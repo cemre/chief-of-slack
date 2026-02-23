@@ -19,13 +19,15 @@ chrome.action.onClicked.addListener(async (tab) => {
 });
 
 // ── Build the prioritization prompt ──
-function buildPrompt(items) {
+function buildPrompt(items, selfName) {
   const vipList = VIPS.map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(', ');
 
   const serialized = JSON.stringify(items, null, 0);
 
-  return `You are a Slack message prioritizer for a busy engineer. Classify each item into exactly one category.
+  const nameClause = `\nMY NAME: Gem / Cemre / @gem. If someone addresses me by any of these names, treat it as directed at me.\n`;
 
+  return `You are a Slack message prioritizer for a busy engineer. Classify each item into exactly one category.
+${nameClause}
 VIPs (messages from these people get higher priority): ${vipList}
 
 CONTEXT:
@@ -34,7 +36,8 @@ CONTEXT:
 
 CATEGORIES:
 - "drop": I already replied in this thread (userReplied=true) AND the new messages are just acknowledgments, +1s, emoji reactions, or the conversation continuing without needing me. Do NOT drop if someone asks a question (even indirectly — it's likely directed at me), pushes back on what I said, or needs me to unblock something.
-- "act_now": Someone is blocked on me or waiting for my response. A decision needs my specific input. A VIP message that requires a reply. An urgent production issue needing my attention. A question in a thread I participated in. Private channel messages that need a response.
+- "act_now": Someone is BLOCKED on me or explicitly waiting for my response. They asked me a direct question, requested my review/approval, or can't proceed without my input. Use this for the most time-sensitive items where someone is stuck.
+- "priority": Needs my attention soon but nobody is stuck right now. A VIP message that warrants a reply. A discussion I'm involved in that's active. DMs from colleagues. Private channel messages that need a response. @mentions.
 - "when_free": FYIs from VIPs I should be aware of. Non-urgent questions directed at me. Discussions I should weigh in on but nobody is blocked. Private channel FYIs.
 - "noise": Bots, automated notifications. General chatter not directed at me. Announcements from non-VIPs. NEVER for private channels.
 
@@ -47,11 +50,11 @@ Respond with ONLY a JSON object mapping each item's "id" to its category. No exp
 }
 
 // ── Call Claude API ──
-async function handlePrioritize(payload) {
+async function handlePrioritize(payload, selfName) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const prompt = buildPrompt(payload);
+  const prompt = buildPrompt(payload, selfName);
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -91,7 +94,7 @@ async function handlePrioritize(payload) {
 // ── Message handler ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === `${FSLACK}:prioritize`) {
-    handlePrioritize(msg.data).then(sendResponse);
+    handlePrioritize(msg.data, msg.selfName).then(sendResponse);
     return true; // async response
   }
   if (msg.type === `${FSLACK}:setApiKey`) {

@@ -309,6 +309,21 @@
       }
     }
 
+    if (msgType === `${FSLACK}:fetchReplies`) {
+      const { channel, ts, requestId } = event.data;
+      try {
+        const data = await slackApi('conversations.replies', { channel, ts, limit: '50' });
+        const replies = (data.messages || []).slice(1).map((m) => ({
+          user: m.user,
+          text: extractText(m),
+          ts: m.ts,
+        }));
+        window.postMessage({ type: `${FSLACK}:repliesResult`, requestId, replies }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:repliesResult`, requestId, replies: [] }, '*');
+      }
+    }
+
     if (msgType === `${FSLACK}:fetchPopular`) {
       try {
         const popular = await fetchPopularMessages();

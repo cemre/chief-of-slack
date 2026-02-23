@@ -88,26 +88,40 @@ shadow.innerHTML = `
     margin: 0;
   }
   .item {
+    display: flex;
     padding: 10px 24px;
     border-bottom: 1px solid #2c2d30;
     cursor: default;
+    gap: 16px;
   }
   .item:hover { background: #222529; }
-  .item-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 4px;
+  .item-left {
+    flex: 0 0 140px;
+    min-width: 0;
   }
-  .item-channel { font-size: 12px; color: #ababad; font-weight: 600; }
-  .item-time { font-size: 12px; color: #616061; }
-  .item-user { font-weight: 700; color: #fff; }
-  .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }
+  .item-channel {
+    font-size: 13px;
+    color: #ababad;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+  .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
   .item-mention {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     color: #e01e5a;
-    margin-bottom: 4px;
+    margin-top: 2px;
   }
+  .item-right {
+    flex: 1;
+    min-width: 0;
+  }
+  .item-user { font-weight: 700; color: #fff; }
+  .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }
+  .item-text:first-child { margin-top: 0; }
   .item-reply-count {
     margin-top: 6px;
     font-size: 12px;
@@ -134,10 +148,12 @@ shadow.innerHTML = `
 
   /* Priority section styles */
   .priority-section h2.act-now { color: #e01e5a; }
+  .priority-section h2.priority-header { color: #e8912d; }
   .priority-section h2.when-free { color: #ecb22e; }
   .priority-section h2.interesting { color: #1d9bd1; }
   .priority-section h2.noise-header { color: #616061; }
   .item.act-now { border-left: 3px solid #e01e5a; }
+  .item.priority-item { border-left: 3px solid #e8912d; }
   .item.when-free { border-left: 3px solid #ecb22e; }
   .item.interesting { border-left: 3px solid #1d9bd1; }
   .item.noise-item { border-left: 3px solid #616061; opacity: 0.7; }
@@ -186,6 +202,23 @@ shadow.innerHTML = `
     outline: none;
     border-color: #1d9bd1;
   }
+  .see-more, .see-less {
+    color: #1d9bd1;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .see-more:hover, .see-less:hover { text-decoration: underline; }
+  .seen-replies-toggle {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #616061;
+    cursor: pointer;
+    user-select: none;
+  }
+  .seen-replies-toggle:hover { color: #ababad; }
+  .seen-replies-toggle.loading { color: #565856; cursor: wait; }
+  .seen-replies-container .item-reply { color: #717274; }
   .warning-banner {
     padding: 8px 24px;
     background: #2c2d30;
@@ -250,16 +283,30 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function truncate(text, max = 200) {
+let truncateId = 0;
+
+function cleanSlackText(text, users) {
   if (!text) return '';
-  // Resolve @mentions before escaping
-  text = text.replace(/<@(U[A-Z0-9]+)>/g, (_, id) => `@${id}`);
-  // Strip Slack link formatting: <url|label> → label, <url> → url
+  text = text.replace(/<@(U[A-Z0-9]+)>/g, (_, id) => `@${users?.[id] || id}`);
   text = text.replace(/<([^|>]+)\|([^>]+)>/g, (_, _url, label) => label);
   text = text.replace(/<([^>]+)>/g, (_, url) => url);
-  // HTML-escape to prevent unclosed tags breaking the DOM
-  text = escapeHtml(text);
-  return text.length > max ? text.slice(0, max) + '...' : text;
+  return text;
+}
+
+function truncate(text, max = 200, users) {
+  const cleaned = cleanSlackText(text, users);
+  const escaped = escapeHtml(cleaned);
+  if (cleaned.length <= max) return escaped;
+  const id = `trunc_${++truncateId}`;
+  const short = escapeHtml(cleaned.slice(0, max));
+  const full = escaped.replace(/\n/g, '<br>');
+  return `<span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span>`;
+}
+
+function plainTruncate(text, max = 150, users) {
+  const cleaned = cleanSlackText(text, users);
+  if (cleaned.length <= max) return cleaned;
+  return cleaned.slice(0, max) + '...';
 }
 
 function uname(uid, users) {
@@ -269,49 +316,64 @@ function uname(uid, users) {
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
 function renderThreadItem(t, data, cssClass) {
-  const ch = data.channels[t.channel_id] || t.channel_id;
   const unread = t.unread_replies || [];
   const lastUnread = unread[unread.length - 1];
+  const seenCount = Math.max(0, (t.reply_count || 0) - unread.length);
+
+  let channelLabel;
+  if (t._isDmThread) {
+    const allUsers = [t.root_user, ...unread.map((r) => r.user)].filter(Boolean);
+    const partner = allUsers.find((u) => u !== data.selfId) || allUsers[0];
+    channelLabel = escapeHtml(uname(partner, data.users));
+  } else {
+    const ch = data.channels[t.channel_id] || t.channel_id;
+    channelLabel = `#${ch}`;
+  }
+
   let html = `<div class="item ${cssClass}">
-    <div class="item-header">
-      <span class="item-channel">#${ch}</span>
+    <div class="item-left">
+      <span class="item-channel">${channelLabel}</span>
       <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
     </div>
-    <div class="item-text">
-      <span class="item-user">${uname(t.root_user, data.users)}:</span>
-      ${truncate(t.root_text)}
-    </div>`;
-  if (t.reply_count > 0) {
-    html += `<div class="item-reply-count">${t.reply_count} ${t.reply_count === 1 ? 'reply' : 'replies'} · ${unread.length} new</div>`;
+    <div class="item-right">
+      <div class="item-text"><span class="item-user">${uname(t.root_user, data.users)}:</span> ${truncate(t.root_text, 200, data.users)}</div>`;
+  if (seenCount > 0) {
+    const unreadTs = unread.map((r) => r.ts).join(',');
+    html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
+    html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
   for (const r of unread) {
-    html += `<div class="item-reply">
-      <span class="item-user">${uname(r.user, data.users)}:</span>
-      ${truncate(r.text)}
-    </div>`;
+    html += `<div class="item-reply"><span class="item-user">${uname(r.user, data.users)}:</span> ${truncate(r.text, 1000, data.users)}</div>`;
   }
-  html += '</div>';
+  html += '</div></div>';
   return html;
+}
+
+function dmPartnerName(dm, data) {
+  // Find the most common non-bot user in the DM — that's who it's with
+  for (const m of dm.messages) {
+    if (m.user && m.subtype !== 'bot_message') return uname(m.user, data.users);
+  }
+  return 'DM';
 }
 
 function renderDmItem(dm, data, cssClass) {
   if (!dm.messages || dm.messages.length === 0) return '';
   const latest = dm.messages[0];
+  const partner = dmPartnerName(dm, data);
   let html = `<div class="item ${cssClass}">
-    <div class="item-header">
-      <span class="item-channel">DM</span>
+    <div class="item-left">
+      <span class="item-channel">${escapeHtml(partner)}</span>
       <span class="item-time">${formatTime(latest.ts)}</span>
-    </div>`;
+    </div>
+    <div class="item-right">`;
   for (const m of dm.messages.slice(0, 5)) {
-    html += `<div class="item-text">
-      <span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users)}:</span>
-      ${truncate(m.text)}
-    </div>`;
+    html += `<div class="item-text">${truncate(m.text, 1000, data.users)}</div>`;
   }
   if (dm.messages.length > 5) {
     html += `<div class="item-reply-count">+${dm.messages.length - 5} more</div>`;
   }
-  html += '</div>';
+  html += '</div></div>';
   return html;
 }
 
@@ -319,23 +381,21 @@ function renderChannelItem(cp, data, cssClass) {
   const ch = data.channels[cp.channel_id] || cp.channel_id;
   const latest = cp.messages[0];
   let html = `<div class="item ${cssClass}">
-    <div class="item-header">
+    <div class="item-left">
       <span class="item-channel">#${ch}</span>
-      <span class="item-time">${formatTime(latest?.ts)}</span>
-    </div>`;
+      <span class="item-time">${formatTime(latest?.ts)}</span>`;
   if (cp.mention_count > 0) {
-    html += `<div class="item-mention">@mentioned ${cp.mention_count}x</div>`;
+    html += `<div class="item-mention">@${cp.mention_count}x</div>`;
   }
-  for (const m of cp.messages.slice(0, 3)) {
-    html += `<div class="item-text">
-      <span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users)}:</span>
-      ${truncate(m.text)}
-    </div>`;
+  html += `</div>
+    <div class="item-right">`;
+  for (const m of cp.messages.slice(0, 5)) {
+    html += `<div class="item-text"><span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users)}:</span> ${truncate(m.text, 200, data.users)}</div>`;
   }
-  if (cp.messages.length > 3) {
-    html += `<div class="item-reply-count">+${cp.messages.length - 3} more</div>`;
+  if (cp.messages.length > 5) {
+    html += `<div class="item-reply-count">+${cp.messages.length - 5} more</div>`;
   }
-  html += '</div>';
+  html += '</div></div>';
   return html;
 }
 
@@ -347,127 +407,101 @@ function renderAnyItem(item, data, cssClass) {
 }
 
 // ── Deterministic pre-filters ──
+// Only hard-drops and bot→noise. Everything else goes to LLM for classification + ranking.
 function applyPreFilters(data) {
   const { selfId, threads, dms, channelPosts, channels } = data;
   const meta = data.channelMeta || {};
 
-  const dropped = [];
   const noise = [];
-  const elevatedWhenFree = [];
-  const actNow = [];
-  const remaining = { threads: [], dms: [], channelPosts: [] };
+  const forLlm = { threads: [], dms: [], channelPosts: [] };
 
-  // Threads: annotate whether user has replied
+  // Threads: annotate metadata for LLM
   for (const t of threads) {
     t._userReplied = (t.reply_users || []).includes(selfId);
     t._type = 'thread';
-    remaining.threads.push(t);
+    t._isDmThread = t.channel_id?.startsWith('D') || meta[t.channel_id]?.isPrivate || false;
+
+    const allTexts = [t.root_text, ...(t.unread_replies || []).map((r) => r.text)].join(' ');
+    const textsLower = allTexts.toLowerCase();
+    t._isMentioned = allTexts.includes(`<@${selfId}>`) || allTexts.includes(`@${selfId}`)
+      || textsLower.includes('@gem') || textsLower.includes('hey gem') || textsLower.includes('hi gem')
+      || textsLower.includes('hey cemre') || textsLower.includes('hi cemre');
+
+    forLlm.threads.push(t);
   }
 
   // Channel posts
   for (const cp of channelPosts) {
     cp._type = 'channel';
     const chName = channels[cp.channel_id] || '';
-    const isPrivate = meta[cp.channel_id]?.isPrivate || false;
 
-    // #help-dia without @mention → drop
-    if (chName === 'help-dia' && (cp.mention_count || 0) === 0) {
-      dropped.push(cp);
-      continue;
-    }
-
-    // @mentioned → act now (deterministic)
-    if ((cp.mention_count || 0) > 0) {
-      actNow.push(cp);
-      continue;
-    }
-
-    // Private channel → at least when_free (LLM can upgrade to act_now)
-    if (isPrivate) {
-      elevatedWhenFree.push(cp);
-      continue;
-    }
-
-    // #dia-dogfooding: elevate threads with 10+ replies
-    if (chName === 'dia-dogfooding') {
-      const hasHotThread = cp.messages.some((m) => (m.reply_count || 0) >= 10);
-      if (hasHotThread) {
-        elevatedWhenFree.push(cp);
-        continue;
-      }
-    }
+    // #help-dia without @mention → hard drop (no LLM needed)
+    if (chName === 'help-dia' && (cp.mention_count || 0) === 0) continue;
 
     // All-bot messages → noise (but check for active threads first)
     if (cp.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) {
-      // dia-reporter channels: if any message has 3+ thread replies, elevate
       if (chName.includes('dia-reporter') || chName.includes('reporter-feedback')) {
         const hasActiveThread = cp.messages.some((m) => (m.reply_count || 0) >= 3);
-        if (hasActiveThread) {
-          elevatedWhenFree.push(cp);
-          continue;
-        }
+        if (hasActiveThread) { forLlm.channelPosts.push(cp); continue; }
       }
       noise.push(cp);
       continue;
     }
 
-    remaining.channelPosts.push(cp);
+    forLlm.channelPosts.push(cp);
   }
 
-  // DMs — all non-bot DMs are act_now (someone is directly messaging you)
+  // DMs
   for (const dm of dms) {
     dm._type = 'dm';
-
-    // All-bot DMs → noise
     if (dm.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) {
       noise.push(dm);
       continue;
     }
-
-    actNow.push(dm);
+    forLlm.dms.push(dm);
   }
 
-  return { dropped, noise, elevatedWhenFree, actNow, remaining };
+  return { noise, forLlm };
 }
 
 // ── Serialize items for LLM ──
-function serializeForLlm(remaining, data) {
+function serializeForLlm(forLlm, data) {
   const items = [];
-
   const meta = data.channelMeta || {};
 
-  for (let i = 0; i < remaining.threads.length; i++) {
-    const t = remaining.threads[i];
+  for (let i = 0; i < forLlm.threads.length; i++) {
+    const t = forLlm.threads[i];
     const ch = data.channels[t.channel_id] || t.channel_id;
     items.push({
       id: `thread_${i}`,
-      type: 'thread',
+      type: t._isDmThread ? 'dm_thread' : 'thread',
       channel: ch,
       isPrivate: meta[t.channel_id]?.isPrivate || false,
+      isMentioned: t._isMentioned || false,
       rootUser: uname(t.root_user, data.users),
-      rootText: truncate(t.root_text, 150),
+      rootText: plainTruncate(t.root_text, 150, data.users),
       userReplied: t._userReplied,
       newReplies: t.unread_replies.map((r) => ({
         user: uname(r.user, data.users),
-        text: truncate(r.text, 150),
+        text: plainTruncate(r.text, 150, data.users),
       })),
     });
   }
 
-  for (let i = 0; i < remaining.dms.length; i++) {
-    const dm = remaining.dms[i];
+  for (let i = 0; i < forLlm.dms.length; i++) {
+    const dm = forLlm.dms[i];
     items.push({
       id: `dm_${i}`,
       type: 'dm',
       messages: dm.messages.map((m) => ({
         user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
-        text: truncate(m.text, 150),
+        text: plainTruncate(m.text, 150, data.users),
       })),
     });
   }
 
-  for (let i = 0; i < remaining.channelPosts.length; i++) {
-    const cp = remaining.channelPosts[i];
+  for (let i = 0; i < forLlm.channelPosts.length; i++) {
+    const cp = forLlm.channelPosts[i];
     const ch = data.channels[cp.channel_id] || cp.channel_id;
     items.push({
       id: `channel_${i}`,
@@ -477,7 +511,7 @@ function serializeForLlm(remaining, data) {
       mentionCount: cp.mention_count || 0,
       messages: cp.messages.map((m) => ({
         user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
-        text: truncate(m.text, 150),
+        text: plainTruncate(m.text, 150, data.users),
       })),
     });
   }
@@ -486,45 +520,51 @@ function serializeForLlm(remaining, data) {
 }
 
 // ── Map LLM priorities back to original data objects ──
-function mapPriorities(priorities, remaining, deterministicNoise, elevatedWhenFree, data) {
+function mapPriorities(priorities, forLlm, deterministicNoise, data) {
   const actNow = [];
-  const whenFree = [...(elevatedWhenFree || [])];
+  const priority = [];
+  const whenFree = [];
   const noise = [...deterministicNoise];
   const meta = data?.channelMeta || {};
 
   function place(item, cat) {
-    const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm';
+    const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm' || item._isDmThread;
+    const userReplied = item._userReplied || false;
 
     if (cat === 'act_now') { actNow.push(item); return; }
-    if (cat === 'drop' && !isPrivate) { return; } // dropped — don't render
+    if (cat === 'priority') { priority.push(item); return; }
 
-    // Deterministic override: private channels and DMs never go to noise
-    if (cat === 'noise' && isPrivate) {
-      whenFree.push(item);
-      return;
-    }
-
+    if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
+    if (cat === 'drop' && !isPrivate) return;
+    if (cat === 'noise' && isPrivate) { whenFree.push(item); return; }
     if (cat === 'when_free') { whenFree.push(item); return; }
-    if (cat === 'drop') { whenFree.push(item); return; } // private + drop → keep as when_free
-    noise.push(item); // noise or unknown
+    if (cat === 'drop') { whenFree.push(item); return; }
+    noise.push(item);
   }
 
-  remaining.threads.forEach((t, i) => place(t, priorities[`thread_${i}`]));
-  remaining.dms.forEach((dm, i) => place(dm, priorities[`dm_${i}`]));
-  remaining.channelPosts.forEach((cp, i) => place(cp, priorities[`channel_${i}`]));
+  forLlm.threads.forEach((t, i) => place(t, priorities[`thread_${i}`]));
+  forLlm.dms.forEach((dm, i) => place(dm, priorities[`dm_${i}`]));
+  forLlm.channelPosts.forEach((cp, i) => place(cp, priorities[`channel_${i}`]));
 
-  return { actNow, whenFree, noise };
+  return { actNow, priority, whenFree, noise };
 }
 
 // ── Render prioritized view ──
 function renderPrioritized(prioritized, data, popular, loading = false) {
-  const { actNow, whenFree, noise } = prioritized;
+  const { actNow, priority, whenFree, noise } = prioritized;
   let html = '';
 
   // Act Now
   if (actNow.length > 0) {
     html += '<section class="priority-section"><h2 class="act-now">Act Now</h2>';
     for (const item of actNow) html += renderAnyItem(item, data, 'act-now');
+    html += '</section>';
+  }
+
+  // Priority
+  if (priority && priority.length > 0) {
+    html += '<section class="priority-section"><h2 class="priority-header">Priority</h2>';
+    for (const item of priority) html += renderAnyItem(item, data, 'priority-item');
     html += '</section>';
   }
 
@@ -540,12 +580,14 @@ function renderPrioritized(prioritized, data, popular, loading = false) {
     html += '<section class="priority-section"><h2 class="interesting">Interesting Elsewhere</h2>';
     for (const p of popular) {
       html += `<div class="item interesting">
-        <div class="item-header">
+        <div class="item-left">
           <span class="item-channel">#${p.channel_name || p.channel_id}</span>
           <span class="item-time">${formatTime(p.ts)}</span>
+          <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
         </div>
-        <div class="item-text">${truncate(p.text)}</div>
-        <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
+        <div class="item-right">
+          <div class="item-text">${truncate(p.text, 200, data.users)}</div>
+        </div>
       </div>`;
     }
     html += '</section>';
@@ -566,11 +608,12 @@ function renderPrioritized(prioritized, data, popular, loading = false) {
   }
 
   // All clear
-  if (!loading && actNow.length === 0 && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
+  if (!loading && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
     html += '<div id="status">All clear — nothing needs your attention.</div>';
   }
 
   bodyEl.innerHTML = html;
+  lastRenderData = data;
 
   // Wire up noise toggle
   const noiseToggle = shadow.getElementById('noise-toggle');
@@ -584,6 +627,91 @@ function renderPrioritized(prioritized, data, popular, loading = false) {
     });
   }
 }
+
+// ── Seen replies lazy loading ──
+let lastRenderData = null;
+let replyRequestId = 0;
+
+bodyEl.addEventListener('click', (e) => {
+  // See more / See less toggle
+  const seeMore = e.target.closest('.see-more');
+  if (seeMore) {
+    const id = seeMore.dataset.truncId;
+    const shortEl = shadow.getElementById(`${id}-short`);
+    const fullEl = shadow.getElementById(`${id}-full`);
+    if (shortEl && fullEl) { shortEl.style.display = 'none'; fullEl.style.display = ''; }
+    return;
+  }
+  const seeLess = e.target.closest('.see-less');
+  if (seeLess) {
+    const id = seeLess.dataset.truncId;
+    const shortEl = shadow.getElementById(`${id}-short`);
+    const fullEl = shadow.getElementById(`${id}-full`);
+    if (shortEl && fullEl) { shortEl.style.display = ''; fullEl.style.display = 'none'; }
+    return;
+  }
+
+  // Seen replies lazy load
+  const toggle = e.target.closest('.seen-replies-toggle');
+  if (!toggle || toggle.classList.contains('loading') || toggle.classList.contains('expanded')) return;
+
+  const channel = toggle.dataset.channel;
+  const ts = toggle.dataset.ts;
+  if (!channel || !ts) return;
+
+  toggle.classList.add('loading');
+  toggle.textContent = 'Loading...';
+
+  const reqId = `reply_${++replyRequestId}`;
+  toggle.dataset.requestId = reqId;
+  window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
+});
+
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  if (event.data?.type !== `${FSLACK}:repliesResult`) return;
+
+  const { requestId, replies } = event.data;
+  const toggle = bodyEl.querySelector(`.seen-replies-toggle[data-request-id="${requestId}"]`);
+  if (!toggle) return;
+
+  const channel = toggle.dataset.channel;
+  const ts = toggle.dataset.ts;
+  const container = bodyEl.querySelector(`.seen-replies-container[data-for="${channel}-${ts}"]`);
+  if (!container) return;
+
+  const data = lastRenderData;
+  const unreadTs = new Set((toggle.dataset.unreadTs || '').split(',').filter(Boolean));
+
+  // Show only seen replies (exclude unread ones already displayed below)
+  const seenReplies = replies.filter((r) => !unreadTs.has(r.ts));
+
+  let html = '';
+  for (const r of seenReplies) {
+    const userName = data ? uname(r.user, data.users) : r.user;
+    html += `<div class="item-reply">
+      <span class="item-user">${userName}:</span>
+      ${truncate(r.text, 200, data?.users)}
+    </div>`;
+  }
+  container.innerHTML = html;
+
+  toggle.classList.remove('loading');
+  toggle.classList.add('expanded');
+  const count = seenReplies.length;
+  toggle.textContent = count > 0
+    ? `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`
+    : 'No earlier replies';
+
+  // Toggle collapse on re-click
+  toggle.addEventListener('click', function collapseHandler() {
+    const isVisible = container.style.display !== 'none';
+    container.style.display = isVisible ? 'none' : '';
+    toggle.textContent = isVisible
+      ? `${count} earlier ${count === 1 ? 'reply' : 'replies'}`
+      : `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`;
+  });
+});
 
 // ── API key inline prompt ──
 function showApiKeyPrompt(rawData) {
@@ -625,30 +753,23 @@ let pendingPopular = null;
 
 function prioritizeAndRender(data) {
   const preFiltered = applyPreFilters(data);
-  const { remaining } = preFiltered;
-  const totalItems = remaining.threads.length + remaining.dms.length + remaining.channelPosts.length;
-
-  // Phase 1: Immediately show deterministic results
-  const deterministicResult = {
-    actNow: [...preFiltered.actNow],
-    whenFree: [...(preFiltered.elevatedWhenFree || [])],
-    noise: preFiltered.noise,
-  };
+  const { forLlm } = preFiltered;
+  const totalItems = forLlm.threads.length + forLlm.dms.length + forLlm.channelPosts.length;
 
   if (totalItems === 0) {
-    // Nothing left for LLM — render final
-    renderPrioritized(deterministicResult, data, pendingPopular);
+    // Only noise/dropped — render what we have
+    renderPrioritized({ actNow: [], priority: [], whenFree: [], noise: preFiltered.noise }, data, pendingPopular);
     return;
   }
 
-  // Show deterministic items + "analyzing remaining..." indicator
-  renderPrioritized(deterministicResult, data, pendingPopular, true);
+  // Show loading while LLM works
+  bodyEl.innerHTML = '<div id="status"><div class="detail">Analyzing messages with AI...</div></div>';
 
-  // Phase 2: Send remaining to LLM
-  const llmItems = serializeForLlm(remaining, data);
+  const llmItems = serializeForLlm(forLlm, data);
+  const selfName = data.users?.[data.selfId] || '';
 
   chrome.runtime.sendMessage(
-    { type: `${FSLACK}:prioritize`, data: llmItems },
+    { type: `${FSLACK}:prioritize`, data: llmItems, selfName },
     (response) => {
       if (chrome.runtime.lastError) {
         render(data);
@@ -670,10 +791,8 @@ function prioritizeAndRender(data) {
         return;
       }
 
-      // Merge LLM results with deterministic results
-      const llmPrioritized = mapPriorities(response.priorities, remaining, preFiltered.noise, preFiltered.elevatedWhenFree, data);
-      llmPrioritized.actNow = [...preFiltered.actNow, ...llmPrioritized.actNow];
-      renderPrioritized(llmPrioritized, data, pendingPopular);
+      const prioritized = mapPriorities(response.priorities, forLlm, preFiltered.noise, data);
+      renderPrioritized(prioritized, data, pendingPopular);
     }
   );
 }
@@ -691,24 +810,19 @@ function render(data) {
       const unread = t.unread_replies || [];
       const lastUnread = unread[unread.length - 1];
       html += `<div class="item">
-        <div class="item-header">
+        <div class="item-left">
           <span class="item-channel">#${ch}</span>
           <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
         </div>
-        <div class="item-text">
-          <span class="item-user">${uname(t.root_user, users)}:</span>
-          ${truncate(t.root_text)}
-        </div>`;
+        <div class="item-right">
+          <div class="item-text"><span class="item-user">${uname(t.root_user, users)}:</span> ${truncate(t.root_text, 200, users)}</div>`;
       if (t.reply_count > 0) {
         html += `<div class="item-reply-count">${t.reply_count} ${t.reply_count === 1 ? 'reply' : 'replies'} · ${unread.length} new</div>`;
       }
       for (const r of unread) {
-        html += `<div class="item-reply">
-          <span class="item-user">${uname(r.user, users)}:</span>
-          ${truncate(r.text)}
-        </div>`;
+        html += `<div class="item-reply"><span class="item-user">${uname(r.user, users)}:</span> ${truncate(r.text, 1000, users)}</div>`;
       }
-      html += '</div>';
+      html += '</div></div>';
     }
     html += '</section>';
   }
@@ -720,13 +834,12 @@ function render(data) {
       const lastMsg = dm.messages[0];
       if (!lastMsg) continue;
       html += `<div class="item">
-        <div class="item-header">
+        <div class="item-left">
           <span class="item-channel">DM</span>
           <span class="item-time">${formatTime(lastMsg.ts)}</span>
         </div>
-        <div class="item-text">
-          <span class="item-user">${lastMsg.subtype === 'bot_message' ? 'Bot' : uname(lastMsg.user, users)}:</span>
-          ${truncate(lastMsg.text)}
+        <div class="item-right">
+          <div class="item-text"><span class="item-user">${lastMsg.subtype === 'bot_message' ? 'Bot' : uname(lastMsg.user, users)}:</span> ${truncate(lastMsg.text, 1000, users)}</div>
         </div>
       </div>`;
     }
@@ -740,23 +853,21 @@ function render(data) {
       const ch = channels[cp.channel_id] || cp.channel_id;
       const latest = cp.messages[0];
       html += `<div class="item">
-        <div class="item-header">
+        <div class="item-left">
           <span class="item-channel">#${ch}</span>
-          <span class="item-time">${formatTime(latest?.ts)}</span>
-        </div>`;
+          <span class="item-time">${formatTime(latest?.ts)}</span>`;
       if (cp.mention_count > 0) {
-        html += `<div class="item-mention">@mentioned ${cp.mention_count}x</div>`;
+        html += `<div class="item-mention">@${cp.mention_count}x</div>`;
       }
+      html += `</div>
+        <div class="item-right">`;
       for (const m of cp.messages.slice(0, 3)) {
-        html += `<div class="item-text">
-          <span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users)}:</span>
-          ${truncate(m.text)}
-        </div>`;
+        html += `<div class="item-text"><span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users)}:</span> ${truncate(m.text, 200, users)}</div>`;
       }
       if (cp.messages.length > 3) {
         html += `<div class="item-reply-count">+${cp.messages.length - 3} more</div>`;
       }
-      html += '</div>';
+      html += '</div></div>';
     }
     html += '</section>';
   }
