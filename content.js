@@ -229,7 +229,7 @@ shadow.innerHTML = `
 </style>
 <div id="overlay">
   <header>
-    <h1>FSlack</h1>
+    <h1>Flack</h1>
     <div class="header-actions">
       <button id="fetch-btn">Fetch Unreads</button>
       <button id="close-btn" class="secondary">Back to Slack</button>
@@ -419,7 +419,7 @@ function applyPreFilters(data) {
   for (const t of threads) {
     t._userReplied = (t.reply_users || []).includes(selfId);
     t._type = 'thread';
-    t._isDmThread = t.channel_id?.startsWith('D') || meta[t.channel_id]?.isPrivate || false;
+    t._isDmThread = t.channel_id?.startsWith('D') || false;
 
     const allTexts = [t.root_text, ...(t.unread_replies || []).map((r) => r.text)].join(' ');
     const textsLower = allTexts.toLowerCase();
@@ -441,7 +441,7 @@ function applyPreFilters(data) {
     // All-bot messages → noise (but check for active threads first)
     if (cp.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) {
       if (chName.includes('dia-reporter') || chName.includes('reporter-feedback')) {
-        const hasActiveThread = cp.messages.some((m) => (m.reply_count || 0) >= 3);
+        const hasActiveThread = cp.messages.some((m) => (m.reply_count || 0) >= 8);
         if (hasActiveThread) { forLlm.channelPosts.push(cp); continue; }
       }
       noise.push(cp);
@@ -816,8 +816,10 @@ function render(data) {
         </div>
         <div class="item-right">
           <div class="item-text"><span class="item-user">${uname(t.root_user, users)}:</span> ${truncate(t.root_text, 200, users)}</div>`;
-      if (t.reply_count > 0) {
-        html += `<div class="item-reply-count">${t.reply_count} ${t.reply_count === 1 ? 'reply' : 'replies'} · ${unread.length} new</div>`;
+      const seenCount = Math.max(0, (t.reply_count || 0) - unread.length);
+      if (seenCount > 0) {
+        html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unread.map(r => r.ts).join(',')}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
+        html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
       }
       for (const r of unread) {
         html += `<div class="item-reply"><span class="item-user">${uname(r.user, users)}:</span> ${truncate(r.text, 1000, users)}</div>`;

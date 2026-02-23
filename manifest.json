@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "FSlack",
+  "name": "Flack",
   "version": "0.1.0",
-  "description": "Focus Slack — see only what needs your attention",
+  "description": "Flack — see only what needs your attention",
   "permissions": ["activeTab", "storage", "scripting", "declarativeNetRequest"],
   "host_permissions": ["https://app.slack.com/*", "https://*.slack.com/*", "https://api.anthropic.com/*"],
   "background": {
@@ -29,6 +29,6 @@
     }]
   },
   "action": {
-    "default_title": "FSlack"
+    "default_title": "Flack"
   }
 }

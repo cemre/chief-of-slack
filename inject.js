@@ -40,8 +40,8 @@
   async function resolveUsers(userIds) {
     const users = {};
     const unique = [...new Set(userIds)].filter(Boolean);
-    // Batch in parallel, max 25
-    const batch = unique.slice(0, 25);
+    // Batch in parallel, max 50
+    const batch = unique.slice(0, 50);
     const results = await Promise.all(
       batch.map(async (uid) => {
         try {
