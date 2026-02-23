@@ -57,7 +57,8 @@ shadow.innerHTML = `
     z-index: 1;
   }
   header h1 { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
-  .last-updated { font-size: 11px; color: #616061; margin-left: 12px; font-weight: 400; }
+  .last-updated { font-size: 11px; color: #616061; margin-left: 12px; font-weight: 400; cursor: pointer; }
+  .last-updated:hover { color: #1d9bd1; }
   .header-actions { display: flex; gap: 8px; }
   button {
     background: #007a5a;
@@ -95,7 +96,6 @@ shadow.innerHTML = `
     cursor: default;
     gap: 16px;
   }
-  .item:hover { background: #222529; }
   .item-left {
     flex: 0 0 140px;
     min-width: 0;
@@ -110,16 +110,17 @@ shadow.innerHTML = `
     display: block;
   }
   .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
-  .mark-all-read {
-    font-size: 11px;
-    color: #616061;
-    cursor: pointer;
-    margin-top: 4px;
+  .item-actions {
     display: none;
+    margin-top: 8px;
+    font-size: 12px;
+    color: #616061;
+    gap: 16px;
   }
-  .mark-all-read:hover { color: #d1d2d3; }
-  .item:hover .mark-all-read { display: block; }
-  .mark-all-read.done { color: #4a9c6d; pointer-events: none; }
+  .item:hover .item-actions { display: flex; }
+  .item-actions span { cursor: pointer; }
+  .item-actions span:hover { color: #d1d2d3; }
+  .item-actions .mark-all-read.done { color: #4a9c6d; pointer-events: none; }
   .item-mention {
     font-size: 11px;
     font-weight: 700;
@@ -131,7 +132,11 @@ shadow.innerHTML = `
     min-width: 0;
   }
   .item-user { font-weight: 700; color: #fff; }
+  .item-user[data-channel] { cursor: pointer; }
+  .item-user[data-channel]:hover { text-decoration: underline; }
   .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }
+  .item-text a, .item-reply a { color: #1d9bd1; text-decoration: none; }
+  .item-text a:hover, .item-reply a:hover { text-decoration: underline; }
   .item-text:first-child { margin-top: 0; }
   .item-reply-count {
     margin-top: 6px;
@@ -235,7 +240,7 @@ shadow.innerHTML = `
     align-items: flex-start;
     position: relative;
   }
-  .msg-content { flex: 1; min-width: 0; }
+  .msg-content { flex: 1; min-width: 0; padding-right: 66px; }
   .msg-actions {
     position: absolute;
     right: 0;
@@ -265,6 +270,7 @@ shadow.innerHTML = `
   .item.read-done { opacity: 0.4; }
   .reply-form {
     display: flex;
+    align-items: flex-end;
     gap: 8px;
     margin-top: 8px;
   }
@@ -277,6 +283,11 @@ shadow.innerHTML = `
     color: #fff;
     font-size: 13px;
     font-family: inherit;
+    resize: none;
+    overflow: hidden;
+    min-height: 32px;
+    max-height: 200px;
+    line-height: 1.4;
   }
   .reply-input:focus { outline: none; border-color: #1d9bd1; }
   .warning-banner {
@@ -296,7 +307,7 @@ shadow.innerHTML = `
     </div>
   </header>
   <div id="body">
-    <div id="status">Press "Fetch Unreads" to scan.</div>
+    <div id="status">Starting fetch...</div>
   </div>
 </div>
 `;
@@ -310,16 +321,58 @@ let lastUpdatedTimer = null;
 
 function updateLastUpdated() {
   if (!lastFetchTime) return;
-  const mins = Math.floor((Date.now() - lastFetchTime) / 60000);
-  if (mins < 1) lastUpdatedEl.textContent = 'just now';
-  else lastUpdatedEl.textContent = `${mins}m ago`;
+  const secs = Math.floor((Date.now() - lastFetchTime) / 1000);
+  if (secs < 60) lastUpdatedEl.textContent = `${secs}s ago`;
+  else lastUpdatedEl.textContent = `${Math.floor(secs / 60)}m ago`;
 }
 
 const closeBtn = shadow.getElementById('close-btn');
+lastUpdatedEl.addEventListener('click', startFetch);
 
 // ── Toggle overlay ──
 let visible = false;
-function show() { visible = true; overlay.classList.add('visible'); }
+let injectReady = false;
+let cachedView = null; // { data, popular, prioritized, ts }
+
+function saveViewCache(data, popular, prioritized) {
+  cachedView = { data, popular, prioritized, ts: Date.now() };
+  chrome.storage.local.set({ fslackViewCache: cachedView });
+}
+
+function startFetch() {
+  if (fetchBtn.disabled) return;
+  fetchBtn.disabled = true;
+  fetchBtn.textContent = 'Fetching...';
+  bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
+  resetFetchState();
+  // Load cached names and pass to inject.js
+  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta'], (cached) => {
+    window.postMessage({
+      type: `${FSLACK}:fetch`,
+      cachedUsers: cached.fslackUsers || {},
+      cachedChannels: cached.fslackChannels || {},
+      cachedChannelMeta: cached.fslackChannelMeta || {},
+    }, '*');
+  });
+  window.postMessage({ type: `${FSLACK}:fetchPopular` }, '*');
+}
+
+function showFromCache() {
+  if (!cachedView || Date.now() - cachedView.ts >= 60000) return false;
+  lastFetchTime = cachedView.ts;
+  updateLastUpdated();
+  if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+  lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+  renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular);
+  return true;
+}
+
+function show() {
+  visible = true;
+  overlay.classList.add('visible');
+  if (showFromCache()) return;
+  if (injectReady) startFetch();
+}
 function hide() { visible = false; overlay.classList.remove('visible'); }
 function toggle() { visible ? hide() : show(); }
 
@@ -364,13 +417,44 @@ function cleanSlackText(text, users) {
   return text;
 }
 
+function formatSlackHtml(text, users) {
+  if (!text) return '';
+  let result = '';
+  let lastIndex = 0;
+  const regex = /<([^>]+)>/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    result += escapeHtml(text.slice(lastIndex, match.index));
+    const inner = match[1];
+    if (inner.match(/^@U[A-Z0-9]+$/)) {
+      const uid = inner.slice(1);
+      result += `@${escapeHtml(users?.[uid] || uid)}`;
+    } else if (inner.includes('|')) {
+      const pipe = inner.indexOf('|');
+      const url = inner.slice(0, pipe);
+      const label = inner.slice(pipe + 1);
+      if (url.match(/^https?:\/\//)) {
+        result += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+      } else {
+        result += escapeHtml(label);
+      }
+    } else if (inner.match(/^https?:\/\//)) {
+      result += `<a href="${escapeHtml(inner)}" target="_blank" rel="noopener">${escapeHtml(inner)}</a>`;
+    } else {
+      result += escapeHtml(inner);
+    }
+    lastIndex = match.index + match[0].length;
+  }
+  result += escapeHtml(text.slice(lastIndex));
+  return result;
+}
+
 function truncate(text, max = 200, users) {
   const cleaned = cleanSlackText(text, users);
-  const escaped = escapeHtml(cleaned);
-  if (cleaned.length <= max) return escaped;
+  if (cleaned.length <= max) return formatSlackHtml(text, users);
   const id = `trunc_${++truncateId}`;
   const short = escapeHtml(cleaned.slice(0, max));
-  const full = escaped.replace(/\n/g, '<br>');
+  const full = formatSlackHtml(text, users).replace(/\n/g, '<br>');
   return `<span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span>`;
 }
 
@@ -385,15 +469,25 @@ function uname(uid, users) {
   return users[uid] || uid;
 }
 
+function userLink(name, channel, ts) {
+  if (!channel || !ts) return `<span class="item-user">${name}:</span>`;
+  return `<span class="item-user" data-channel="${channel}" data-ts="${ts}">${name}:</span>`;
+}
+
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
-function msgActions(channel, ts, threadTs, isDm) {
+function msgActions(channel, ts) {
   return `<div class="msg-actions">
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍</span>
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="heart" title="heart">💛</span>
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="eyes" title="eyes">👀</span>
     <span class="action-btn action-save" data-channel="${channel}" data-ts="${ts}" title="Save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></span>
-    <span class="action-btn action-read" data-channel="${channel}" data-ts="${ts}" title="Mark read">○</span>
-    <span class="action-btn action-reply" data-channel="${channel}" data-ts="${threadTs || ts}"${isDm ? ' data-dm="true"' : ''} title="Reply">↩</span>
+  </div>`;
+}
+
+function itemActions(channel, markTs, threadTs, isDm) {
+  return `<div class="item-actions">
+    <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}>mark read</span>
+    <span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>reply</span>
   </div>`;
 }
 
@@ -418,18 +512,18 @@ function renderThreadItem(t, data, cssClass) {
     <div class="item-left">
       <span class="item-channel">${channelLabel}</span>
       <span class="item-time">${formatTime(markAllTs)}</span>
-      ${unread.length > 0 ? `<span class="mark-all-read" data-channel="${t.channel_id}" data-ts="${markAllTs}">mark all read</span>` : ''}
     </div>
     <div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text"><span class="item-user">${uname(t.root_user, data.users)}:</span> ${truncate(t.root_text, 200, data.users)}</div>${msgActions(t.channel_id, t.ts, null, t._isDmThread)}</div>`;
+      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, data.users)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
   for (const r of unread) {
-    html += `<div class="msg-row"><div class="msg-content item-reply"><span class="item-user">${uname(r.user, data.users)}:</span> ${truncate(r.text, 1000, data.users)}</div>${msgActions(t.channel_id, r.ts, t.ts, t._isDmThread)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
   }
+  html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread);
   html += '</div></div>';
   return html;
 }
@@ -450,15 +544,15 @@ function renderDmItem(dm, data, cssClass) {
     <div class="item-left">
       <span class="item-channel">${escapeHtml(partner)}</span>
       <span class="item-time">${formatTime(latest.ts)}</span>
-      ${dm.messages.length > 1 ? `<span class="mark-all-read" data-channel="${dm.channel_id}" data-ts="${latest.ts}">mark all read</span>` : ''}
     </div>
     <div class="item-right">`;
   for (const m of dm.messages.slice(0, 5)) {
-    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}</div>${msgActions(dm.channel_id, m.ts, null, true)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
   }
   if (dm.messages.length > 5) {
     html += `<div class="item-reply-count">+${dm.messages.length - 5} more</div>`;
   }
+  html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div></div>';
   return html;
 }
@@ -479,7 +573,7 @@ function renderChannelItem(cp, data, cssClass) {
   html += `</div>
     <div class="item-right">`;
   for (const m of cp.messages.slice(0, 5)) {
-    html += `<div class="msg-row"><div class="msg-content item-text"><span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users)}:</span> ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   if (cp.messages.length > 5) {
     html += `<div class="item-reply-count">+${cp.messages.length - 5} more</div>`;
@@ -496,13 +590,16 @@ function renderAnyItem(item, data, cssClass) {
 }
 
 // ── Deterministic pre-filters ──
-// Only hard-drops and bot→noise. Everything else goes to LLM for classification + ranking.
+// Hard-drops, bot→whenFree. Everything else goes to LLM for classification + ranking.
 function applyPreFilters(data) {
   const { selfId, threads, dms, channelPosts, channels } = data;
   const meta = data.channelMeta || {};
 
   const noise = [];
+  const whenFree = [];
   const forLlm = { threads: [], dms: [], channelPosts: [] };
+
+  function isBot(m) { return m.bot_id || m.subtype === 'bot_message'; }
 
   // Threads: annotate metadata for LLM
   for (const t of threads) {
@@ -516,6 +613,12 @@ function applyPreFilters(data) {
       || textsLower.includes('@gem') || textsLower.includes('hey gem') || textsLower.includes('hi gem')
       || textsLower.includes('hey cemre') || textsLower.includes('hi cemre');
 
+    // All-bot unread replies → when free
+    if ((t.unread_replies || []).every(isBot)) {
+      whenFree.push(t);
+      continue;
+    }
+
     forLlm.threads.push(t);
   }
 
@@ -527,13 +630,13 @@ function applyPreFilters(data) {
     // #help-dia without @mention → hard drop (no LLM needed)
     if (chName === 'help-dia' && (cp.mention_count || 0) === 0) continue;
 
-    // All-bot messages → noise (but check for active threads first)
-    if (cp.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) {
+    // All-bot messages → when free (but check for active threads first)
+    if (cp.messages.every(isBot)) {
       if (chName.includes('dia-reporter') || chName.includes('reporter-feedback')) {
         const hasActiveThread = cp.messages.some((m) => (m.reply_count || 0) >= 8);
         if (hasActiveThread) { forLlm.channelPosts.push(cp); continue; }
       }
-      noise.push(cp);
+      whenFree.push(cp);
       continue;
     }
 
@@ -543,14 +646,14 @@ function applyPreFilters(data) {
   // DMs
   for (const dm of dms) {
     dm._type = 'dm';
-    if (dm.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) {
-      noise.push(dm);
+    if (dm.messages.every(isBot)) {
+      whenFree.push(dm);
       continue;
     }
     forLlm.dms.push(dm);
   }
 
-  return { noise, forLlm };
+  return { noise, whenFree, forLlm };
 }
 
 // ── Serialize items for LLM ──
@@ -609,10 +712,10 @@ function serializeForLlm(forLlm, data) {
 }
 
 // ── Map LLM priorities back to original data objects ──
-function mapPriorities(priorities, forLlm, deterministicNoise, data) {
+function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data) {
   const actNow = [];
   const priority = [];
-  const whenFree = [];
+  const whenFree = [...deterministicWhenFree];
   const noise = [...deterministicNoise];
   const meta = data?.channelMeta || {};
 
@@ -722,6 +825,19 @@ let lastRenderData = null;
 let replyRequestId = 0;
 
 bodyEl.addEventListener('click', (e) => {
+  // Let links in messages open normally
+  if (e.target.closest('a[href]')) return;
+
+  // Permalink: click username to navigate to message in Slack
+  const userEl = e.target.closest('.item-user[data-channel]');
+  if (userEl) {
+    const { channel, ts } = userEl.dataset;
+    hide();
+    sessionStorage.setItem('fslack_hide', '1');
+    window.location.href = `/archives/${channel}/p${ts.replace('.', '')}`;
+    return;
+  }
+
   // See more / See less toggle
   const seeMore = e.target.closest('.see-more');
   if (seeMore) {
@@ -743,9 +859,9 @@ bodyEl.addEventListener('click', (e) => {
   // Mark all read
   const markAll = e.target.closest('.mark-all-read');
   if (markAll && !markAll.classList.contains('done')) {
-    const { channel, ts } = markAll.dataset;
+    const { channel, ts, threadTs } = markAll.dataset;
     markAll.textContent = '...';
-    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, requestId: `readall_${Date.now()}` }, '*');
+    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
     markAll.dataset.pending = 'true';
     return;
   }
@@ -773,9 +889,9 @@ bodyEl.addEventListener('click', (e) => {
   // Mark read action
   const readBtn = e.target.closest('.action-read');
   if (readBtn && !readBtn.classList.contains('active')) {
-    const { channel, ts } = readBtn.dataset;
+    const { channel, ts, threadTs } = readBtn.dataset;
     readBtn.textContent = '…';
-    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, requestId: `read_${Date.now()}` }, '*');
+    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `read_${Date.now()}` }, '*');
     readBtn.dataset.pending = 'true';
     return;
   }
@@ -789,15 +905,21 @@ bodyEl.addEventListener('click', (e) => {
     const isDm = dm === 'true';
     const form = document.createElement('div');
     form.className = 'reply-form';
-    form.innerHTML = `<input class="reply-input" type="text" placeholder="Reply..."><button class="reply-send">Send</button>`;
+    form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="Reply... (⌘Enter to send)"></textarea><button class="reply-send">Send</button>`;
     msgRow.insertAdjacentElement('afterend', form);
     const input = form.querySelector('.reply-input');
     for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
       input.addEventListener(evt, (ev) => ev.stopPropagation());
     }
     input.focus();
+    function autoResize() {
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    }
+    input.addEventListener('input', autoResize);
     input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && input.value.trim()) {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && input.value.trim()) {
+        ev.preventDefault();
         sendReply(form, channel, isDm ? null : ts, input.value.trim());
       }
       if (ev.key === 'Escape') form.remove();
@@ -850,7 +972,7 @@ window.addEventListener('message', (event) => {
   let html = '';
   for (const r of seenReplies) {
     const userName = data ? uname(r.user, data.users) : r.user;
-    html += `<div class="msg-row"><div class="msg-content item-reply"><span class="item-user">${userName}:</span> ${truncate(r.text, 200, data?.users)}</div>${msgActions(channel, r.ts, ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}</div>${msgActions(channel, r.ts, ts)}</div>`;
   }
   container.innerHTML = html;
 
@@ -911,6 +1033,8 @@ window.addEventListener('message', (event) => {
   }
 
   if (msg.type === `${FSLACK}:markReadResult`) {
+    // Invalidate view cache so next show() fetches fresh data
+    if (msg.ok) { cachedView = null; chrome.storage.local.remove('fslackViewCache'); }
     // Per-message mark read
     const btn = bodyEl.querySelector('.action-read[data-pending="true"]');
     if (btn) {
@@ -994,8 +1118,10 @@ function prioritizeAndRender(data) {
   const totalItems = forLlm.threads.length + forLlm.dms.length + forLlm.channelPosts.length;
 
   if (totalItems === 0) {
-    // Only noise/dropped — render what we have
-    renderPrioritized({ actNow: [], priority: [], whenFree: [], noise: preFiltered.noise }, data, pendingPopular);
+    // Only noise/dropped/bot — render what we have
+    const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise };
+    renderPrioritized(prioritized, data, pendingPopular);
+    saveViewCache(data, pendingPopular, prioritized);
     return;
   }
 
@@ -1028,8 +1154,9 @@ function prioritizeAndRender(data) {
         return;
       }
 
-      const prioritized = mapPriorities(response.priorities, forLlm, preFiltered.noise, data);
+      const prioritized = mapPriorities(response.priorities, forLlm, preFiltered.noise, preFiltered.whenFree, data);
       renderPrioritized(prioritized, data, pendingPopular);
+      saveViewCache(data, pendingPopular, prioritized);
     }
   );
 }
@@ -1052,14 +1179,14 @@ function render(data) {
           <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
         </div>
         <div class="item-right">
-          <div class="item-text"><span class="item-user">${uname(t.root_user, users)}:</span> ${truncate(t.root_text, 200, users)}</div>`;
+          <div class="item-text">${userLink(uname(t.root_user, users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, users)}</div>`;
       const seenCount = Math.max(0, (t.reply_count || 0) - unread.length);
       if (seenCount > 0) {
         html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unread.map(r => r.ts).join(',')}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
         html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
       }
       for (const r of unread) {
-        html += `<div class="item-reply"><span class="item-user">${uname(r.user, users)}:</span> ${truncate(r.text, 1000, users)}</div>`;
+        html += `<div class="item-reply">${userLink(uname(r.user, users), t.channel_id, r.ts)} ${truncate(r.text, 1000, users)}</div>`;
       }
       html += '</div></div>';
     }
@@ -1078,7 +1205,7 @@ function render(data) {
           <span class="item-time">${formatTime(lastMsg.ts)}</span>
         </div>
         <div class="item-right">
-          <div class="item-text"><span class="item-user">${lastMsg.subtype === 'bot_message' ? 'Bot' : uname(lastMsg.user, users)}:</span> ${truncate(lastMsg.text, 1000, users)}</div>
+          <div class="item-text">${userLink(lastMsg.subtype === 'bot_message' ? 'Bot' : uname(lastMsg.user, users), dm.channel_id, lastMsg.ts)} ${truncate(lastMsg.text, 1000, users)}</div>
         </div>
       </div>`;
     }
@@ -1101,7 +1228,7 @@ function render(data) {
       html += `</div>
         <div class="item-right">`;
       for (const m of cp.messages.slice(0, 3)) {
-        html += `<div class="item-text"><span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users)}:</span> ${truncate(m.text, 200, users)}</div>`;
+        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 200, users)}</div>`;
       }
       if (cp.messages.length > 3) {
         html += `<div class="item-reply-count">+${cp.messages.length - 3} more</div>`;
@@ -1119,14 +1246,7 @@ function render(data) {
 }
 
 // ── Fetch button: fire both unreads + popular in parallel ──
-fetchBtn.addEventListener('click', () => {
-  fetchBtn.disabled = true;
-  fetchBtn.textContent = 'Fetching...';
-  bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
-  pendingPopular = null;
-  window.postMessage({ type: `${FSLACK}:fetch` }, '*');
-  window.postMessage({ type: `${FSLACK}:fetchPopular` }, '*');
-});
+fetchBtn.addEventListener('click', startFetch);
 
 // ── Listen for messages from inject.js ──
 let pendingUnreads = null;
@@ -1176,7 +1296,7 @@ function runPrioritize() {
   lastFetchTime = Date.now();
   updateLastUpdated();
   if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
-  lastUpdatedTimer = setInterval(updateLastUpdated, 60000);
+  lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
   prioritizeAndRender(data);
 }
 
@@ -1194,6 +1314,14 @@ window.addEventListener('message', (event) => {
   if (msg.type === `${FSLACK}:result`) {
     pendingUnreads = msg.data;
     gotUnreads = true;
+    // Cache resolved user/channel names for next fetch
+    if (msg.data) {
+      const toStore = {};
+      if (msg.data.users) toStore.fslackUsers = msg.data.users;
+      if (msg.data.channels) toStore.fslackChannels = msg.data.channels;
+      if (msg.data.channelMeta) toStore.fslackChannelMeta = msg.data.channelMeta;
+      if (Object.keys(toStore).length > 0) chrome.storage.local.set(toStore);
+    }
     tryPrioritize();
   }
 
@@ -1211,5 +1339,21 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// Auto-show on load
-show();
+// Auto-show on load — load persisted cache first, then show
+window.addEventListener('message', (event) => {
+  if (event.source === window && event.data?.type === `${FSLACK}:ready`) {
+    injectReady = true;
+    if (visible && !showFromCache()) startFetch();
+  }
+});
+if (sessionStorage.getItem('fslack_hide')) {
+  sessionStorage.removeItem('fslack_hide');
+} else {
+  // Load persisted view cache before showing — avoids unnecessary fetch
+  chrome.storage.local.get('fslackViewCache', (result) => {
+    if (result.fslackViewCache && !cachedView) {
+      cachedView = result.fslackViewCache;
+    }
+    show();
+  });
+}

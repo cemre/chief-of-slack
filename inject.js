@@ -37,22 +37,25 @@
     return data;
   }
 
-  async function resolveUsers(userIds) {
-    const users = {};
+  async function resolveUsers(userIds, cachedUsers = {}) {
+    const users = { ...cachedUsers };
     const unique = [...new Set(userIds)].filter(Boolean);
+    const uncached = unique.filter((uid) => !users[uid]);
     // Batch in parallel, max 50
-    const batch = unique.slice(0, 50);
-    const results = await Promise.all(
-      batch.map(async (uid) => {
-        try {
-          const data = await slackApi('users.info', { user: uid });
-          return [uid, data.user.real_name || data.user.name];
-        } catch {
-          return [uid, uid];
-        }
-      })
-    );
-    for (const [id, name] of results) users[id] = name;
+    const batch = uncached.slice(0, 50);
+    if (batch.length > 0) {
+      const results = await Promise.all(
+        batch.map(async (uid) => {
+          try {
+            const data = await slackApi('users.info', { user: uid });
+            return [uid, data.user.real_name || data.user.name];
+          } catch {
+            return [uid, uid];
+          }
+        })
+      );
+      for (const [id, name] of results) users[id] = name;
+    }
     return users;
   }
 
@@ -87,7 +90,7 @@
     window.postMessage({ type: `${FSLACK}:progress`, step, detail }, '*');
   }
 
-  async function fetchUnreads() {
+  async function fetchUnreads({ cachedUsers = {}, cachedChannels = {}, cachedChannelMeta = {} } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
     const [counts, selfId] = await Promise.all([
@@ -105,6 +108,8 @@
           user: r.user,
           text: extractText(r),
           ts: r.ts,
+          bot_id: r.bot_id,
+          subtype: r.subtype,
         }));
         // Filter: skip if all unread replies are from self
         const othersUnread = unread.filter((r) => r.user !== selfId);
@@ -231,8 +236,10 @@
         collectMentions(m.text);
       });
     });
-    progress(5, `Resolving ${[...new Set(allUserIds)].length} user names...`);
-    const users = await resolveUsers(allUserIds);
+    const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
+    const uncachedUserCount = uniqueUserIds.filter((uid) => !cachedUsers[uid]).length;
+    progress(5, `Resolving ${uncachedUserCount} user names (${uniqueUserIds.length - uncachedUserCount} cached)...`);
+    const users = await resolveUsers(allUserIds, cachedUsers);
     progress(5, `Done. ${Object.keys(users).length} users resolved.`);
 
     // 6. Get channel names for threads + channel posts
@@ -241,11 +248,12 @@
       ...channelPosts.map((cp) => cp.channel_id),
     ];
     const channelIds = [...new Set(allChannelIds.filter(Boolean))];
-    progress(6, `Resolving ${channelIds.length} channel names...`);
-    const channels = {};
-    const channelMeta = {};
+    const channels = { ...cachedChannels };
+    const channelMeta = { ...cachedChannelMeta };
+    const uncachedChannelIds = channelIds.filter((cid) => !channels[cid]);
+    progress(6, `Resolving ${uncachedChannelIds.length} channel names (${channelIds.length - uncachedChannelIds.length} cached)...`);
     await Promise.all(
-      channelIds.map(async (cid) => {
+      uncachedChannelIds.map(async (cid) => {
         try {
           const info = await slackApi('conversations.info', { channel: cid });
           channels[cid] = info.channel.name;
@@ -308,7 +316,12 @@
 
     if (msgType === `${FSLACK}:fetch`) {
       try {
-        const result = await fetchUnreads();
+        const cached = {
+          cachedUsers: event.data.cachedUsers || {},
+          cachedChannels: event.data.cachedChannels || {},
+          cachedChannelMeta: event.data.cachedChannelMeta || {},
+        };
+        const result = await fetchUnreads(cached);
         window.postMessage({ type: `${FSLACK}:result`, data: result }, '*');
       } catch (err) {
         window.postMessage(
@@ -354,9 +367,13 @@
     }
 
     if (msgType === `${FSLACK}:markRead`) {
-      const { channel, ts, requestId } = event.data;
+      const { channel, ts, thread_ts, requestId } = event.data;
       try {
-        await slackApi('conversations.mark', { channel, ts });
+        if (thread_ts) {
+          await slackApi('subscriptions.thread.mark', { channel, thread_ts, ts });
+        } else {
+          await slackApi('conversations.mark', { channel, ts });
+        }
         window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: true }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: false }, '*');
