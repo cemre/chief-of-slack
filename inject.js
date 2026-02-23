@@ -70,9 +70,25 @@
     // Bot messages often store content in attachments
     if (m.attachments?.length) {
       const att = m.attachments[0];
-      return att.fallback || att.text || att.pretext || '';
+      // title/text are more meaningful than fallback (which is often "[no preview available]")
+      const candidate = att.title || att.text || att.pretext;
+      if (candidate) return candidate;
+      // structured fields (e.g. Zendesk ticket metadata)
+      if (att.fields?.length) return att.fields.map((f) => `${f.title}: ${f.value}`).join(' · ');
+      // blocks inside the attachment
+      if (att.blocks?.length) {
+        for (const block of att.blocks) {
+          if (block.text?.text) return block.text.text;
+          if (block.elements?.length) {
+            for (const el of block.elements) {
+              if (el.text) return typeof el.text === 'string' ? el.text : el.text.text || '';
+            }
+          }
+        }
+      }
+      if (att.fallback && att.fallback !== '[no preview available]') return att.fallback;
     }
-    // Or in blocks
+    // Top-level blocks
     if (m.blocks?.length) {
       for (const block of m.blocks) {
         if (block.text?.text) return block.text.text;
@@ -377,6 +393,21 @@
         window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: true }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:markUnread`) {
+      const { channel, ts, thread_ts, requestId } = event.data;
+      const prevTs = (parseFloat(ts) - 0.000001).toFixed(6);
+      try {
+        if (thread_ts) {
+          await slackApi('subscriptions.thread.mark', { channel, thread_ts, ts: prevTs });
+        } else {
+          await slackApi('conversations.mark', { channel, ts: prevTs });
+        }
+        window.postMessage({ type: `${FSLACK}:markUnreadResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:markUnreadResult`, requestId, ok: false }, '*');
       }
     }
 

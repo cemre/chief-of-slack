@@ -57,8 +57,11 @@ shadow.innerHTML = `
     z-index: 1;
   }
   header h1 { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
-  .last-updated { font-size: 11px; color: #616061; margin-left: 12px; font-weight: 400; cursor: pointer; }
-  .last-updated:hover { color: #1d9bd1; }
+  .last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
+  .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
+  .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; display: none; }
+  .refresh-link:hover { text-decoration: underline; }
+  .last-updated-wrap:hover .refresh-link { display: inline; }
   .header-actions { display: flex; gap: 8px; }
   button {
     background: #007a5a;
@@ -111,16 +114,19 @@ shadow.innerHTML = `
   }
   .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
   .item-actions {
-    display: none;
+    display: flex;
+    visibility: hidden;
+    height: 20px;
     margin-top: 8px;
     font-size: 12px;
     color: #616061;
     gap: 16px;
   }
-  .item:hover .item-actions { display: flex; }
+  .item:hover .item-actions { visibility: visible; }
   .item-actions span { cursor: pointer; }
   .item-actions span:hover { color: #d1d2d3; }
-  .item-actions .mark-all-read.done { color: #4a9c6d; pointer-events: none; }
+  .item-actions .mark-all-read.done { color: #4a9c6d; }
+  .item-actions .mark-all-read.done:hover { color: #e01e5a; }
   .item-mention {
     font-size: 11px;
     font-weight: 700;
@@ -300,7 +306,7 @@ shadow.innerHTML = `
 </style>
 <div id="overlay">
   <header>
-    <h1>Flack <span id="last-updated" class="last-updated"></span></h1>
+    <h1>Flack <span class="last-updated-wrap"><span id="last-updated" class="last-updated"></span><span id="refresh-link" class="refresh-link">refresh</span></span></h1>
     <div class="header-actions">
       <button id="fetch-btn">Fetch Unreads</button>
       <button id="close-btn" class="secondary">Back to Slack</button>
@@ -327,7 +333,7 @@ function updateLastUpdated() {
 }
 
 const closeBtn = shadow.getElementById('close-btn');
-lastUpdatedEl.addEventListener('click', startFetch);
+shadow.getElementById('refresh-link').addEventListener('click', startFetch);
 
 // ── Toggle overlay ──
 let visible = false;
@@ -567,17 +573,19 @@ function renderChannelItem(cp, data, cssClass) {
   if (cp.mention_count > 0) {
     html += `<div class="item-mention">@${cp.mention_count}x</div>`;
   }
-  if (cp.messages.length > 1) {
-    html += `<span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}">mark all read</span>`;
-  }
   html += `</div>
     <div class="item-right">`;
-  for (const m of cp.messages.slice(0, 5)) {
-    html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+  if (cp._summary) {
+    html += `<div class="item-text">${escapeHtml(cp._summary)}</div>`;
+  } else {
+    for (const m of cp.messages.slice(0, 5)) {
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    }
+    if (cp.messages.length > 5) {
+      html += `<div class="item-reply-count">+${cp.messages.length - 5} more</div>`;
+    }
   }
-  if (cp.messages.length > 5) {
-    html += `<div class="item-reply-count">+${cp.messages.length - 5} more</div>`;
-  }
+  html += itemActions(cp.channel_id, latest?.ts, null, false);
   html += '</div></div>';
   return html;
 }
@@ -630,13 +638,18 @@ function applyPreFilters(data) {
     // #help-dia without @mention → hard drop (no LLM needed)
     if (chName === 'help-dia' && (cp.mention_count || 0) === 0) continue;
 
-    // All-bot messages → when free (but check for active threads first)
+    // All-bot messages → whenFree if 3+ replies, noise with summary otherwise (drop if no text)
     if (cp.messages.every(isBot)) {
-      if (chName.includes('dia-reporter') || chName.includes('reporter-feedback')) {
-        const hasActiveThread = cp.messages.some((m) => (m.reply_count || 0) >= 8);
-        if (hasActiveThread) { forLlm.channelPosts.push(cp); continue; }
+      const hasEngagement = cp.messages.some((m) => (m.reply_count || 0) >= 3);
+      if (hasEngagement) {
+        whenFree.push(cp);
+      } else {
+        const texts = cp.messages.map((m) => m.text).filter(Boolean);
+        if (texts.length > 0) {
+          cp._summary = texts.join(' · ').slice(0, 160);
+          noise.push(cp);
+        }
       }
-      whenFree.push(cp);
       continue;
     }
 
@@ -856,13 +869,21 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Mark all read
+  // Mark all read / undo
   const markAll = e.target.closest('.mark-all-read');
-  if (markAll && !markAll.classList.contains('done')) {
-    const { channel, ts, threadTs } = markAll.dataset;
-    markAll.textContent = '...';
-    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
-    markAll.dataset.pending = 'true';
+  if (markAll) {
+    if (markAll.classList.contains('done')) {
+      const { channel, ts, threadTs } = markAll.dataset;
+      markAll.textContent = '...';
+      markAll.classList.remove('done');
+      window.postMessage({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` }, '*');
+      markAll.dataset.pending = 'true';
+    } else if (!markAll.dataset.pending) {
+      const { channel, ts, threadTs } = markAll.dataset;
+      markAll.textContent = '...';
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+      markAll.dataset.pending = 'true';
+    }
     return;
   }
 
@@ -886,27 +907,17 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Mark read action
-  const readBtn = e.target.closest('.action-read');
-  if (readBtn && !readBtn.classList.contains('active')) {
-    const { channel, ts, threadTs } = readBtn.dataset;
-    readBtn.textContent = '…';
-    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `read_${Date.now()}` }, '*');
-    readBtn.dataset.pending = 'true';
-    return;
-  }
-
-  // Reply action
+  // Reply action (in item-actions)
   const replyBtn = e.target.closest('.action-reply');
   if (replyBtn) {
-    const msgRow = replyBtn.closest('.msg-row');
-    if (!msgRow || msgRow.nextElementSibling?.classList.contains('reply-form')) return;
+    const itemActions = replyBtn.closest('.item-actions');
+    if (!itemActions || itemActions.nextElementSibling?.classList.contains('reply-form')) return;
     const { channel, ts, dm } = replyBtn.dataset;
     const isDm = dm === 'true';
     const form = document.createElement('div');
     form.className = 'reply-form';
     form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="Reply... (⌘Enter to send)"></textarea><button class="reply-send">Send</button>`;
-    msgRow.insertAdjacentElement('afterend', form);
+    itemActions.insertAdjacentElement('afterend', form);
     const input = form.querySelector('.reply-input');
     for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
       input.addEventListener(evt, (ev) => ev.stopPropagation());
@@ -972,7 +983,7 @@ window.addEventListener('message', (event) => {
   let html = '';
   for (const r of seenReplies) {
     const userName = data ? uname(r.user, data.users) : r.user;
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}</div>${msgActions(channel, r.ts, ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}</div>${msgActions(channel, r.ts)}</div>`;
   }
   container.innerHTML = html;
 
@@ -1035,26 +1046,30 @@ window.addEventListener('message', (event) => {
   if (msg.type === `${FSLACK}:markReadResult`) {
     // Invalidate view cache so next show() fetches fresh data
     if (msg.ok) { cachedView = null; chrome.storage.local.remove('fslackViewCache'); }
-    // Per-message mark read
-    const btn = bodyEl.querySelector('.action-read[data-pending="true"]');
-    if (btn) {
-      delete btn.dataset.pending;
-      if (msg.ok) {
-        btn.textContent = '●'; btn.classList.add('active');
-        const item = btn.closest('.item');
-        if (item) item.classList.add('read-done');
-      } else { btn.textContent = '○'; }
-    }
-    // Mark all read
     const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
     if (markAll) {
       delete markAll.dataset.pending;
       if (msg.ok) {
-        markAll.textContent = 'done';
+        markAll.textContent = 'undo';
         markAll.classList.add('done');
         const item = markAll.closest('.item');
         if (item) item.classList.add('read-done');
-      } else { markAll.textContent = 'mark all read'; }
+      } else { markAll.textContent = 'mark read'; }
+    }
+  }
+
+  if (msg.type === `${FSLACK}:markUnreadResult`) {
+    const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
+    if (markAll) {
+      delete markAll.dataset.pending;
+      if (msg.ok) {
+        markAll.textContent = 'mark read';
+        const item = markAll.closest('.item');
+        if (item) item.classList.remove('read-done');
+      } else {
+        markAll.textContent = 'undo';
+        markAll.classList.add('done');
+      }
     }
   }
 
