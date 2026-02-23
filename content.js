@@ -133,6 +133,11 @@ shadow.innerHTML = `
     color: #e01e5a;
     margin-top: 2px;
   }
+  .item-replied {
+    font-size: 11px;
+    color: #ababad;
+    margin-top: 4px;
+  }
   .item-right {
     flex: 1;
     min-width: 0;
@@ -494,6 +499,8 @@ function itemActions(channel, markTs, threadTs, isDm) {
   return `<div class="item-actions">
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}>mark read</span>
     <span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>reply</span>
+    ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}">mute thread</span>` : ''}
+    ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}">mute channel</span>` : ''}
   </div>`;
 }
 
@@ -573,6 +580,11 @@ function renderChannelItem(cp, data, cssClass) {
   if (cp.mention_count > 0) {
     html += `<div class="item-mention">@${cp.mention_count}x</div>`;
   }
+  if (cp._repliers?.length) {
+    const names = cp._repliers.map(escapeHtml).join(', ');
+    const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
+    html += `<div class="item-replied">${names}${overflow} replied</div>`;
+  }
   html += `</div>
     <div class="item-right">`;
   if (cp._summary) {
@@ -600,7 +612,7 @@ function renderAnyItem(item, data, cssClass) {
 // ── Deterministic pre-filters ──
 // Hard-drops, bot→whenFree. Everything else goes to LLM for classification + ranking.
 function applyPreFilters(data) {
-  const { selfId, threads, dms, channelPosts, channels } = data;
+  const { selfId, threads, dms, channelPosts, channels, users } = data;
   const meta = data.channelMeta || {};
 
   const noise = [];
@@ -642,11 +654,20 @@ function applyPreFilters(data) {
     if (cp.messages.every(isBot)) {
       const hasEngagement = cp.messages.some((m) => (m.reply_count || 0) >= 3);
       if (hasEngagement) {
+        const replierIds = [...new Set(
+          cp.messages
+            .filter((m) => (m.reply_count || 0) >= 3)
+            .flatMap((m) => m.reply_users || [])
+        )];
+        cp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
+        cp._replierOverflow = Math.max(0, replierIds.length - 3);
         whenFree.push(cp);
       } else {
-        const texts = cp.messages.map((m) => m.text).filter(Boolean);
+        const texts = cp.messages
+          .map((m) => cleanSlackText(m.text || '', users))
+          .filter(Boolean);
         if (texts.length > 0) {
-          cp._summary = texts.join(' · ').slice(0, 160);
+          cp._summary = texts[0].slice(0, 140);
           noise.push(cp);
         }
       }
@@ -941,6 +962,26 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
+  // Mute thread
+  const muteBtn = e.target.closest('.action-mute');
+  if (muteBtn && !muteBtn.dataset.pending) {
+    const { channel, threadTs } = muteBtn.dataset;
+    muteBtn.textContent = '...';
+    muteBtn.dataset.pending = 'true';
+    window.postMessage({ type: `${FSLACK}:muteThread`, channel, thread_ts: threadTs, requestId: `mute_${Date.now()}` }, '*');
+    return;
+  }
+
+  // Mute channel
+  const muteChannelBtn = e.target.closest('.action-mute-channel');
+  if (muteChannelBtn && !muteChannelBtn.dataset.pending) {
+    const { channel } = muteChannelBtn.dataset;
+    muteChannelBtn.textContent = '...';
+    muteChannelBtn.dataset.pending = 'true';
+    window.postMessage({ type: `${FSLACK}:muteChannel`, channel, requestId: `mutech_${Date.now()}` }, '*');
+    return;
+  }
+
   // Send reply via postMessage
   const sendBtn = e.target.closest('.reply-send');
   if (sendBtn) return; // handled by direct listener above
@@ -1073,14 +1114,47 @@ window.addEventListener('message', (event) => {
     }
   }
 
+  if (msg.type === `${FSLACK}:muteThreadResult`) {
+    const muteBtn = bodyEl.querySelector('.action-mute[data-pending="true"]');
+    if (muteBtn) {
+      if (msg.ok) {
+        muteBtn.closest('.item')?.remove();
+      } else {
+        delete muteBtn.dataset.pending;
+        muteBtn.textContent = 'mute thread';
+      }
+    }
+  }
+
+  if (msg.type === `${FSLACK}:muteChannelResult`) {
+    const muteBtn = bodyEl.querySelector('.action-mute-channel[data-pending="true"]');
+    if (muteBtn) {
+      if (msg.ok) {
+        muteBtn.closest('.item')?.remove();
+      } else {
+        delete muteBtn.dataset.pending;
+        muteBtn.textContent = 'mute channel';
+      }
+    }
+  }
+
   if (msg.type === `${FSLACK}:postReplyResult`) {
     const form = bodyEl.querySelector(`.reply-form[data-request-id="${msg.requestId}"]`);
     if (!form) return;
     if (msg.ok) {
       const text = form.querySelector('.reply-input').value;
+      const item = form.closest('.item');
       const replyHtml = `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
       form.insertAdjacentHTML('beforebegin', replyHtml);
       form.remove();
+      // Auto mark as read, same flow as clicking "mark read" (undo works for free)
+      const markAll = item?.querySelector('.mark-all-read');
+      if (markAll && !markAll.classList.contains('done') && !markAll.dataset.pending) {
+        const { channel, ts, threadTs } = markAll.dataset;
+        markAll.textContent = '...';
+        markAll.dataset.pending = 'true';
+        window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+      }
     } else {
       const btn = form.querySelector('.reply-send');
       btn.textContent = 'Failed';

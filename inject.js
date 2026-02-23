@@ -207,6 +207,7 @@
               subtype: m.subtype,
               bot_id: m.bot_id,
               reply_count: m.reply_count || 0,
+              reply_users: m.reply_users || [],
             }));
           if (msgs.length > 0) {
             channelPosts.push({
@@ -250,6 +251,7 @@
       cp.messages.forEach((m) => {
         if (m.user) allUserIds.push(m.user);
         collectMentions(m.text);
+        (m.reply_users || []).forEach((uid) => allUserIds.push(uid));
       });
     });
     const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
@@ -408,6 +410,30 @@
         window.postMessage({ type: `${FSLACK}:markUnreadResult`, requestId, ok: true }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:markUnreadResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:muteChannel`) {
+      const { channel, requestId } = event.data;
+      try {
+        await slackApi('users.prefs.setNotifications', {
+          channel_ids: channel,
+          global: 'false',
+          prefs: JSON.stringify([{ name: 'muted', value: 'true' }]),
+        });
+        window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:muteThread`) {
+      const { channel, thread_ts, requestId } = event.data;
+      try {
+        await slackApi('subscriptions.thread.remove', { channel, thread_ts });
+        window.postMessage({ type: `${FSLACK}:muteThreadResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:muteThreadResult`, requestId, ok: false }, '*');
       }
     }
 
