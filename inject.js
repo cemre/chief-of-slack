@@ -206,20 +206,29 @@
 
     // 5. Collect all user IDs and resolve names
     const allUserIds = [];
+    function collectMentions(text) {
+      if (!text) return;
+      const matches = text.matchAll(/<@(U[A-Z0-9]+)>/g);
+      for (const m of matches) allUserIds.push(m[1]);
+    }
     threads.forEach((t) => {
       if (t.root_user) allUserIds.push(t.root_user);
+      collectMentions(t.root_text);
       t.unread_replies.forEach((r) => {
         if (r.user) allUserIds.push(r.user);
+        collectMentions(r.text);
       });
     });
     dms.forEach((dm) => {
       dm.messages.forEach((m) => {
         if (m.user) allUserIds.push(m.user);
+        collectMentions(m.text);
       });
     });
     channelPosts.forEach((cp) => {
       cp.messages.forEach((m) => {
         if (m.user) allUserIds.push(m.user);
+        collectMentions(m.text);
       });
     });
     progress(5, `Resolving ${[...new Set(allUserIds)].length} user names...`);
@@ -321,6 +330,48 @@
         window.postMessage({ type: `${FSLACK}:repliesResult`, requestId, replies }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:repliesResult`, requestId, replies: [] }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:addReaction`) {
+      const { channel, ts, emoji, requestId } = event.data;
+      try {
+        await slackApi('reactions.add', { channel, timestamp: ts, name: emoji });
+        window.postMessage({ type: `${FSLACK}:reactResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:reactResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:saveMessage`) {
+      const { channel, ts, requestId } = event.data;
+      try {
+        await slackApi('stars.add', { channel, timestamp: ts });
+        window.postMessage({ type: `${FSLACK}:saveResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:saveResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:markRead`) {
+      const { channel, ts, requestId } = event.data;
+      try {
+        await slackApi('conversations.mark', { channel, ts });
+        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:postReply`) {
+      const { channel, thread_ts, text, requestId } = event.data;
+      try {
+        const params = { channel, text };
+        if (thread_ts) params.thread_ts = thread_ts;
+        await slackApi('chat.postMessage', params);
+        window.postMessage({ type: `${FSLACK}:postReplyResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:postReplyResult`, requestId, ok: false }, '*');
       }
     }
 

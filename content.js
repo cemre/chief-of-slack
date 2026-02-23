@@ -57,6 +57,7 @@ shadow.innerHTML = `
     z-index: 1;
   }
   header h1 { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
+  .last-updated { font-size: 11px; color: #616061; margin-left: 12px; font-weight: 400; }
   .header-actions { display: flex; gap: 8px; }
   button {
     background: #007a5a;
@@ -109,6 +110,16 @@ shadow.innerHTML = `
     display: block;
   }
   .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
+  .mark-all-read {
+    font-size: 11px;
+    color: #616061;
+    cursor: pointer;
+    margin-top: 4px;
+    display: none;
+  }
+  .mark-all-read:hover { color: #d1d2d3; }
+  .item:hover .mark-all-read { display: block; }
+  .mark-all-read.done { color: #4a9c6d; pointer-events: none; }
   .item-mention {
     font-size: 11px;
     font-weight: 700;
@@ -219,6 +230,55 @@ shadow.innerHTML = `
   .seen-replies-toggle:hover { color: #ababad; }
   .seen-replies-toggle.loading { color: #565856; cursor: wait; }
   .seen-replies-container .item-reply { color: #717274; }
+  .msg-row {
+    display: flex;
+    align-items: flex-start;
+    position: relative;
+  }
+  .msg-content { flex: 1; min-width: 0; }
+  .msg-actions {
+    position: absolute;
+    right: 0;
+    top: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 22px);
+    grid-template-rows: repeat(2, 22px);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .msg-row:hover { background: rgba(255,255,255,0.04); }
+  .msg-row:hover .msg-actions { opacity: 1; }
+  .action-btn {
+    cursor: pointer;
+    font-size: 13px;
+    color: #616061;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    user-select: none;
+  }
+  .action-btn:hover { background: #363940; color: #d1d2d3; }
+  .action-btn.active { color: #ecb22e; }
+  .action-btn.reacted { opacity: 0.3; pointer-events: none; }
+  .action-btn.saved { color: #ecb22e; pointer-events: none; }
+  .item.read-done { opacity: 0.4; }
+  .reply-form {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .reply-input {
+    flex: 1;
+    padding: 6px 10px;
+    background: #222529;
+    border: 1px solid #565856;
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .reply-input:focus { outline: none; border-color: #1d9bd1; }
   .warning-banner {
     padding: 8px 24px;
     background: #2c2d30;
@@ -229,7 +289,7 @@ shadow.innerHTML = `
 </style>
 <div id="overlay">
   <header>
-    <h1>Flack</h1>
+    <h1>Flack <span id="last-updated" class="last-updated"></span></h1>
     <div class="header-actions">
       <button id="fetch-btn">Fetch Unreads</button>
       <button id="close-btn" class="secondary">Back to Slack</button>
@@ -244,6 +304,17 @@ shadow.innerHTML = `
 const overlay = shadow.getElementById('overlay');
 const bodyEl = shadow.getElementById('body');
 const fetchBtn = shadow.getElementById('fetch-btn');
+const lastUpdatedEl = shadow.getElementById('last-updated');
+let lastFetchTime = null;
+let lastUpdatedTimer = null;
+
+function updateLastUpdated() {
+  if (!lastFetchTime) return;
+  const mins = Math.floor((Date.now() - lastFetchTime) / 60000);
+  if (mins < 1) lastUpdatedEl.textContent = 'just now';
+  else lastUpdatedEl.textContent = `${mins}m ago`;
+}
+
 const closeBtn = shadow.getElementById('close-btn');
 
 // ── Toggle overlay ──
@@ -314,6 +385,18 @@ function uname(uid, users) {
   return users[uid] || uid;
 }
 
+// threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
+function msgActions(channel, ts, threadTs, isDm) {
+  return `<div class="msg-actions">
+    <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍</span>
+    <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="heart" title="heart">💛</span>
+    <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="eyes" title="eyes">👀</span>
+    <span class="action-btn action-save" data-channel="${channel}" data-ts="${ts}" title="Save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></span>
+    <span class="action-btn action-read" data-channel="${channel}" data-ts="${ts}" title="Mark read">○</span>
+    <span class="action-btn action-reply" data-channel="${channel}" data-ts="${threadTs || ts}"${isDm ? ' data-dm="true"' : ''} title="Reply">↩</span>
+  </div>`;
+}
+
 // ── Render a single item (thread, DM, or channel) as HTML ──
 function renderThreadItem(t, data, cssClass) {
   const unread = t.unread_replies || [];
@@ -330,20 +413,22 @@ function renderThreadItem(t, data, cssClass) {
     channelLabel = `#${ch}`;
   }
 
+  const markAllTs = lastUnread?.ts || t.ts;
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
       <span class="item-channel">${channelLabel}</span>
-      <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
+      <span class="item-time">${formatTime(markAllTs)}</span>
+      ${unread.length > 0 ? `<span class="mark-all-read" data-channel="${t.channel_id}" data-ts="${markAllTs}">mark all read</span>` : ''}
     </div>
     <div class="item-right">
-      <div class="item-text"><span class="item-user">${uname(t.root_user, data.users)}:</span> ${truncate(t.root_text, 200, data.users)}</div>`;
+      <div class="msg-row"><div class="msg-content item-text"><span class="item-user">${uname(t.root_user, data.users)}:</span> ${truncate(t.root_text, 200, data.users)}</div>${msgActions(t.channel_id, t.ts, null, t._isDmThread)}</div>`;
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
   for (const r of unread) {
-    html += `<div class="item-reply"><span class="item-user">${uname(r.user, data.users)}:</span> ${truncate(r.text, 1000, data.users)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply"><span class="item-user">${uname(r.user, data.users)}:</span> ${truncate(r.text, 1000, data.users)}</div>${msgActions(t.channel_id, r.ts, t.ts, t._isDmThread)}</div>`;
   }
   html += '</div></div>';
   return html;
@@ -365,10 +450,11 @@ function renderDmItem(dm, data, cssClass) {
     <div class="item-left">
       <span class="item-channel">${escapeHtml(partner)}</span>
       <span class="item-time">${formatTime(latest.ts)}</span>
+      ${dm.messages.length > 1 ? `<span class="mark-all-read" data-channel="${dm.channel_id}" data-ts="${latest.ts}">mark all read</span>` : ''}
     </div>
     <div class="item-right">`;
   for (const m of dm.messages.slice(0, 5)) {
-    html += `<div class="item-text">${truncate(m.text, 1000, data.users)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}</div>${msgActions(dm.channel_id, m.ts, null, true)}</div>`;
   }
   if (dm.messages.length > 5) {
     html += `<div class="item-reply-count">+${dm.messages.length - 5} more</div>`;
@@ -387,10 +473,13 @@ function renderChannelItem(cp, data, cssClass) {
   if (cp.mention_count > 0) {
     html += `<div class="item-mention">@${cp.mention_count}x</div>`;
   }
+  if (cp.messages.length > 1) {
+    html += `<span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}">mark all read</span>`;
+  }
   html += `</div>
     <div class="item-right">`;
   for (const m of cp.messages.slice(0, 5)) {
-    html += `<div class="item-text"><span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users)}:</span> ${truncate(m.text, 200, data.users)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text"><span class="item-user">${m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users)}:</span> ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   if (cp.messages.length > 5) {
     html += `<div class="item-reply-count">+${cp.messages.length - 5} more</div>`;
@@ -586,7 +675,7 @@ function renderPrioritized(prioritized, data, popular, loading = false) {
           <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
         </div>
         <div class="item-right">
-          <div class="item-text">${truncate(p.text, 200, data.users)}</div>
+          <div class="msg-row"><div class="msg-content item-text">${truncate(p.text, 200, data.users)}</div>${msgActions(p.channel_id, p.ts)}</div>
         </div>
       </div>`;
     }
@@ -651,6 +740,78 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
+  // Mark all read
+  const markAll = e.target.closest('.mark-all-read');
+  if (markAll && !markAll.classList.contains('done')) {
+    const { channel, ts } = markAll.dataset;
+    markAll.textContent = '...';
+    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, requestId: `readall_${Date.now()}` }, '*');
+    markAll.dataset.pending = 'true';
+    return;
+  }
+
+  // Reaction action
+  const reactBtn = e.target.closest('.action-react');
+  if (reactBtn && !reactBtn.classList.contains('active')) {
+    const { channel, ts, emoji } = reactBtn.dataset;
+    reactBtn.style.opacity = '0.4';
+    window.postMessage({ type: `${FSLACK}:addReaction`, channel, ts, emoji, requestId: `react_${Date.now()}` }, '*');
+    reactBtn.dataset.pending = 'true';
+    return;
+  }
+
+  // Save action
+  const saveBtn = e.target.closest('.action-save');
+  if (saveBtn && !saveBtn.classList.contains('saved')) {
+    const { channel, ts } = saveBtn.dataset;
+    saveBtn.style.opacity = '0.4';
+    window.postMessage({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` }, '*');
+    saveBtn.dataset.pending = 'true';
+    return;
+  }
+
+  // Mark read action
+  const readBtn = e.target.closest('.action-read');
+  if (readBtn && !readBtn.classList.contains('active')) {
+    const { channel, ts } = readBtn.dataset;
+    readBtn.textContent = '…';
+    window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, requestId: `read_${Date.now()}` }, '*');
+    readBtn.dataset.pending = 'true';
+    return;
+  }
+
+  // Reply action
+  const replyBtn = e.target.closest('.action-reply');
+  if (replyBtn) {
+    const msgRow = replyBtn.closest('.msg-row');
+    if (!msgRow || msgRow.nextElementSibling?.classList.contains('reply-form')) return;
+    const { channel, ts, dm } = replyBtn.dataset;
+    const isDm = dm === 'true';
+    const form = document.createElement('div');
+    form.className = 'reply-form';
+    form.innerHTML = `<input class="reply-input" type="text" placeholder="Reply..."><button class="reply-send">Send</button>`;
+    msgRow.insertAdjacentElement('afterend', form);
+    const input = form.querySelector('.reply-input');
+    for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
+      input.addEventListener(evt, (ev) => ev.stopPropagation());
+    }
+    input.focus();
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && input.value.trim()) {
+        sendReply(form, channel, isDm ? null : ts, input.value.trim());
+      }
+      if (ev.key === 'Escape') form.remove();
+    });
+    form.querySelector('.reply-send').addEventListener('click', () => {
+      if (input.value.trim()) sendReply(form, channel, isDm ? null : ts, input.value.trim());
+    });
+    return;
+  }
+
+  // Send reply via postMessage
+  const sendBtn = e.target.closest('.reply-send');
+  if (sendBtn) return; // handled by direct listener above
+
   // Seen replies lazy load
   const toggle = e.target.closest('.seen-replies-toggle');
   if (!toggle || toggle.classList.contains('loading') || toggle.classList.contains('expanded')) return;
@@ -689,10 +850,7 @@ window.addEventListener('message', (event) => {
   let html = '';
   for (const r of seenReplies) {
     const userName = data ? uname(r.user, data.users) : r.user;
-    html += `<div class="item-reply">
-      <span class="item-user">${userName}:</span>
-      ${truncate(r.text, 200, data?.users)}
-    </div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply"><span class="item-user">${userName}:</span> ${truncate(r.text, 200, data?.users)}</div>${msgActions(channel, r.ts, ts)}</div>`;
   }
   container.innerHTML = html;
 
@@ -711,6 +869,85 @@ window.addEventListener('message', (event) => {
       ? `${count} earlier ${count === 1 ? 'reply' : 'replies'}`
       : `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`;
   });
+});
+
+// ── Send reply helper ──
+function sendReply(form, channel, threadTs, text) {
+  const input = form.querySelector('.reply-input');
+  const btn = form.querySelector('.reply-send');
+  input.disabled = true;
+  btn.disabled = true;
+  btn.textContent = '...';
+  const reqId = `post_${Date.now()}`;
+  form.dataset.requestId = reqId;
+  window.postMessage({ type: `${FSLACK}:postReply`, channel, thread_ts: threadTs, text, requestId: reqId }, '*');
+}
+
+// ── Action result listeners ──
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  const msg = event.data || {};
+
+  if (msg.type === `${FSLACK}:reactResult`) {
+    const btn = bodyEl.querySelector('.action-react[data-pending="true"]');
+    if (btn) {
+      delete btn.dataset.pending;
+      btn.style.opacity = '';
+      if (msg.ok) btn.classList.add('reacted');
+    }
+  }
+
+  if (msg.type === `${FSLACK}:saveResult`) {
+    const btn = bodyEl.querySelector('.action-save[data-pending="true"]');
+    if (btn) {
+      delete btn.dataset.pending;
+      btn.style.opacity = '';
+      if (msg.ok) {
+        btn.classList.add('saved');
+        const svg = btn.querySelector('svg path');
+        if (svg) svg.setAttribute('fill', 'currentColor');
+      }
+    }
+  }
+
+  if (msg.type === `${FSLACK}:markReadResult`) {
+    // Per-message mark read
+    const btn = bodyEl.querySelector('.action-read[data-pending="true"]');
+    if (btn) {
+      delete btn.dataset.pending;
+      if (msg.ok) {
+        btn.textContent = '●'; btn.classList.add('active');
+        const item = btn.closest('.item');
+        if (item) item.classList.add('read-done');
+      } else { btn.textContent = '○'; }
+    }
+    // Mark all read
+    const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
+    if (markAll) {
+      delete markAll.dataset.pending;
+      if (msg.ok) {
+        markAll.textContent = 'done';
+        markAll.classList.add('done');
+        const item = markAll.closest('.item');
+        if (item) item.classList.add('read-done');
+      } else { markAll.textContent = 'mark all read'; }
+    }
+  }
+
+  if (msg.type === `${FSLACK}:postReplyResult`) {
+    const form = bodyEl.querySelector(`.reply-form[data-request-id="${msg.requestId}"]`);
+    if (!form) return;
+    if (msg.ok) {
+      const text = form.querySelector('.reply-input').value;
+      const replyHtml = `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
+      form.insertAdjacentHTML('beforebegin', replyHtml);
+      form.remove();
+    } else {
+      const btn = form.querySelector('.reply-send');
+      btn.textContent = 'Failed';
+      setTimeout(() => { btn.textContent = 'Send'; btn.disabled = false; form.querySelector('.reply-input').disabled = false; }, 2000);
+    }
+  }
 });
 
 // ── API key inline prompt ──
@@ -936,6 +1173,10 @@ function runPrioritize() {
 
   fetchBtn.disabled = false;
   fetchBtn.textContent = 'Fetch Unreads';
+  lastFetchTime = Date.now();
+  updateLastUpdated();
+  if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+  lastUpdatedTimer = setInterval(updateLastUpdated, 60000);
   prioritizeAndRender(data);
 }
 
