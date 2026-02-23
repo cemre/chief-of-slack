@@ -32,14 +32,13 @@ VIPs (messages from these people get higher priority): ${vipList}
 
 CONTEXT:
 - If I posted or replied in a thread (userReplied=true) and someone then asks a question — even without @mentioning me — treat it as a question directed at me.
-- Messages in private channels (isPrivate=true) are inherently higher signal. Never classify private channel messages as "noise".
 
 CATEGORIES:
-- "drop": I already replied in this thread (userReplied=true) AND the new messages are just acknowledgments, +1s, emoji reactions, or the conversation continuing without needing me. Do NOT drop if someone asks a question (even indirectly — it's likely directed at me), pushes back on what I said, or needs me to unblock something.
-- "act_now": Someone is BLOCKED on me or explicitly waiting for my response. They asked me a direct question, requested my review/approval, or can't proceed without my input. Use this for the most time-sensitive items where someone is stuck.
-- "priority": Needs my attention soon but nobody is stuck right now. A VIP message that warrants a reply. A discussion I'm involved in that's active. DMs from colleagues. Private channel messages that need a response. @mentions.
-- "when_free": FYIs from VIPs I should be aware of. Non-urgent questions directed at me. Discussions I should weigh in on but nobody is blocked. Private channel FYIs.
-- "noise": Bots, automated notifications. General chatter not directed at me. Announcements from non-VIPs. NEVER for private channels.
+- "drop": I already replied in this thread (userReplied=true) AND the new messages are just acknowledgments, +1s, emoji reactions, or the conversation continuing without needing me. Do NOT drop if someone asks a question or needs me to unblock something.
+- "act_now": Someone is BLOCKED on me or explicitly waiting — direct question, review/approval request, can't proceed without my input.
+- "priority": Needs my attention soon — warrants a response but nobody is stuck right now.
+- "when_free": Something I could usefully respond to or should be aware of, but not urgent.
+- "noise": Chatter not directed at me, announcements, automated posts, things that don't need a response.
 
 IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, classify as one of the other categories.
 
@@ -91,11 +90,72 @@ async function handlePrioritize(payload, selfName) {
   }
 }
 
+// ── Build deep-analysis summarization prompt ──
+function buildSummarizePrompt(items) {
+  const serialized = JSON.stringify(items, null, 0);
+  return `For each busy channel below, determine if there is something worth surfacing: an intentional update or announcement, a decision made, a heated discussion, or a situation that needs attention. If not, return relevant: false.
+
+Types: "key_update" | "decision" | "heated_discussion" | "needs_attention"
+
+For relevant items, write a concise 1-2 sentence summary of what happened.
+
+ITEMS:
+${serialized}
+
+Respond with ONLY a JSON object mapping each item's "id" to its result:
+{"channel_0": {"relevant": true, "type": "...", "summary": "..."}, "channel_1": {"relevant": false}}
+No explanation, no markdown fences, just the JSON object.`;
+}
+
+// ── Call Claude API for deep summarization ──
+async function handleSummarize(items) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  const prompt = buildSummarizePrompt(items);
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return { summaries: JSON.parse(jsonMatch[0]) };
+    }
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Message handler ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === `${FSLACK}:prioritize`) {
     handlePrioritize(msg.data, msg.selfName).then(sendResponse);
     return true; // async response
+  }
+  if (msg.type === `${FSLACK}:summarize`) {
+    handleSummarize(msg.data).then(sendResponse);
+    return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {
     chrome.storage.local.set({ claudeApiKey: msg.key }, () => {

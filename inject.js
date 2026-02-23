@@ -37,19 +37,22 @@
     return data;
   }
 
-  async function resolveUsers(userIds, cachedUsers = {}) {
+  async function resolveUsers(userIds, cachedUsers = {}, onProgress) {
     const users = { ...cachedUsers };
     const unique = [...new Set(userIds)].filter(Boolean);
     const uncached = unique.filter((uid) => !users[uid]);
     // Batch in parallel, max 50
     const batch = uncached.slice(0, 50);
     if (batch.length > 0) {
+      let done = 0;
       const results = await Promise.all(
         batch.map(async (uid) => {
           try {
             const data = await slackApi('users.info', { user: uid });
+            if (onProgress) onProgress(++done, batch.length);
             return [uid, data.user.real_name || data.user.name];
           } catch {
+            if (onProgress) onProgress(++done, batch.length);
             return [uid, uid];
           }
         })
@@ -149,15 +152,16 @@
     progress(2, `Done. ${threads.length} threads with unread replies from others.`);
 
     // 3. Get unread DMs — fetch history for each
-    progress(3, 'Fetching DMs...');
     const unreadIms = (counts.ims || []).filter((c) => c.has_unreads);
     const dms = [];
-    for (const im of unreadIms.slice(0, 10)) {
+    let dmsDone = 0;
+    const dmsTotal = unreadIms.length;
+    progress(3, dmsTotal > 0 ? `Fetching DMs... 0/${dmsTotal}` : 'Fetching DMs...');
+    for (const im of unreadIms) {
       try {
         const hist = await slackApi('conversations.history', {
           channel: im.id,
           oldest: im.last_read || '0',
-          limit: '10',
         });
         const msgs = (hist.messages || [])
           .filter((m) => m.user !== selfId)
@@ -177,25 +181,27 @@
       } catch {
         // skip failed DMs
       }
+      progress(3, `Fetching DMs... ${++dmsDone}/${dmsTotal}`);
     }
 
     progress(3, `Done. ${dms.length} DMs.`);
 
-    // 4. Get unread channel messages — most recent channels first, cap at 15
-    progress(4, 'Fetching channel messages (15 most recent)...');
+    // 4. Get unread channel messages — most recent channels first
+    progress(4, 'Fetching channel messages...');
     const unreadChannels = (counts.channels || [])
       .filter((c) => c.has_unreads)
-      .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest))
-      .slice(0, 15);
+      .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
 
     const channelPosts = [];
+    let channelsDone = 0;
+    const channelsTotal = unreadChannels.length;
+    progress(4, `Fetching channels... 0/${channelsTotal}`);
     await Promise.all(
       unreadChannels.map(async (ch) => {
         try {
           const hist = await slackApi('conversations.history', {
             channel: ch.id,
             oldest: ch.last_read,
-            limit: '5',
           });
           const msgs = (hist.messages || [])
             .filter((m) => !m.subtype || m.subtype === 'bot_message')
@@ -210,16 +216,57 @@
               reply_users: m.reply_users || [],
             }));
           if (msgs.length > 0) {
-            channelPosts.push({
+            const channelPost = {
               channel_id: ch.id,
               mention_count: ch.mention_count,
               messages: msgs,
               sort_ts: msgs[0]?.ts || '0',
-            });
+            };
+            if (msgs.length >= 4) {
+              try {
+                const deepHist = await slackApi('conversations.history', {
+                  channel: ch.id, oldest: ch.last_read, limit: '20',
+                });
+                const deepMsgs = (deepHist.messages || [])
+                  .filter((m) => !m.subtype || m.subtype === 'bot_message')
+                  .filter((m) => m.user !== selfId)
+                  .map((m) => ({
+                    user: m.user,
+                    text: extractText(m),
+                    ts: m.ts,
+                    subtype: m.subtype,
+                    bot_id: m.bot_id,
+                    reply_count: m.reply_count || 0,
+                    reply_users: m.reply_users || [],
+                  }));
+                const threadRoots = deepMsgs.filter((m) => m.reply_count > 0).slice(0, 5);
+                const deepThreads = await Promise.all(
+                  threadRoots.map(async (m) => {
+                    try {
+                      const r = await slackApi('conversations.replies', { channel: ch.id, ts: m.ts, limit: '30' });
+                      return {
+                        rootTs: m.ts,
+                        messages: (r.messages || []).slice(1).map((reply) => ({
+                          user: reply.user,
+                          text: extractText(reply),
+                          ts: reply.ts,
+                        })),
+                      };
+                    } catch { return null; }
+                  })
+                );
+                channelPost._deepAnalysis = true;
+                channelPost.fullMessages = { history: deepMsgs, threads: deepThreads.filter(Boolean) };
+              } catch {
+                // Deep fetch failed — proceed without deep analysis
+              }
+            }
+            channelPosts.push(channelPost);
           }
         } catch {
           // skip failed channels
         }
+        progress(4, `Fetching channels... ${++channelsDone}/${channelsTotal}`);
       })
     );
     channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
@@ -253,11 +300,22 @@
         collectMentions(m.text);
         (m.reply_users || []).forEach((uid) => allUserIds.push(uid));
       });
+      if (cp.fullMessages) {
+        cp.fullMessages.history.forEach((m) => {
+          if (m.user) allUserIds.push(m.user);
+          collectMentions(m.text);
+        });
+        cp.fullMessages.threads.forEach((t) => {
+          t.messages.forEach((r) => { if (r.user) allUserIds.push(r.user); });
+        });
+      }
     });
     const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
     const uncachedUserCount = uniqueUserIds.filter((uid) => !cachedUsers[uid]).length;
     progress(5, `Resolving ${uncachedUserCount} user names (${uniqueUserIds.length - uncachedUserCount} cached)...`);
-    const users = await resolveUsers(allUserIds, cachedUsers);
+    const users = await resolveUsers(allUserIds, cachedUsers, (done, total) => {
+      progress(5, `Resolving users... ${done}/${total}`);
+    });
     progress(5, `Done. ${Object.keys(users).length} users resolved.`);
 
     // 6. Get channel names for threads + channel posts
@@ -269,7 +327,11 @@
     const channels = { ...cachedChannels };
     const channelMeta = { ...cachedChannelMeta };
     const uncachedChannelIds = channelIds.filter((cid) => !channels[cid]);
-    progress(6, `Resolving ${uncachedChannelIds.length} channel names (${channelIds.length - uncachedChannelIds.length} cached)...`);
+    let channelNamesDone = 0;
+    const channelNamesTotal = uncachedChannelIds.length;
+    progress(6, channelNamesTotal > 0
+      ? `Resolving channel names... 0/${channelNamesTotal} (${channelIds.length - channelNamesTotal} cached)`
+      : `Resolving channel names (${channelIds.length} cached)...`);
     await Promise.all(
       uncachedChannelIds.map(async (cid) => {
         try {
@@ -280,6 +342,7 @@
           channels[cid] = cid;
           channelMeta[cid] = { isPrivate: false };
         }
+        progress(6, `Resolving channel names... ${++channelNamesDone}/${channelNamesTotal}`);
       })
     );
 

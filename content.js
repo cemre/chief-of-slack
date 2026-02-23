@@ -308,6 +308,30 @@ shadow.innerHTML = `
     font-size: 12px;
     border-bottom: 1px solid #363940;
   }
+  .deep-summary { font-style: italic; color: #ababad; margin-top: 4px; line-height: 1.46; }
+  .deep-type-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: #363940;
+    color: #ababad;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .show-messages-link {
+    color: #1d9bd1;
+    cursor: pointer;
+    font-size: 12px;
+    margin-top: 6px;
+    display: inline-block;
+    user-select: none;
+  }
+  .show-messages-link:hover { text-decoration: underline; }
+  .deep-messages { display: none; margin-top: 8px; }
+  .even-more-noise-section { opacity: 0.5; }
+  .even-more-noise-item { padding: 4px 24px; font-size: 12px; color: #616061; }
 </style>
 <div id="overlay">
   <header>
@@ -559,11 +583,8 @@ function renderDmItem(dm, data, cssClass) {
       <span class="item-time">${formatTime(latest.ts)}</span>
     </div>
     <div class="item-right">`;
-  for (const m of dm.messages.slice(0, 5)) {
+  for (const m of dm.messages) {
     html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
-  }
-  if (dm.messages.length > 5) {
-    html += `<div class="item-reply-count">+${dm.messages.length - 5} more</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div></div>';
@@ -590,11 +611,12 @@ function renderChannelItem(cp, data, cssClass) {
   if (cp._summary) {
     html += `<div class="item-text">${escapeHtml(cp._summary)}</div>`;
   } else {
-    for (const m of cp.messages.slice(0, 5)) {
+    const visibleMsgs = cp.messages.slice(0, 3);
+    for (const m of visibleMsgs) {
       html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
     }
-    if (cp.messages.length > 5) {
-      html += `<div class="item-reply-count">+${cp.messages.length - 5} more</div>`;
+    if (cp.messages.length > 3) {
+      html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 3} more messages</div>`;
     }
   }
   html += itemActions(cp.channel_id, latest?.ts, null, false);
@@ -602,10 +624,43 @@ function renderChannelItem(cp, data, cssClass) {
   return html;
 }
 
+function renderDeepSummarizedItem(cp, data) {
+  const ch = data.channels[cp.channel_id] || cp.channel_id;
+  const latest = cp.messages[0];
+  const typeLabels = {
+    key_update: 'Key Update',
+    decision: 'Decision',
+    heated_discussion: 'Heated Discussion',
+    needs_attention: 'Needs Attention',
+  };
+  const typeBadge = cp._deepType ? (typeLabels[cp._deepType] || cp._deepType) : '';
+  const msgs = cp.fullMessages?.history || cp.messages;
+  let messagesHtml = '';
+  for (const m of msgs.slice(0, 10)) {
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+  }
+  const deepMsgId = `deep-msgs-${cp.channel_id}`;
+  return `<div class="item noise-item">
+    <div class="item-left">
+      <span class="item-channel">#${escapeHtml(ch)}</span>
+      <span class="item-time">${formatTime(latest?.ts)}</span>
+    </div>
+    <div class="item-right">
+      <div>${typeBadge ? `<span class="deep-type-badge">${escapeHtml(typeBadge)}</span>` : ''}</div>
+      <div class="deep-summary">${escapeHtml(cp._deepSummary || '')}</div>
+      <div class="show-messages-link" data-target="${deepMsgId}">show messages ↓</div>
+      <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
+    </div>
+  </div>`;
+}
+
 function renderAnyItem(item, data, cssClass) {
   if (item._type === 'thread') return renderThreadItem(item, data, cssClass);
   if (item._type === 'dm') return renderDmItem(item, data, cssClass);
-  if (item._type === 'channel') return renderChannelItem(item, data, cssClass);
+  if (item._type === 'channel') {
+    if (item._deepSummary) return renderDeepSummarizedItem(item, data);
+    return renderChannelItem(item, data, cssClass);
+  }
   return '';
 }
 
@@ -652,6 +707,10 @@ function applyPreFilters(data) {
 
     // All-bot messages → whenFree if 3+ replies, noise with summary otherwise (drop if no text)
     if (cp.messages.every(isBot)) {
+      if (cp._deepAnalysis) {
+        noise.push(cp); // deep summarization path will handle it
+        continue;
+      }
       const hasEngagement = cp.messages.some((m) => (m.reply_count || 0) >= 3);
       if (hasEngagement) {
         const replierIds = [...new Set(
@@ -667,7 +726,7 @@ function applyPreFilters(data) {
           .map((m) => cleanSlackText(m.text || '', users))
           .filter(Boolean);
         if (texts.length > 0) {
-          cp._summary = texts[0].slice(0, 140);
+          cp._summary = texts[0];
           noise.push(cp);
         }
       }
@@ -755,16 +814,21 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 
   function place(item, cat) {
     const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm' || item._isDmThread;
+    const isDm = item._type === 'dm' || item._isDmThread;
+    const isMentioned = item._isMentioned || (item.mention_count > 0) || false;
+    const isQualified = isDm || isPrivate || isMentioned;
     const userReplied = item._userReplied || false;
+
+    // Hard gate: only DMs, private channels, or @mentions can reach act_now/priority
+    if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
 
     if (cat === 'act_now') { actNow.push(item); return; }
     if (cat === 'priority') { priority.push(item); return; }
 
     if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
-    if (cat === 'drop' && !isPrivate) return;
+    if (cat === 'drop') return;
     if (cat === 'noise' && isPrivate) { whenFree.push(item); return; }
     if (cat === 'when_free') { whenFree.push(item); return; }
-    if (cat === 'drop') { whenFree.push(item); return; }
     noise.push(item);
   }
 
@@ -776,7 +840,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 }
 
 // ── Render prioritized view ──
-function renderPrioritized(prioritized, data, popular, loading = false) {
+function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false) {
   const { actNow, priority, whenFree, noise } = prioritized;
   let html = '';
 
@@ -833,8 +897,13 @@ function renderPrioritized(prioritized, data, popular, loading = false) {
     html += '</div></section>';
   }
 
+  // Deep-noise loading placeholder / results area
+  if (deepNoiseLoading) {
+    html += '<div id="deep-noise-area"><div class="section-toggle" style="color:#3d3f42;cursor:default">Analyzing busy channels...</div></div>';
+  }
+
   // All clear
-  if (!loading && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
+  if (!loading && !deepNoiseLoading && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
     html += '<div id="status">All clear — nothing needs your attention.</div>';
   }
 
@@ -985,6 +1054,23 @@ bodyEl.addEventListener('click', (e) => {
   // Send reply via postMessage
   const sendBtn = e.target.closest('.reply-send');
   if (sendBtn) return; // handled by direct listener above
+
+  // Show/hide full messages for deep-summarized items
+  const showMsgsLink = e.target.closest('.show-messages-link');
+  if (showMsgsLink) {
+    const targetId = showMsgsLink.dataset.target;
+    const msgsDiv = shadow.getElementById(targetId);
+    if (msgsDiv) {
+      if (msgsDiv.style.display === 'block') {
+        msgsDiv.style.display = 'none';
+        showMsgsLink.textContent = 'show messages ↓';
+      } else {
+        msgsDiv.style.display = 'block';
+        showMsgsLink.textContent = 'hide messages ↑';
+      }
+    }
+    return;
+  }
 
   // Seen replies lazy load
   const toggle = e.target.closest('.seen-replies-toggle');
@@ -1244,8 +1330,95 @@ function prioritizeAndRender(data) {
       }
 
       const prioritized = mapPriorities(response.priorities, forLlm, preFiltered.noise, preFiltered.whenFree, data);
-      renderPrioritized(prioritized, data, pendingPopular);
-      saveViewCache(data, pendingPopular, prioritized);
+      const regularNoise = prioritized.noise.filter((item) => !item._deepAnalysis);
+      const deepNoise = prioritized.noise.filter((item) => item._deepAnalysis);
+
+      if (deepNoise.length === 0) {
+        renderPrioritized(prioritized, data, pendingPopular);
+        saveViewCache(data, pendingPopular, prioritized);
+        return;
+      }
+
+      // Render main sections; deep-noise area shows loading indicator
+      renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, true);
+
+      // Serialize deep noise for summarization
+      const summarizeItems = deepNoise.map((cp, i) => {
+        const ch = data.channels[cp.channel_id] || cp.channel_id;
+        return {
+          id: `channel_${i}`,
+          channel: ch,
+          messageCount: (cp.fullMessages?.history || cp.messages).length,
+          history: (cp.fullMessages?.history || cp.messages).slice(0, 15).map((m) => ({
+            user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
+            text: plainTruncate(m.text, 200, data.users),
+          })),
+          threads: (cp.fullMessages?.threads || []).map((t) => ({
+            messages: t.messages.slice(0, 10).map((r) => ({
+              user: uname(r.user, data.users),
+              text: plainTruncate(r.text, 200, data.users),
+            })),
+          })),
+        };
+      });
+
+      chrome.runtime.sendMessage({ type: `${FSLACK}:summarize`, data: summarizeItems }, (sumResponse) => {
+        const deepNoiseArea = shadow.getElementById('deep-noise-area');
+        if (!deepNoiseArea) return;
+
+        if (chrome.runtime.lastError || sumResponse?.error) {
+          // Fallback: render deep noise items as regular noise
+          let fallbackHtml = '';
+          for (const item of deepNoise) fallbackHtml += renderAnyItem(item, data, 'noise-item');
+          deepNoiseArea.innerHTML = fallbackHtml;
+          saveViewCache(data, pendingPopular, { ...prioritized, noise: [...regularNoise, ...deepNoise] });
+          return;
+        }
+
+        const summaries = sumResponse.summaries || {};
+        const summarizedItems = [];
+        const evenMoreNoise = [];
+        deepNoise.forEach((cp, i) => {
+          const result = summaries[`channel_${i}`];
+          if (result?.relevant) {
+            cp._deepSummary = result.summary;
+            cp._deepType = result.type;
+            summarizedItems.push(cp);
+          } else {
+            evenMoreNoise.push(cp);
+          }
+        });
+
+        let deepHtml = '';
+        for (const item of summarizedItems) deepHtml += renderDeepSummarizedItem(item, data);
+        if (evenMoreNoise.length > 0) {
+          deepHtml += '<section class="priority-section even-more-noise-section">';
+          deepHtml += `<div class="section-toggle" id="even-more-noise-toggle">Show ${evenMoreNoise.length} lower-signal channel${evenMoreNoise.length === 1 ? '' : 's'}</div>`;
+          deepHtml += '<div class="noise-items" id="even-more-noise-items">';
+          for (const cp of evenMoreNoise) {
+            const ch = data.channels[cp.channel_id] || cp.channel_id;
+            const msgCount = (cp.fullMessages?.history || cp.messages).length;
+            deepHtml += `<div class="even-more-noise-item">#${escapeHtml(ch)} — ${msgCount} message${msgCount === 1 ? '' : 's'}</div>`;
+          }
+          deepHtml += '</div></section>';
+        }
+        deepNoiseArea.innerHTML = deepHtml;
+
+        // Wire even-more-noise toggle
+        const emnToggle = shadow.getElementById('even-more-noise-toggle');
+        const emnItems = shadow.getElementById('even-more-noise-items');
+        if (emnToggle && emnItems) {
+          emnToggle.addEventListener('click', () => {
+            const expanded = emnItems.classList.toggle('expanded');
+            const count = evenMoreNoise.length;
+            emnToggle.textContent = expanded
+              ? `Hide ${count} lower-signal channel${count === 1 ? '' : 's'}`
+              : `Show ${count} lower-signal channel${count === 1 ? '' : 's'}`;
+          });
+        }
+
+        saveViewCache(data, pendingPopular, { ...prioritized, noise: [...regularNoise, ...summarizedItems] });
+      });
     }
   );
 }
