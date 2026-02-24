@@ -1968,12 +1968,23 @@ async function kickoffVipSection(data) {
     hasContent = true;
     const latestTs = vip.messages[0]?.ts;
     const msgId = `vip-msgs-${i}`;
-    let messagesHtml = '';
+    // Group messages by channel
+    const byChannel = new Map();
     for (const m of vip.messages) {
-      const channelLabel = m.permalink
-        ? `<a href="${escapeHtml(m.permalink)}" target="_blank" style="color:#616061">#${escapeHtml(m.channel_name || '?')}</a>`
-        : `#${escapeHtml(m.channel_name || '?')}`;
-      messagesHtml += `<div class="item-text"><span style="font-size:11px">${channelLabel}</span> ${formatSlackHtml(m.text || '', data?.users)}</div>`;
+      const key = m.channel_id || m.channel_name || '?';
+      if (!byChannel.has(key)) byChannel.set(key, { name: m.channel_name || '?', permalink: m.permalink, messages: [] });
+      byChannel.get(key).messages.push(m);
+    }
+    let messagesHtml = '';
+    for (const [, ch] of byChannel) {
+      const channelLabel = ch.permalink
+        ? `<a href="${escapeHtml(ch.permalink.replace(/\/p\d+$/, ''))}" target="_blank" style="color:#616061">#${escapeHtml(ch.name)}</a>`
+        : `#${escapeHtml(ch.name)}`;
+      messagesHtml += `<div style="margin-top:4px"><span style="font-size:11px">${channelLabel}</span><ul style="margin:2px 0 0;padding-left:18px">`;
+      for (const m of ch.messages) {
+        messagesHtml += `<li class="item-text" style="margin:1px 0">${formatSlackHtml(m.text || '', data?.users)}</li>`;
+      }
+      messagesHtml += '</ul></div>';
     }
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
