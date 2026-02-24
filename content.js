@@ -899,7 +899,8 @@ function renderChannelItem(cp, data, cssClass) {
   html += `</div>
     <div class="item-right">`;
   if (cp._summary) {
-    html += `<div class="item-text">${escapeHtml(cp._summary)}</div>`;
+    const zendesk = extractZendeskSummary(cp._summary);
+    html += `<div class="item-text">${escapeHtml(zendesk || cp._summary)}</div>`;
   } else {
     const visibleMsgs = cp.messages.slice(0, 3);
     for (const m of visibleMsgs) {
@@ -2474,27 +2475,41 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// Auto-show on load — load persisted cache first, then show
+// Auto-show on load — only when opened via ?fslack bookmark
+// Use the original navigation URL (immune to SPA replaceState rewrites)
+const _navUrl = (() => {
+  try {
+    const entry = performance.getEntriesByType('navigation')[0];
+    if (entry?.name) return new URL(entry.name);
+  } catch {}
+  return new URL(window.location.href);
+})();
+const _autoShow = _navUrl.searchParams.has('fslack');
+
 window.addEventListener('message', (event) => {
   if (event.source === window && event.data?.type === `${FSLACK}:ready`) {
     injectReady = true;
     if (visible && !showFromCache()) startFetch();
   }
 });
-const _hideOnce = localStorage.getItem('fslack_hide_once');
-if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
-  localStorage.removeItem('fslack_hide_once');
-} else if (sessionStorage.getItem('fslack_hide')) {
-  sessionStorage.removeItem('fslack_hide');
+if (!_autoShow) {
+  // No ?fslack param — don't auto-show (toggle still works via shortcut/icon)
 } else {
-  // Load persisted view cache, timestamp, and saved messages before showing
-  chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen'], (result) => {
-    if (result.fslackViewCache && !cachedView) {
-      cachedView = result.fslackViewCache;
-    }
-    persistedFetchTs = result.fslackLastFetchTs || 0;
-    savedMsgKeys = new Set(result.fslackSavedMsgs || []);
-    vipSeenTimestamps = result.fslackVipSeen || {};
-    show();
-  });
+  const _hideOnce = localStorage.getItem('fslack_hide_once');
+  if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
+    localStorage.removeItem('fslack_hide_once');
+  } else if (sessionStorage.getItem('fslack_hide')) {
+    sessionStorage.removeItem('fslack_hide');
+  } else {
+    // Load persisted view cache, timestamp, and saved messages before showing
+    chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen'], (result) => {
+      if (result.fslackViewCache && !cachedView) {
+        cachedView = result.fslackViewCache;
+      }
+      persistedFetchTs = result.fslackLastFetchTs || 0;
+      savedMsgKeys = new Set(result.fslackSavedMsgs || []);
+      vipSeenTimestamps = result.fslackVipSeen || {};
+      show();
+    });
+  }
 }
