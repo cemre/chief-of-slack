@@ -372,6 +372,7 @@ shadow.innerHTML = `
     align-items: flex-start;
     position: relative;
   }
+  .msg-row + .msg-row { margin-top: 1em; }
   .msg-content { flex: 1; min-width: 0; padding-right: 66px; }
   .msg-actions {
     position: absolute;
@@ -490,6 +491,21 @@ shadow.innerHTML = `
   .file-video-placeholder .file-video-name { color: #ababad; font-size: 11px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-link { display: inline-block; color: #1d9bd1; font-size: 12px; text-decoration: none; padding: 2px 0; }
   .file-link:hover { text-decoration: underline; }
+
+  /* Lightbox */
+  #lightbox { display: none; position: fixed; inset: 0; z-index: 9999999; }
+  #lightbox.open { display: flex; align-items: center; justify-content: center; }
+  .lb-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.85); }
+  .lb-close { position: absolute; top: 12px; right: 16px; color: #fff; font-size: 28px; cursor: pointer; z-index: 2; line-height: 1; opacity: 0.7; background: none; border: none; }
+  .lb-close:hover { opacity: 1; }
+  .lb-counter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); color: #ababad; font-size: 13px; z-index: 2; user-select: none; }
+  .lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); color: #fff; font-size: 32px; cursor: pointer; z-index: 2; opacity: 0.5; background: none; border: none; padding: 16px; user-select: none; }
+  .lb-arrow:hover { opacity: 1; }
+  .lb-arrow.prev { left: 8px; }
+  .lb-arrow.next { right: 8px; }
+  .lb-media { position: relative; z-index: 1; max-width: 90vw; max-height: 88vh; display: flex; align-items: center; justify-content: center; }
+  .lb-media img { max-width: 90vw; max-height: 88vh; object-fit: contain; border-radius: 4px; }
+  .lb-media video { max-width: 90vw; max-height: 88vh; border-radius: 4px; outline: none; }
 </style>
 <div id="overlay">
   <header>
@@ -502,6 +518,14 @@ shadow.innerHTML = `
   <div id="body">
     <div id="status">Starting fetch...</div>
   </div>
+</div>
+<div id="lightbox">
+  <div class="lb-backdrop"></div>
+  <button class="lb-close">&times;</button>
+  <div class="lb-counter"></div>
+  <button class="lb-arrow prev">&#8249;</button>
+  <button class="lb-arrow next">&#8250;</button>
+  <div class="lb-media"></div>
 </div>
 `;
 
@@ -519,6 +543,66 @@ function updateLastUpdated() {
   else lastUpdatedEl.textContent = `${Math.floor(secs / 60)}m ago`;
   lastUpdatedEl.classList.toggle('stale', secs >= 300);
 }
+
+// ── Lightbox ──
+const lightbox = shadow.getElementById('lightbox');
+const lbMedia = lightbox.querySelector('.lb-media');
+const lbCounter = lightbox.querySelector('.lb-counter');
+let lbItems = []; // [{ url, type:'image'|'video' }]
+let lbIndex = 0;
+
+function lbShow(items, index) {
+  lbItems = items;
+  lbIndex = index;
+  lbRender();
+  lightbox.classList.add('open');
+  document.addEventListener('keydown', lbKeyHandler, true);
+}
+
+function lbClose() {
+  lightbox.classList.remove('open');
+  const vid = lbMedia.querySelector('video');
+  if (vid) vid.pause();
+  lbMedia.innerHTML = '';
+  lbItems = [];
+  document.removeEventListener('keydown', lbKeyHandler, true);
+}
+
+function lbRender() {
+  const vid = lbMedia.querySelector('video');
+  if (vid) vid.pause();
+  const item = lbItems[lbIndex];
+  if (!item) return;
+  if (item.type === 'video') {
+    lbMedia.innerHTML = `<video src="${escapeHtml(item.url)}" controls autoplay playsinline></video>`;
+  } else {
+    lbMedia.innerHTML = `<img src="${escapeHtml(item.url)}">`;
+  }
+  lbCounter.textContent = lbItems.length > 1 ? `${lbIndex + 1} / ${lbItems.length}` : '';
+  lightbox.querySelector('.lb-arrow.prev').style.display = lbItems.length > 1 ? '' : 'none';
+  lightbox.querySelector('.lb-arrow.next').style.display = lbItems.length > 1 ? '' : 'none';
+}
+
+function lbNav(dir) {
+  if (lbItems.length < 2) return;
+  lbIndex = (lbIndex + dir + lbItems.length) % lbItems.length;
+  lbRender();
+}
+
+function lbKeyHandler(e) {
+  if (e.key === 'Escape') { e.stopPropagation(); lbClose(); }
+  else if (e.key === 'ArrowLeft') { e.stopPropagation(); lbNav(-1); }
+  else if (e.key === 'ArrowRight') { e.stopPropagation(); lbNav(1); }
+  else if (e.key === ' ') {
+    const vid = lbMedia.querySelector('video');
+    if (vid) { e.preventDefault(); e.stopPropagation(); vid.paused ? vid.play() : vid.pause(); }
+  }
+}
+
+lightbox.querySelector('.lb-backdrop').addEventListener('click', lbClose);
+lightbox.querySelector('.lb-close').addEventListener('click', lbClose);
+lightbox.querySelector('.lb-arrow.prev').addEventListener('click', () => lbNav(-1));
+lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1));
 
 const closeBtn = shadow.getElementById('close-btn');
 shadow.getElementById('refresh-link').addEventListener('click', startFetch);
@@ -769,7 +853,7 @@ function renderFiles(files) {
     const name = escapeHtml(f.name || 'file');
     if ((isImage || isVideo) && f.thumb) {
       const href = f.url || f.thumb;
-      html += `<a class="file-thumb" href="${escapeHtml(href)}" target="_blank" rel="noopener">`;
+      html += `<a class="file-thumb" href="${escapeHtml(href)}" data-lb-url="${escapeHtml(href)}" data-lb-type="${isVideo ? 'video' : 'image'}" target="_blank" rel="noopener">`;
       html += `<img src="${escapeHtml(f.thumb)}" alt="${name}" loading="lazy">`;
       if (isVideo) html += '<span class="file-video-badge">VIDEO</span>';
       html += '</a>';
@@ -1377,6 +1461,18 @@ let lastRenderData = null;
 let replyRequestId = 0;
 
 bodyEl.addEventListener('click', (e) => {
+  // Lightbox: intercept clicks on media thumbnails
+  const thumb = e.target.closest('.file-thumb[data-lb-url]');
+  if (thumb) {
+    e.preventDefault();
+    const container = thumb.closest('.msg-files');
+    const allThumbs = container ? [...container.querySelectorAll('.file-thumb[data-lb-url]')] : [thumb];
+    const items = allThumbs.map(el => ({ url: el.dataset.lbUrl, type: el.dataset.lbType || 'image' }));
+    const idx = allThumbs.indexOf(thumb);
+    lbShow(items, idx >= 0 ? idx : 0);
+    return;
+  }
+
   // Let links in messages open normally
   if (e.target.closest('a[href]')) return;
 
