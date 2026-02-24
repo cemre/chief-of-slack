@@ -96,7 +96,7 @@ async function handlePrioritize(payload, selfName) {
 // ── Build single-channel summarization prompt ──
 function buildSummarizePrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `Summarize what's happening in this Slack channel in 1-2 sentences, and pick the best type.
+  return `Summarize what happened in this Slack channel in 1-3 terse clauses, and pick the best type.
 
 Channel: #${item.channel}
 
@@ -106,11 +106,18 @@ Types:
 - "heated_discussion": back-and-forth debate
 - "needs_attention": something requires action
 - "feedback_digest": user feedback, bug reports, or support tickets (e.g. Zendesk)
-- "activity_digest": automated activity feed (e.g. Linear, GitHub, Jira) — summarize active work areas or people involved
+- "activity_digest": automated activity feed (e.g. Linear, GitHub, Jira)
 
-If multiple people are discussing something, name them and describe the back-and-forth.
-For bot/automated channels, summarize the themes, active areas, or people mentioned.
-Use first names when available.
+FORMAT: Write the summary as short clauses joined by semicolons.
+Each clause = [first name] [action verb] [specific thing].
+Name the actual artifact, outcome, or content — not a vague category.
+
+Bad: "Matthew is coordinating end-of-week updates"
+Bad: "Cory introducing a new CLI tool and flagging policy updates"
+Good: "matthew merged a PR that fixes auth timeouts; cory shipped an org-admin CLI for provisioning and flagged that golden-triangle needs legal/policy sign-off"
+
+For automated channels, name the specific repos, tickets, or people involved.
+Omit filler. Use first names only. No passive voice.
 
 MESSAGES:
 ${serialized}

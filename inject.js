@@ -501,7 +501,7 @@
     if (msgType === `${FSLACK}:saveMessage`) {
       const { channel, ts, requestId } = event.data;
       try {
-        await slackApi('stars.add', { channel, timestamp: ts });
+        await slackApi('saved.add', { channel, timestamp: ts, item_type: 'message', date_created: Math.floor(Date.now() / 1000), due: '', complete: 'false' });
         window.postMessage({ type: `${FSLACK}:saveResult`, requestId, ok: true }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:saveResult`, requestId, ok: false }, '*');

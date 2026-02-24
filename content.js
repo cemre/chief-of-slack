@@ -529,8 +529,8 @@ function extractZendeskSummary(text) {
   const idx = text.indexOf('Request Summary');
   if (idx === -1) return null;
   let after = text.slice(idx + 'Request Summary'.length).replace(/^[\s:]+/, '');
-  const newline = after.indexOf('\n');
-  if (newline !== -1) after = after.slice(0, newline);
+  const endIdx = after.search(/\n| \*/);
+  if (endIdx !== -1) after = after.slice(0, endIdx);
   return after.trim() || null;
 }
 
@@ -1197,9 +1197,15 @@ bodyEl.addEventListener('click', (e) => {
   const saveBtn = e.target.closest('.action-save');
   if (saveBtn && !saveBtn.classList.contains('saved')) {
     const { channel, ts } = saveBtn.dataset;
-    saveBtn.style.opacity = '0.4';
+    // Save locally immediately so the icon fills right away
+    saveBtn.classList.add('saved');
+    const svgPath = saveBtn.querySelector('svg path');
+    if (svgPath) svgPath.setAttribute('fill', 'currentColor');
+    const key = `${channel}:${ts}`;
+    savedMsgKeys.add(key);
+    chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
+    // Best-effort sync to Slack in background
     window.postMessage({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` }, '*');
-    saveBtn.dataset.pending = 'true';
     return;
   }
 
@@ -1468,19 +1474,7 @@ window.addEventListener('message', (event) => {
   }
 
   if (msg.type === `${FSLACK}:saveResult`) {
-    const btn = bodyEl.querySelector('.action-save[data-pending="true"]');
-    if (btn) {
-      delete btn.dataset.pending;
-      btn.style.opacity = '';
-      if (msg.ok) {
-        btn.classList.add('saved');
-        const svg = btn.querySelector('svg path');
-        if (svg) svg.setAttribute('fill', 'currentColor');
-        const key = `${btn.dataset.channel}:${btn.dataset.ts}`;
-        savedMsgKeys.add(key);
-        chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
-      }
-    }
+    // DOM already updated on click; nothing to do here
   }
 
   if (msg.type === `${FSLACK}:markReadResult`) {
@@ -2131,11 +2125,12 @@ if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
 } else if (sessionStorage.getItem('fslack_hide')) {
   sessionStorage.removeItem('fslack_hide');
 } else {
-  // Load persisted view cache before showing — avoids unnecessary fetch
-  chrome.storage.local.get('fslackViewCache', (result) => {
+  // Load persisted view cache and saved messages before showing
+  chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs'], (result) => {
     if (result.fslackViewCache && !cachedView) {
       cachedView = result.fslackViewCache;
     }
+    savedMsgKeys = new Set(result.fslackSavedMsgs || []);
     show();
   });
 }
