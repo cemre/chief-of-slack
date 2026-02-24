@@ -280,12 +280,25 @@ shadow.innerHTML = `
     font-size: 12px;
     font-weight: 600;
     color: #1d9bd1;
-    margin-left: 0;
+    margin-left: 8px;
     vertical-align: -2px;
     cursor: pointer;
   }
   .msg-thread-badge:hover { text-decoration: underline; }
   .msg-thread-badge svg { flex-shrink: 0; }
+  .msg-thread-badge.loading { color: #565856; cursor: wait; }
+  .msg-thread-badge.expanded { color: #ababad; }
+  .thread-replies-container:empty {
+    display: none;
+  }
+  .thread-replies-container {
+    margin-top: 2px;
+    margin-bottom: 16px;
+    font-size: 12px;
+    width: 100%;
+  }
+  .thread-replies-container .msg-row + .msg-row { margin-top: 5px; }
+  .thread-replies-container .item-reply { margin-top: 0; }
   .item-reply {
     margin-top: 6px;
     padding-left: 12px;
@@ -383,6 +396,7 @@ shadow.innerHTML = `
   .seen-replies-container .item-reply { color: #717274; }
   .msg-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
     position: relative;
   }
@@ -929,6 +943,11 @@ function threadBadge(m, channel) {
   return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${m.ts}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>${n} ${n === 1 ? 'reply' : 'replies'}</span>`;
 }
 
+function threadRepliesContainer(m, channel) {
+  if (!m.reply_count) return '';
+  return `<div class="thread-replies-container" data-channel="${channel}" data-ts="${m.ts}"></div>`;
+}
+
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
 function msgActions(channel, ts) {
   const saved = savedMsgKeys.has(`${channel}:${ts}`);
@@ -1048,7 +1067,7 @@ function renderChannelItem(cp, data, cssClass) {
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -1079,7 +1098,7 @@ function renderDeepSummarizedItem(cp, data) {
     : formatTime(newestTs);
   let messagesHtml = '';
   for (const m of msgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -1135,7 +1154,7 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   let messagesHtml = '';
   for (const m of allMsgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
   }
 
   let contentHtml;
@@ -1629,12 +1648,42 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Thread badge: open thread in a new tab
+  // Thread badge: expand replies inline (shift/meta-click opens in new tab)
   const threadBadgeEl = e.target.closest('.msg-thread-badge');
   if (threadBadgeEl) {
     const { channel, ts } = threadBadgeEl.dataset;
-    localStorage.setItem('fslack_hide_once', Date.now());
-    window.open(`/archives/${channel}/p${ts.replace('.', '')}`, '_blank');
+
+    // Modifier click → open in Slack as before
+    if (e.shiftKey || e.metaKey || e.ctrlKey || e.button === 1) {
+      localStorage.setItem('fslack_hide_once', Date.now());
+      window.open(`/archives/${channel}/p${ts.replace('.', '')}`, '_blank');
+      return;
+    }
+
+    const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+    if (!container) return;
+
+    // Already loaded → toggle visibility
+    if (threadBadgeEl.classList.contains('expanded')) {
+      const isVisible = container.style.display !== 'none';
+      container.style.display = isVisible ? 'none' : '';
+      const n = parseInt(container.dataset.count, 10) || 0;
+      const svg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+      threadBadgeEl.innerHTML = isVisible
+        ? `${svg}${n} ${n === 1 ? 'reply' : 'replies'}`
+        : `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}`;
+      return;
+    }
+
+    // Loading in progress → ignore
+    if (threadBadgeEl.classList.contains('loading')) return;
+
+    // First click → fetch replies
+    threadBadgeEl.classList.add('loading');
+    threadBadgeEl.textContent = 'Loading...';
+    const reqId = `thread_${++replyRequestId}`;
+    threadBadgeEl.dataset.requestId = reqId;
+    window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
     return;
   }
 
@@ -2007,42 +2056,76 @@ window.addEventListener('message', (event) => {
   if (event.data?.type !== `${FSLACK}:repliesResult`) return;
 
   const { requestId, replies } = event.data;
+
+  // ── Seen-replies toggle (thread items) ──
   const toggle = bodyEl.querySelector(`.seen-replies-toggle[data-request-id="${requestId}"]`);
-  if (!toggle) return;
+  if (toggle) {
+    const channel = toggle.dataset.channel;
+    const ts = toggle.dataset.ts;
+    const container = bodyEl.querySelector(`.seen-replies-container[data-for="${channel}-${ts}"]`);
+    if (!container) return;
 
-  const channel = toggle.dataset.channel;
-  const ts = toggle.dataset.ts;
-  const container = bodyEl.querySelector(`.seen-replies-container[data-for="${channel}-${ts}"]`);
-  if (!container) return;
+    const data = lastRenderData;
+    const unreadTs = new Set((toggle.dataset.unreadTs || '').split(',').filter(Boolean));
 
-  const data = lastRenderData;
-  const unreadTs = new Set((toggle.dataset.unreadTs || '').split(',').filter(Boolean));
+    // Show only seen replies (exclude unread ones already displayed below)
+    const seenReplies = replies.filter((r) => !unreadTs.has(r.ts));
 
-  // Show only seen replies (exclude unread ones already displayed below)
-  const seenReplies = replies.filter((r) => !unreadTs.has(r.ts));
+    let html = '';
+    for (const r of seenReplies) {
+      const userName = data ? uname(r.user, data.users) : r.user;
+      html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 400, data?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(channel, r.ts)}</div>`;
+    }
+    container.innerHTML = html;
 
-  let html = '';
-  for (const r of seenReplies) {
-    const userName = data ? uname(r.user, data.users) : r.user;
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(channel, r.ts)}</div>`;
+    toggle.classList.remove('loading');
+    toggle.classList.add('expanded');
+    const count = seenReplies.length;
+    toggle.textContent = count > 0
+      ? `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`
+      : 'No earlier replies';
+
+    // Toggle collapse on re-click
+    toggle.addEventListener('click', function collapseHandler() {
+      const isVisible = container.style.display !== 'none';
+      container.style.display = isVisible ? 'none' : '';
+      toggle.textContent = isVisible
+        ? `${count} earlier ${count === 1 ? 'reply' : 'replies'}`
+        : `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`;
+    });
+    return;
   }
-  container.innerHTML = html;
 
-  toggle.classList.remove('loading');
-  toggle.classList.add('expanded');
-  const count = seenReplies.length;
-  toggle.textContent = count > 0
-    ? `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`
-    : 'No earlier replies';
+  // ── Thread badge inline expand (channel posts) ──
+  const badge = bodyEl.querySelector(`.msg-thread-badge[data-request-id="${requestId}"]`);
+  if (badge) {
+    const channel = badge.dataset.channel;
+    const ts = badge.dataset.ts;
+    const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+    if (!container) return;
 
-  // Toggle collapse on re-click
-  toggle.addEventListener('click', function collapseHandler() {
-    const isVisible = container.style.display !== 'none';
-    container.style.display = isVisible ? 'none' : '';
-    toggle.textContent = isVisible
-      ? `${count} earlier ${count === 1 ? 'reply' : 'replies'}`
-      : `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`;
-  });
+    const data = lastRenderData;
+    // conversations.replies returns root message at index 0 — skip it
+    const threadReplies = replies.filter((r) => r.ts !== ts);
+
+    let html = '';
+    for (const r of threadReplies) {
+      const userName = data ? uname(r.user, data.users) : r.user;
+      html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 400, data?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(channel, r.ts)}</div>`;
+    }
+    container.innerHTML = html;
+    container.style.display = '';
+    container.dataset.count = threadReplies.length;
+
+    badge.classList.remove('loading');
+    badge.classList.add('expanded');
+    const n = threadReplies.length;
+    const svg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+    badge.innerHTML = n > 0
+      ? `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}`
+      : `${svg}No replies`;
+    return;
+  }
 });
 
 // ── Send reply helper ──
