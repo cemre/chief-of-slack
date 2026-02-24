@@ -519,6 +519,7 @@ let persistedFetchTs = 0; // lightweight timestamp that always persists to stora
 let noiseChannels = {};      // { [channelId]: channelName } — always force to noise
 let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
+let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
 let customEmojiMap = null;
 
 // Preload custom emoji from cache for instant render on showFromCache()
@@ -563,10 +564,11 @@ function startFetch() {
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
   resetFetchState();
   // Load cached names and pass to inject.js
-  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
+    vipSeenTimestamps = cached.fslackVipSeen || {};
     const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
     const cachedEmoji = (cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS)
       ? (cached.fslackEmoji || {}) : null;
@@ -1252,7 +1254,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Saved items (last 72h, collapsed by default)
   if (savedItems && savedItems.length > 0) {
     html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="saved-items-toggle">Show ${savedItems.length} saved item${savedItems.length === 1 ? '' : 's'}</div>`;
+    html += `<div class="section-toggle" id="saved-items-toggle">${savedItems.length} saved item${savedItems.length === 1 ? '' : 's'} ↓</div>`;
     html += '<div class="saved-items-list" id="saved-items-list">';
     for (const item of savedItems) html += renderSavedItem(item, data);
     html += '</div>';
@@ -1266,7 +1268,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
     html += '<section class="priority-section">';
     if (noiseRecent.length > 0 || deepNoiseLoading) {
-      html += `<div class="section-toggle" id="noise-recent-toggle">Show ${noiseRecent.length} recent noise item${noiseRecent.length === 1 ? '' : 's'}</div>`;
+      html += `<div class="section-toggle" id="noise-recent-toggle">${noiseRecent.length} recent noise item${noiseRecent.length === 1 ? '' : 's'} ↓</div>`;
       html += '<div class="noise-items" id="noise-recent-items">';
       for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
       if (deepNoiseLoading) {
@@ -1278,7 +1280,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     // Always render older section when deepNoiseLoading so it's ready to receive items; hide if empty
     if (noiseOlder.length > 0 || deepNoiseLoading) {
       const olderHidden = noiseOlder.length === 0;
-      html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Show ${noiseOlder.length} older noise item${noiseOlder.length === 1 ? '' : 's'}</div>`;
+      html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>${noiseOlder.length} older noise item${noiseOlder.length === 1 ? '' : 's'} ↓</div>`;
       html += '<div class="noise-items" id="noise-older-items">';
       for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
       html += `<div class="noise-section-footer" id="noise-older-footer"${olderHidden ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
@@ -1295,7 +1297,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // VIP section placeholder (filled in async by kickoffVipSection)
   if (!loading) {
     html += `<div id="vip-area">
-  <div class="section-toggle" id="vip-toggle">Creeping on VIPs ↓</div>
+  <div class="section-toggle" id="vip-toggle">Creep on VIPs ↓</div>
   <div id="vip-items" style="display:none"></div>
 </div>`;
   }
@@ -1311,7 +1313,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       toggle.addEventListener('click', () => {
         const expanded = items.classList.toggle('expanded');
         const count = items.querySelectorAll('.item').length;
-        toggle.textContent = `${expanded ? 'Hide' : 'Show'} ${count} ${label}${count === 1 ? '' : 's'}`;
+        toggle.textContent = `${count} ${label}${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
       });
     }
   }
@@ -1350,10 +1352,10 @@ bodyEl.addEventListener('click', (e) => {
     const isExpanded = vipItems.style.display !== 'none';
     if (isExpanded) {
       vipItems.style.display = 'none';
-      vipToggle.textContent = 'Creeping on VIPs ↓';
+      vipToggle.textContent = 'Creep on VIPs ↓';
     } else {
       vipItems.style.display = '';
-      vipToggle.textContent = 'Creeping on VIPs ↑';
+      vipToggle.textContent = 'Creep on VIPs ↑';
       if (!vipItems.dataset.loaded) {
         vipItems.innerHTML = '<div style="padding:8px 24px;font-size:12px;color:#3d3f42">Loading VIP activity...</div>';
         window.postMessage({ type: `${FSLACK}:fetchVips` }, '*');
@@ -1548,6 +1550,19 @@ bodyEl.addEventListener('click', (e) => {
   // Send reply via postMessage
   const sendBtn = e.target.closest('.reply-send');
   if (sendBtn) return; // handled by direct listener above
+
+  // Mark VIP as seen — hide their messages until new ones arrive
+  const vipSeenBtn = e.target.closest('.vip-mark-seen');
+  if (vipSeenBtn) {
+    const vipName = vipSeenBtn.dataset.vipName;
+    const maxTs = vipSeenBtn.dataset.maxTs;
+    if (vipName && maxTs) {
+      vipSeenTimestamps[vipName] = maxTs;
+      chrome.storage.local.set({ fslackVipSeen: vipSeenTimestamps });
+      vipSeenBtn.closest('.item')?.remove();
+    }
+    return;
+  }
 
   // Show/hide full messages for deep-summarized items
   const showMsgsLink = e.target.closest('.show-messages-link[data-target]');
@@ -1875,14 +1890,17 @@ async function kickoffVipSection(data) {
   const vipArea = shadow.getElementById('vip-items');
   if (!vipArea) return;
 
-  // Filter out messages the user has already read in that channel
+  // Filter out messages the user has already read in that channel, or manually dismissed
   const filteredVips = vips.map((v) => ({
     ...v,
     messages: v.messages.filter((m) => {
       if (!m.channel_id || !data?.lastRead) return true;
       const lr = data.lastRead[m.channel_id];
       if (!lr) return true;
-      return parseFloat(m.ts) > parseFloat(lr);
+      if (parseFloat(m.ts) <= parseFloat(lr)) return false;
+      const seenTs = vipSeenTimestamps[v.name];
+      if (seenTs && parseFloat(m.ts) <= parseFloat(seenTs)) return false;
+      return true;
     }),
   }));
 
@@ -1920,7 +1938,7 @@ async function kickoffVipSection(data) {
     return { vip, result: response?.summary };
   }));
 
-  let vipHtml = '<section class="priority-section"><h2 style="color:#ab7ae0">Creeping on VIPs</h2>';
+  let vipHtml = '<section class="priority-section"><h2 style="color:#ab7ae0">Creep on VIPs</h2>';
   let hasContent = false;
   for (let i = 0; i < summaries.length; i++) {
     const { vip, result } = summaries[i];
@@ -1942,7 +1960,10 @@ async function kickoffVipSection(data) {
       </div>
       <div class="item-right">
         <ul class="deep-summary">${(result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>
-        <span class="show-messages-link" data-target="${msgId}">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${msgId}" style="margin-top:0">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
+        </div>
         <div class="deep-messages" id="${msgId}">${messagesHtml}</div>
       </div>
     </div>`;
@@ -2174,7 +2195,7 @@ function prioritizeAndRender(data) {
           if (noiseRecentToggleEl) {
             const count = allNoiseRecent.length;
             const expanded = noiseRecentEl.classList.contains('expanded');
-            noiseRecentToggleEl.textContent = `${expanded ? 'Hide' : 'Show'} ${count} recent noise item${count === 1 ? '' : 's'}`;
+            noiseRecentToggleEl.textContent = `${count} recent noise item${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
           }
         }
         if (noiseOlderEl) {
@@ -2189,7 +2210,7 @@ function prioritizeAndRender(data) {
           if (noiseOlderToggleEl) {
             const count = allNoiseOlder.length;
             const expanded = noiseOlderEl.classList.contains('expanded');
-            noiseOlderToggleEl.textContent = `${expanded ? 'Hide' : 'Show'} ${count} older noise item${count === 1 ? '' : 's'}`;
+            noiseOlderToggleEl.textContent = `${count} older noise item${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
           }
         }
 
@@ -2413,12 +2434,13 @@ if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
   sessionStorage.removeItem('fslack_hide');
 } else {
   // Load persisted view cache, timestamp, and saved messages before showing
-  chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs'], (result) => {
+  chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen'], (result) => {
     if (result.fslackViewCache && !cachedView) {
       cachedView = result.fslackViewCache;
     }
     persistedFetchTs = result.fslackLastFetchTs || 0;
     savedMsgKeys = new Set(result.fslackSavedMsgs || []);
+    vipSeenTimestamps = result.fslackVipSeen || {};
     show();
   });
 }
