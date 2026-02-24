@@ -1765,12 +1765,20 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Mute thread
+  // Mute thread (also mark as read)
   const muteBtn = e.target.closest('.action-mute');
   if (muteBtn && !muteBtn.dataset.pending) {
     const { channel, threadTs } = muteBtn.dataset;
     muteBtn.textContent = '...';
     muteBtn.dataset.pending = 'true';
+    const markAllBtn = muteBtn.closest('.item-actions')?.querySelector('.mark-all-read')
+      || muteBtn.closest('.item')?.querySelector('.mark-all-read');
+    if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
+      const { ts, threadTs: tTs } = markAllBtn.dataset;
+      markAllBtn.textContent = '...';
+      markAllBtn.dataset.pending = 'true';
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, requestId: `readall_${Date.now()}` }, '*');
+    }
     window.postMessage({ type: `${FSLACK}:muteThread`, channel, thread_ts: threadTs, requestId: `mute_${Date.now()}` }, '*');
     return;
   }
