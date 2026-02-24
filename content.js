@@ -277,9 +277,11 @@ shadow.innerHTML = `
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: 12px;
+    font-weight: 600;
     color: #1d9bd1;
-    margin-left: 6px;
+    margin-left: 0;
+    vertical-align: -2px;
     cursor: pointer;
   }
   .msg-thread-badge:hover { text-decoration: underline; }
@@ -366,6 +368,7 @@ shadow.innerHTML = `
     cursor: pointer;
     font-size: 12px;
     font-weight: 600;
+    padding-right: 15px;
   }
   .see-more:hover, .see-less:hover { text-decoration: underline; }
   .seen-replies-toggle {
