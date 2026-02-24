@@ -1281,7 +1281,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
           <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
         </div>
         <div class="item-right">
-          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 200, data.users)}</div>${msgActions(p.channel_id, p.ts)}</div>
+          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 200, data.users)}${renderFiles(p.files)}</div>${msgActions(p.channel_id, p.ts)}</div>
         </div>
       </div>`;
     }
@@ -2002,7 +2002,7 @@ async function kickoffVipSection(data) {
         : `#${escapeHtml(ch.name)}`;
       messagesHtml += `<div style="margin-top:4px"><span style="font-size:11px">${channelLabel}</span><ul style="margin:2px 0 0;padding-left:18px">`;
       for (const m of ch.messages) {
-        messagesHtml += `<li class="item-text" style="margin:1px 0">${formatSlackHtml(m.text || '', data?.users)}</li>`;
+        messagesHtml += `<li class="item-text" style="margin:1px 0">${formatSlackHtml(m.text || '', data?.users)}${renderFiles(m.files)}</li>`;
       }
       messagesHtml += '</ul></div>';
     }

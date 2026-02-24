@@ -163,10 +163,23 @@
       }
     }
 
-    // 2. m.attachments[].image_url — attachment images (skip forwarded/shared avatars)
+    // 2. m.attachments[] — attachment images + forwarded message files
     if (m.attachments?.length) {
       for (const att of m.attachments) {
-        if (att.is_msg_unfurl || att.is_share) continue;
+        // Forwarded/shared messages: skip image_url (it's the avatar), but extract att.files[]
+        if (att.is_msg_unfurl || att.is_share) {
+          if (att.files?.length) {
+            for (const f of att.files) {
+              if (f.mode === 'tombstone') continue;
+              const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || null;
+              const url = f.url_private || null;
+              if (thumb || url) {
+                files.push({ name: f.name || 'file', mimetype: f.mimetype || '', thumb, url });
+              }
+            }
+          }
+          continue;
+        }
         if (att.image_url) {
           files.push({ name: att.title || 'image', mimetype: 'image/', thumb: att.image_url, url: att.image_url });
         }
@@ -489,6 +502,7 @@
           user: m.user || m.username,
           text: m.text || '',
           ts: m.ts,
+          files: extractFiles(m),
           reaction_count: (m.reactions || []).reduce((s, r) => s + r.count, 0),
           reply_count: m.reply_count || 0,
           permalink: m.permalink,
@@ -523,6 +537,7 @@
           user: m.user || m.username,
           text: m.text || '',
           ts: m.ts,
+          files: extractFiles(m),
           channel_id: m.channel?.id,
           channel_name: m.channel?.name,
           permalink: m.permalink,
