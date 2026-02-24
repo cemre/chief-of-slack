@@ -534,14 +534,10 @@ chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels'], (ca
 
 function saveViewCache(data, popular, prioritized, savedItems = []) {
   cachedView = { data, popular, prioritized, saved: savedItems, ts: Date.now() };
-  console.log('[fslack] saveViewCache ts:', cachedView.ts);
   chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts, fslackViewCache: cachedView }, () => {
     if (chrome.runtime.lastError) {
       console.warn('[fslack] cache persist failed:', chrome.runtime.lastError.message);
-      // Fallback: persist just the timestamp
       chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts });
-    } else {
-      console.log('[fslack] cache persisted OK');
     }
   });
 }
@@ -562,7 +558,6 @@ function removeCachedItem(channel, threadTs) {
 }
 
 function startFetch() {
-  console.log('[fslack] startFetch called', new Error().stack?.split('\n')[2]?.trim());
   if (fetchBtn.disabled) return;
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
@@ -590,7 +585,6 @@ function startFetch() {
 }
 
 function showFromCache() {
-  console.log('[fslack] showFromCache: cachedView?', !!cachedView, 'ts?', cachedView?.ts, 'age:', cachedView ? Date.now() - cachedView.ts : 'n/a', 'persistedFetchTs:', persistedFetchTs, 'age:', persistedFetchTs ? Date.now() - persistedFetchTs : 'n/a');
   // Full cache available and fresh — render it
   if (cachedView && Date.now() - cachedView.ts < 300000) {
     lastFetchTime = cachedView.ts;
@@ -599,7 +593,6 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
-    console.log('[fslack] showFromCache -> true (full cache)');
     return true;
   }
   // No full cache, but we fetched recently — skip auto-fetch
@@ -610,19 +603,15 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     const ago = Math.floor((Date.now() - persistedFetchTs) / 60000);
     bodyEl.innerHTML = `<div id="status">Last fetched ${ago < 1 ? 'just now' : ago + 'm ago'}. Click Fetch to refresh.</div>`;
-    console.log('[fslack] showFromCache -> true (timestamp only)');
     return true;
   }
-  console.log('[fslack] showFromCache -> false');
   return false;
 }
 
 function show() {
-  console.log('[fslack] show() called, injectReady:', injectReady);
   visible = true;
   overlay.classList.add('visible');
   if (showFromCache()) return;
-  console.log('[fslack] show() -> cache miss, injectReady:', injectReady);
   if (injectReady) startFetch();
 }
 function hide() { visible = false; overlay.classList.remove('visible'); }
@@ -2216,7 +2205,7 @@ function prioritizeAndRender(data) {
         }
 
         // Sort ALL noise items by message count desc, then recency desc
-        const allNoise = sortNoiseItems([...regularNoise, ...summarizedItems], response.noiseOrder);
+        const allNoise = sortNoiseItems([...regularNoise, ...summarizedItems], mergedNoiseOrder);
         const noiseCutoff = Date.now() / 1000 - 86400;
         const allNoiseRecent = allNoise.filter((item) => getItemSortTs(item) >= noiseCutoff);
         const allNoiseOlder = allNoise.filter((item) => getItemSortTs(item) < noiseCutoff);
@@ -2457,12 +2446,8 @@ window.addEventListener('message', (event) => {
 // Auto-show on load — load persisted cache first, then show
 window.addEventListener('message', (event) => {
   if (event.source === window && event.data?.type === `${FSLACK}:ready`) {
-    console.log('[fslack] ready received, visible:', visible);
     injectReady = true;
-    if (visible && !showFromCache()) {
-      console.log('[fslack] ready -> startFetch');
-      startFetch();
-    }
+    if (visible && !showFromCache()) startFetch();
   }
 });
 const _hideOnce = localStorage.getItem('fslack_hide_once');
@@ -2473,7 +2458,6 @@ if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
 } else {
   // Load persisted view cache, timestamp, and saved messages before showing
   chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen'], (result) => {
-    console.log('[fslack] storage loaded: viewCache?', !!result.fslackViewCache, 'lastFetchTs:', result.fslackLastFetchTs);
     if (result.fslackViewCache && !cachedView) {
       cachedView = result.fslackViewCache;
     }
