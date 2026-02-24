@@ -152,6 +152,65 @@ async function handleSummarize(item) {
   }
 }
 
+// ── Build VIP summarization prompt ──
+function buildVipSummarizePrompt(item) {
+  const serialized = JSON.stringify(item.messages, null, 0);
+  return `Extract 3-5 specific bullet points about what ${item.name} has been saying or doing in Slack.
+Each bullet should capture a concrete thing: a specific decision, question, announcement, concern, or piece of work — not a vague category.
+Do NOT start bullets with the person's name — just state the thing directly.
+Bad: "Announced the new onboarding flow is launching Thursday." (too vague) Good: "New onboarding flow launching Thursday."
+Bad: "Josh asked why the /auth endpoint is returning 403s in staging." (uses name) Good: "Asking why /auth returns 403s in staging."
+Use direct, terse language. No filler. No names.
+If there are fewer than 2 substantive messages, return {"relevant": false}.
+
+MESSAGES:
+${serialized}
+
+Respond with ONLY a JSON object:
+{"relevant": true, "bullets": ["...", "...", "..."]} or {"relevant": false}
+No explanation, no markdown fences, just the JSON object.`;
+}
+
+// ── Call Claude API for VIP summarization ──
+async function handleVipSummarize(item) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  const prompt = buildVipSummarizePrompt(item);
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return { summary: JSON.parse(jsonMatch[0]) };
+    }
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Message handler ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === `${FSLACK}:prioritize`) {
@@ -160,6 +219,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarize`) {
     handleSummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:summarizeVip`) {
+    handleVipSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {

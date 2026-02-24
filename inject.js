@@ -347,6 +347,15 @@
       })
     );
 
+    // Build last_read map for VIP message filtering
+    const lastRead = {};
+    for (const ch of (counts.channels || [])) {
+      if (ch.last_read) lastRead[ch.id] = ch.last_read;
+    }
+    for (const im of (counts.ims || [])) {
+      if (im.last_read) lastRead[im.id] = im.last_read;
+    }
+
     return {
       selfId,
       badges: counts.channel_badges,
@@ -357,6 +366,7 @@
       users,
       channels,
       channelMeta,
+      lastRead,
     };
   }
 
@@ -389,6 +399,42 @@
       // search.messages may not be available — gracefully return empty
       return [];
     }
+  }
+
+  const VIP_QUERIES = [
+    { name: 'JM',     query: 'from:@jm' },
+    { name: 'Josh',   query: 'from:@josh' },
+    { name: 'Samir',  query: 'from:@samir' },
+    { name: 'Ori',    query: 'from:@Ori' },
+    { name: 'Leith',  query: 'from:@leith' },
+    { name: 'Jane',   query: 'from:@jane' },
+    { name: 'Dustin', query: 'from:@dustin' },
+    { name: 'Tara',   query: 'from:@Tara' },
+  ];
+
+  async function fetchVipActivity() {
+    const results = [];
+    for (const vip of VIP_QUERIES) {
+      try {
+        const res = await slackApi('search.messages', {
+          query: vip.query,
+          sort: 'timestamp',
+          count: '10',
+        });
+        const messages = (res.messages?.matches || []).slice(0, 10).map((m) => ({
+          user: m.user || m.username,
+          text: m.text || '',
+          ts: m.ts,
+          channel_id: m.channel?.id,
+          channel_name: m.channel?.name,
+          permalink: m.permalink,
+        }));
+        results.push({ name: vip.name, messages });
+      } catch {
+        results.push({ name: vip.name, messages: [] });
+      }
+    }
+    return results;
   }
 
   // Listen for requests from content script
@@ -519,6 +565,15 @@
         window.postMessage({ type: `${FSLACK}:popularResult`, data: popular }, '*');
       } catch (err) {
         window.postMessage({ type: `${FSLACK}:popularResult`, data: [] }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:fetchVips`) {
+      try {
+        const vips = await fetchVipActivity();
+        window.postMessage({ type: `${FSLACK}:vipResult`, data: vips }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:vipResult`, data: [] }, '*');
       }
     }
   });

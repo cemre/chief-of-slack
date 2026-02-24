@@ -309,6 +309,7 @@ shadow.innerHTML = `
     border-bottom: 1px solid #363940;
   }
   .deep-summary { font-style: italic; color: #ababad; margin-top: 4px; line-height: 1.46; }
+  ul.deep-summary { margin: 4px 0; padding-left: 18px; }
   .deep-type-badge {
     display: inline-block;
     font-size: 10px;
@@ -428,6 +429,7 @@ function startFetch() {
     }, '*');
   });
   window.postMessage({ type: `${FSLACK}:fetchPopular` }, '*');
+  window.postMessage({ type: `${FSLACK}:fetchVips` }, '*');
 }
 
 function showFromCache() {
@@ -966,6 +968,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     if (deepNoiseLoading) {
       html += '<div id="deep-noise-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Analyzing busy channels...</div>';
     }
+    html += `<div id="bankruptcy-footer"><button id="noise-mark-all-btn">Mark all noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
     html += '</div></section>';
   }
 
@@ -974,12 +977,9 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '<div id="status">All clear — nothing needs your attention.</div>';
   }
 
-  // Bankruptcy + noise buttons (always shown when not loading)
+  // VIP section placeholder (filled in async by kickoffVipSection)
   if (!loading) {
-    const noiseBtn = (noise.length > 0 || deepNoiseLoading)
-      ? `<button id="noise-mark-all-btn">Mark all noise as read</button>`
-      : '';
-    html += `<div id="bankruptcy-footer">${noiseBtn}<button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
+    html += '<div id="vip-area"><div class="section-toggle" style="color:#3d3f42;cursor:default">Creeping on VIPs...</div></div>';
   }
 
   bodyEl.innerHTML = html;
@@ -1442,8 +1442,107 @@ function showApiKeyPrompt(rawData) {
   });
 }
 
+// ── Async VIP section: wait for data, summarize, render ──
+async function kickoffVipSection(data) {
+  // Wait up to 3s for pendingVips to arrive from inject.js
+  let vips = pendingVips;
+  if (vips === null) {
+    await new Promise((resolve) => {
+      const deadline = Date.now() + 3000;
+      const poll = setInterval(() => {
+        if (pendingVips !== null || Date.now() > deadline) {
+          clearInterval(poll);
+          vips = pendingVips || [];
+          resolve();
+        }
+      }, 100);
+    });
+  }
+  if (!vips) vips = [];
+
+  const vipArea = shadow.getElementById('vip-area');
+  if (!vipArea) return;
+
+  // Filter out messages the user has already read in that channel
+  const filteredVips = vips.map((v) => ({
+    ...v,
+    messages: v.messages.filter((m) => {
+      if (!m.channel_id || !data?.lastRead) return true;
+      const lr = data.lastRead[m.channel_id];
+      if (!lr) return true;
+      return parseFloat(m.ts) > parseFloat(lr);
+    }),
+  }));
+
+  const relevantVips = filteredVips.filter((v) => v.messages.length > 0);
+  if (relevantVips.length === 0) {
+    vipArea.innerHTML = '';
+    return;
+  }
+
+  // Summarize each VIP in parallel with a byte cap
+  const MAX_PAYLOAD_BYTES = 2000;
+  const summaries = await Promise.all(relevantVips.map(async (vip) => {
+    const messages = [];
+    let bytes = 0;
+    for (const m of vip.messages) {
+      const entry = {
+        channel: m.channel_name || m.channel_id,
+        text: plainTruncate(m.text, 150, data?.users || {}),
+        ts: m.ts,
+      };
+      const s = JSON.stringify(entry);
+      if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
+      messages.push(entry);
+      bytes += s.length;
+    }
+    let response;
+    try {
+      response = await new Promise((resolve) =>
+        chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeVip`, data: { name: vip.name, messages } }, resolve)
+      );
+    } catch {
+      response = { error: 'send failed' };
+    }
+    return { vip, result: response?.summary };
+  }));
+
+  let vipHtml = '<section class="priority-section"><h2 style="color:#ab7ae0">Creeping on VIPs</h2>';
+  let hasContent = false;
+  for (let i = 0; i < summaries.length; i++) {
+    const { vip, result } = summaries[i];
+    if (!result?.relevant) continue;
+    hasContent = true;
+    const latestTs = vip.messages[0]?.ts;
+    const msgId = `vip-msgs-${i}`;
+    let messagesHtml = '';
+    for (const m of vip.messages) {
+      messagesHtml += `<div class="item-text"><span style="color:#616061;font-size:11px">#${escapeHtml(m.channel_name || '?')}</span> ${escapeHtml(m.text || '')}</div>`;
+    }
+    vipHtml += `<div class="item vip-item">
+      <div class="item-left">
+        <span class="item-channel">${escapeHtml(vip.name)}</span>
+        <span class="item-time">${formatTime(latestTs)}</span>
+      </div>
+      <div class="item-right">
+        <ul class="deep-summary">${(result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>
+        <span class="show-messages-link" data-target="${msgId}">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
+        <div class="deep-messages" id="${msgId}">${messagesHtml}</div>
+      </div>
+    </div>`;
+  }
+
+  if (!hasContent) {
+    vipArea.innerHTML = '';
+    return;
+  }
+  vipHtml += '</section>';
+  vipArea.innerHTML = vipHtml;
+}
+
 // ── Main orchestration: pre-filter → LLM → render ──
 let pendingPopular = null;
+let pendingVips = null;
 
 function prioritizeAndRender(data) {
   const preFiltered = applyPreFilters(data);
@@ -1455,6 +1554,7 @@ function prioritizeAndRender(data) {
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise };
     renderPrioritized(prioritized, data, pendingPopular);
     saveViewCache(data, pendingPopular, prioritized);
+    kickoffVipSection(data);
     return;
   }
 
@@ -1494,11 +1594,13 @@ function prioritizeAndRender(data) {
       if (deepNoise.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular);
         saveViewCache(data, pendingPopular, prioritized);
+        kickoffVipSection(data);
         return;
       }
 
       // Render main sections; deep-noise area shows loading indicator
       renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, true);
+      kickoffVipSection(data);
 
       // Summarize each deep-noise channel individually with a byte cap on messages sent
       const MAX_PAYLOAD_BYTES = 3000;
@@ -1669,6 +1771,7 @@ let gotPopular = false;
 function resetFetchState() {
   pendingUnreads = null;
   pendingPopular = null;
+  pendingVips = null;
   gotUnreads = false;
   gotPopular = false;
 }
@@ -1742,6 +1845,10 @@ window.addEventListener('message', (event) => {
     pendingPopular = msg.data || [];
     gotPopular = true;
     tryPrioritize();
+  }
+
+  if (msg.type === `${FSLACK}:vipResult`) {
+    pendingVips = msg.data || [];
   }
 
   if (msg.type === `${FSLACK}:error`) {
