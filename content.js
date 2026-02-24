@@ -303,6 +303,9 @@ shadow.innerHTML = `
   .item.noise-item { border-left: 3px solid #616061; opacity: 0.7; }
   .noise-items { display: none; }
   .noise-items.expanded { display: block; }
+  .saved-items-list { display: none; }
+  .saved-items-list.expanded { display: block; }
+  .item.saved-item { border-left: 3px solid #27ae60; }
   .section-toggle {
     padding: 6px 24px;
     font-size: 12px;
@@ -512,6 +515,7 @@ shadow.getElementById('refresh-link').addEventListener('click', startFetch);
 let visible = false;
 let injectReady = false;
 let cachedView = null; // { data, popular, prioritized, ts }
+let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
 let noiseChannels = {};      // { [channelId]: channelName } — always force to noise
 let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
@@ -525,9 +529,16 @@ chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs'], (cached) => {
   }
 });
 
-function saveViewCache(data, popular, prioritized) {
-  cachedView = { data, popular, prioritized, ts: Date.now() };
-  chrome.storage.local.set({ fslackViewCache: cachedView });
+function saveViewCache(data, popular, prioritized, savedItems = []) {
+  cachedView = { data, popular, prioritized, saved: savedItems, ts: Date.now() };
+  // Always persist the timestamp (tiny, guaranteed to fit in storage)
+  chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts });
+  // Best-effort persist of full view cache (may fail if data is too large)
+  chrome.storage.local.set({ fslackViewCache: cachedView }, () => {
+    if (chrome.runtime.lastError) {
+      console.warn('[fslack] View cache too large to persist:', chrome.runtime.lastError.message);
+    }
+  });
 }
 
 function removeCachedItem(channel, threadTs) {
@@ -568,17 +579,31 @@ function startFetch() {
     }, '*');
   });
   window.postMessage({ type: `${FSLACK}:fetchPopular` }, '*');
+  window.postMessage({ type: `${FSLACK}:fetchSaved`, requestId: `saved_${Date.now()}` }, '*');
 }
 
 function showFromCache() {
-  if (!cachedView || Date.now() - cachedView.ts >= 60000) return false;
-  lastFetchTime = cachedView.ts;
-  updateLastUpdated();
-  if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
-  lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
-  renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular);
-  runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
-  return true;
+  // Full cache available and fresh — render it
+  if (cachedView && Date.now() - cachedView.ts < 300000) {
+    lastFetchTime = cachedView.ts;
+    updateLastUpdated();
+    if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+    lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+    renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
+    runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
+    return true;
+  }
+  // No full cache, but we fetched recently — skip auto-fetch
+  if (persistedFetchTs && Date.now() - persistedFetchTs < 300000) {
+    lastFetchTime = persistedFetchTs;
+    updateLastUpdated();
+    if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+    lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+    const ago = Math.floor((Date.now() - persistedFetchTs) / 60000);
+    bodyEl.innerHTML = `<div id="status">Last fetched ${ago < 1 ? 'just now' : ago + 'm ago'}. Click Fetch to refresh.</div>`;
+    return true;
+  }
+  return false;
 }
 
 function show() {
@@ -887,6 +912,31 @@ function renderDeepSummarizedItem(cp, data) {
   </div>`;
 }
 
+function renderSavedItem(item, data) {
+  const channel = item.item_id;
+  const ts = item.ts;
+  const ch = data.channels?.[channel] || channel;
+  const msg = item.message || {};
+  const user = msg.user;
+  const textHtml = msg.text ? truncate(msg.text, 200, data.users) : '';
+  return `<div class="item saved-item" data-complete-request-id="">
+    <div class="item-left">
+      ${channelLink('#' + escapeHtml(ch), channel)}
+      <span class="item-time">${formatTime(ts)}</span>
+    </div>
+    <div class="item-right">
+      <div class="msg-row">
+        <div class="msg-content item-text">${user ? userLink(uname(user, data.users), channel, ts) + ' ' : ''}${textHtml}</div>
+        <span class="action-btn action-complete-saved" data-item-id="${escapeHtml(channel)}" data-ts="${escapeHtml(ts)}" title="Mark complete">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        </span>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderBotThreadItem(cp, data, cssClass) {
   const ch = data.channels[cp.channel_id] || cp.channel_id;
   const allMsgs = cp.messages;
@@ -1151,7 +1201,7 @@ function sortNoiseItems(items, noiseOrder = []) {
   });
 }
 
-function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false) {
+function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = []) {
   const { actNow, priority, whenFree, noise } = prioritized;
   let html = '';
 
@@ -1197,6 +1247,16 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Loading indicator while LLM is working
   if (loading) {
     html += '<div id="status"><div class="detail">Analyzing remaining messages with AI...</div></div>';
+  }
+
+  // Saved items (last 72h, collapsed by default)
+  if (savedItems && savedItems.length > 0) {
+    html += '<section class="priority-section">';
+    html += `<div class="section-toggle" id="saved-items-toggle">Show ${savedItems.length} saved item${savedItems.length === 1 ? '' : 's'}</div>`;
+    html += '<div class="saved-items-list" id="saved-items-list">';
+    for (const item of savedItems) html += renderSavedItem(item, data);
+    html += '</div>';
+    html += '</section>';
   }
 
   // Noise (collapsed by default) — split into recent (last 24h) and older
@@ -1257,6 +1317,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
   wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'recent noise item');
   wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'older noise item');
+  wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'saved item');
 }
 
 // ── Seen replies lazy loading ──
@@ -1266,6 +1327,20 @@ let replyRequestId = 0;
 bodyEl.addEventListener('click', (e) => {
   // Let links in messages open normally
   if (e.target.closest('a[href]')) return;
+
+  const completeBtn = e.target.closest('.action-complete-saved');
+  if (completeBtn) {
+    if (completeBtn.dataset.pending) return;
+    completeBtn.dataset.pending = 'true';
+    const { itemId, ts } = completeBtn.dataset;
+    const itemEl = completeBtn.closest('.saved-item');
+    const requestId = `complete_${Date.now()}`;
+    if (itemEl) itemEl.dataset.completeRequestId = requestId;
+    window.postMessage({ type: `${FSLACK}:completeSaved`, item_id: itemId, ts, requestId }, '*');
+    if (itemEl) { itemEl.style.transition = 'opacity 0.3s'; itemEl.style.opacity = '0.3'; }
+    return;
+  }
+
 
   // VIP section lazy-load toggle
   const vipToggle = e.target.closest('#vip-toggle');
@@ -1644,6 +1719,28 @@ window.addEventListener('message', (event) => {
     // DOM already updated on click; nothing to do here
   }
 
+  if (msg.type === `${FSLACK}:completeSavedResult`) {
+    const { requestId, ok } = msg;
+    const itemEl = shadow.querySelector(`.saved-item[data-complete-request-id="${requestId}"]`);
+    if (ok) {
+      if (itemEl) itemEl.remove();
+      const toggle = shadow.getElementById('saved-items-toggle');
+      const list = shadow.getElementById('saved-items-list');
+      if (toggle && list) {
+        const count = list.querySelectorAll('.item').length;
+        if (count === 0) {
+          list.closest('.priority-section')?.style.setProperty('display', 'none');
+        } else {
+          toggle.textContent = toggle.textContent.replace(/\d+/, count);
+        }
+      }
+    } else {
+      if (itemEl) { itemEl.style.opacity = ''; itemEl.dataset.completeRequestId = ''; }
+      const btn = itemEl?.querySelector('.action-complete-saved');
+      if (btn) delete btn.dataset.pending;
+    }
+  }
+
   if (msg.type === `${FSLACK}:markReadResult`) {
     if (msg.ok) { removeCachedItem(msg.channel, msg.thread_ts); }
     const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
@@ -1910,6 +2007,8 @@ function runBotThreadSummarization(whenFreeItems, data) {
 // ── Main orchestration: pre-filter → LLM → render ──
 let pendingPopular = null;
 let pendingVips = null;
+let pendingSaved = null;
+let gotSaved = false;
 
 function prioritizeAndRender(data) {
   const preFiltered = applyPreFilters(data);
@@ -1928,9 +2027,9 @@ function prioritizeAndRender(data) {
   if (totalItems === 0) {
     // Only noise/dropped/bot — render what we have
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise };
-    renderPrioritized(prioritized, data, pendingPopular);
+    renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
     runBotThreadSummarization(prioritized.whenFree, data);
-    saveViewCache(data, pendingPopular, prioritized);
+    saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
     return;
   }
 
@@ -1995,14 +2094,14 @@ function prioritizeAndRender(data) {
       );
 
       if (deepNoise.length === 0) {
-        renderPrioritized(prioritized, data, pendingPopular);
+        renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
         runBotThreadSummarization(prioritized.whenFree, data);
-        saveViewCache(data, pendingPopular, prioritized);
+        saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
         return;
       }
 
       // Render main sections; deep-noise area shows loading indicator
-      renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, true);
+      renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, true, pendingSaved || []);
       runBotThreadSummarization(prioritized.whenFree, data);
 
       // Summarize each deep-noise channel individually with a byte cap on messages sent
@@ -2094,7 +2193,7 @@ function prioritizeAndRender(data) {
           }
         }
 
-        saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise });
+        saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
       })();
   });
 }
@@ -2195,19 +2294,25 @@ function resetFetchState() {
   pendingUnreads = null;
   pendingPopular = null;
   pendingVips = null;
+  pendingSaved = null;
   gotUnreads = false;
   gotPopular = false;
+  gotSaved = false;
 }
 
 function tryPrioritize() {
   if (!gotUnreads) return;
-  // Don't wait for popular — it may fail or be slow
-  // But give it a short window if unreads arrive first
-  if (!gotPopular) {
+  // Don't wait for popular or saved — they may fail or be slow
+  // But give them a short window if unreads arrive first
+  if (!gotPopular || !gotSaved) {
     setTimeout(() => {
       if (!gotPopular) {
         gotPopular = true;
         pendingPopular = [];
+      }
+      if (!gotSaved) {
+        gotSaved = true;
+        pendingSaved = [];
       }
       runPrioritize();
     }, 2000);
@@ -2275,6 +2380,13 @@ window.addEventListener('message', (event) => {
     tryPrioritize();
   }
 
+  if (msg.type === `${FSLACK}:savedResult`) {
+    pendingSaved = msg.items || [];
+    gotSaved = true;
+    console.log('[fslack] savedResult received, items:', pendingSaved.length, pendingSaved[0]);
+    tryPrioritize();
+  }
+
   if (msg.type === `${FSLACK}:vipResult`) {
     pendingVips = msg.data || [];
   }
@@ -2300,11 +2412,12 @@ if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
 } else if (sessionStorage.getItem('fslack_hide')) {
   sessionStorage.removeItem('fslack_hide');
 } else {
-  // Load persisted view cache and saved messages before showing
-  chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs'], (result) => {
+  // Load persisted view cache, timestamp, and saved messages before showing
+  chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs'], (result) => {
     if (result.fslackViewCache && !cachedView) {
       cachedView = result.fslackViewCache;
     }
+    persistedFetchTs = result.fslackLastFetchTs || 0;
     savedMsgKeys = new Set(result.fslackSavedMsgs || []);
     show();
   });

@@ -546,6 +546,74 @@
       }
     }
 
+    if (msgType === `${FSLACK}:fetchSaved`) {
+      const { requestId } = event.data;
+      try {
+        const result = await slackApi('saved.list', { limit: 25, filter: 'saved', include_tombstones: true });
+        console.log('[fslack] saved.list raw result:', JSON.stringify(result).slice(0, 2000));
+        const cutoff = Math.floor(Date.now() / 1000) - 72 * 60 * 60;
+        const items = (result.saved_items || []).filter(
+          (item) => item.state !== 'completed' && (item.date_created || 0) >= cutoff
+        );
+        console.log('[fslack] saved items after filter:', items.length, 'cutoff:', cutoff);
+        const itemsWithMessages = await Promise.all(
+          items.map(async (item) => {
+            try {
+              // Try top-level history first
+              const hist = await slackApi('conversations.history', {
+                channel: item.item_id,
+                latest: item.ts,
+                oldest: item.ts,
+                inclusive: true,
+                limit: 1,
+              });
+              let message = hist.messages?.[0] || null;
+
+              // Not in history — likely a thread reply; use reactions.get which resolves any message by channel+ts
+              if (!message) {
+                try {
+                  const rxn = await slackApi('reactions.get', {
+                    channel: item.item_id,
+                    timestamp: item.ts,
+                    full: true,
+                  });
+                  message = rxn.message || null;
+                } catch {}
+              }
+
+              if (message) message = { ...message, text: extractText(message) };
+              console.log('[fslack] saved msg fetch', item.item_id, item.ts, '→', message ? 'ok: ' + message.text?.slice(0, 50) : 'not found');
+              return { ...item, message };
+            } catch (e) {
+              console.log('[fslack] saved msg fetch THREW', item.item_id, item.ts, e);
+              return item;
+            }
+          })
+        );
+        window.postMessage({ type: `${FSLACK}:savedResult`, requestId, items: itemsWithMessages }, '*');
+      } catch (e) {
+        console.log('[fslack] fetchSaved error:', e);
+        window.postMessage({ type: `${FSLACK}:savedResult`, requestId, items: [] }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:completeSaved`) {
+      const { item_id, ts, requestId } = event.data;
+      try {
+        await slackApi('saved.update', {
+          item_type: 'message',
+          item_id,
+          ts,
+          date_due: 0,
+          mark: 'completed',
+          _x_reason: 'manually_mark_completed',
+        });
+        window.postMessage({ type: `${FSLACK}:completeSavedResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:completeSavedResult`, requestId, ok: false }, '*');
+      }
+    }
+
     if (msgType === `${FSLACK}:markRead`) {
       const { channel, ts, thread_ts, requestId } = event.data;
       try {
