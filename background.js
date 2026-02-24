@@ -93,11 +93,13 @@ async function handlePrioritize(payload, selfName) {
 // ── Build single-channel summarization prompt ──
 function buildSummarizePrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `Determine if this Slack channel has something worth surfacing: an intentional update or announcement, a decision made, a heated discussion, or a situation that needs attention. If not, return relevant: false.
+  return `Determine if this Slack channel has something worth surfacing: an intentional update or announcement, a decision made, a heated discussion, a situation that needs attention, or a collection of user feedback / support tickets. If not, return relevant: false.
 
 Channel: #${item.channel}
 
-Types: "key_update" | "decision" | "heated_discussion" | "needs_attention"
+Types: "key_update" | "decision" | "heated_discussion" | "needs_attention" | "feedback_digest"
+
+Use "feedback_digest" when the channel contains multiple user feedback items, bug reports, or support tickets (e.g. Zendesk). Summarize the common themes or top issues.
 
 For relevant content, write a concise 1-2 sentence summary of what happened.
 - If multiple people are actively discussing something, name them and describe the back-and-forth (e.g. "Callan triaged it, Connor is looking into it").

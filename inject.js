@@ -222,8 +222,8 @@
               messages: msgs,
               sort_ts: msgs[0]?.ts || '0',
             };
+            channelPost._deepAnalysis = true;
             if (msgs.length >= 4) {
-              channelPost._deepAnalysis = true;
               try {
                 const deepHist = await slackApi('conversations.history', {
                   channel: ch.id, oldest: ch.last_read, limit: '20',

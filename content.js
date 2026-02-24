@@ -565,7 +565,7 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise 
     <span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>reply</span>
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}">mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}">mute channel</span>` : ''}
-    ${!threadTs && !isDm && !isNoise ? `<span class="action-always-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">always noise</span>` : ''}
+    ${!threadTs && !isDm && !isNoise ? `<span class="action-always-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark noise</span>` : ''}
     ${!threadTs && !isDm && isNoise ? `<span class="action-never-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">never noise</span>` : ''}
   </div>`;
 }
@@ -674,6 +674,7 @@ function renderDeepSummarizedItem(cp, data) {
     decision: 'Decision',
     heated_discussion: 'Heated Discussion',
     needs_attention: 'Needs Attention',
+    feedback_digest: 'Feedback Digest',
   };
   const typeBadge = cp._deepType ? (typeLabels[cp._deepType] || cp._deepType) : '';
   const msgs = cp.fullMessages?.history || cp.messages;
@@ -911,6 +912,17 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 }
 
 // ── Render prioritized view ──
+function sortNoiseItems(items) {
+  return [...items].sort((a, b) => {
+    const aMsgs = (a.fullMessages?.history || a.messages || []).length;
+    const bMsgs = (b.fullMessages?.history || b.messages || []).length;
+    if (bMsgs !== aMsgs) return bMsgs - aMsgs;
+    const aTs = parseFloat(a.messages?.[0]?.ts || a.sort_ts || '0');
+    const bTs = parseFloat(b.messages?.[0]?.ts || b.sort_ts || '0');
+    return bTs - aTs;
+  });
+}
+
 function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false) {
   const { actNow, priority, whenFree, noise } = prioritized;
   let html = '';
@@ -1651,26 +1663,25 @@ function prioritizeAndRender(data) {
           if (result?.relevant) {
             cp._deepSummary = result.summary;
             cp._deepType = result.type;
-            summarizedItems.push(cp);
           }
+          summarizedItems.push(cp);
         }
 
-        // Remove loading placeholder and append summarized items into noise section
-        deepNoiseArea?.remove();
-        let deepHtml = '';
-        for (const item of summarizedItems) deepHtml += renderDeepSummarizedItem(item, data);
-        if (deepHtml) noiseItemsEl.insertAdjacentHTML('beforeend', deepHtml);
+        // Sort ALL noise items by message count desc, then recency desc
+        const allNoise = sortNoiseItems([...regularNoise, ...summarizedItems]);
+        let sortedHtml = '';
+        for (const item of allNoise) sortedHtml += renderAnyItem(item, data, 'noise-item');
+        sortedHtml += `<div id="bankruptcy-footer"><button id="noise-mark-all-btn">Mark all noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
+        noiseItemsEl.innerHTML = sortedHtml;
 
-        // Update toggle count to include newly added items
+        // Update toggle count
         if (noiseToggleEl) {
-          const totalCount = noiseItemsEl.querySelectorAll('.item').length;
+          const total = allNoise.length;
           const expanded = noiseItemsEl.classList.contains('expanded');
-          noiseToggleEl.textContent = expanded
-            ? `Hide ${totalCount} noise item${totalCount === 1 ? '' : 's'}`
-            : `Show ${totalCount} noise item${totalCount === 1 ? '' : 's'}`;
+          noiseToggleEl.textContent = (expanded ? 'Hide' : 'Show') + ` ${total} noise item${total === 1 ? '' : 's'}`;
         }
 
-        saveViewCache(data, pendingPopular, { ...prioritized, noise: [...regularNoise, ...summarizedItems] });
+        saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise });
       })();
     }
   );
