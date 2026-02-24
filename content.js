@@ -484,6 +484,10 @@ shadow.innerHTML = `
   .file-thumb img { display: block; max-width: 240px; max-height: 160px; object-fit: contain; background: #222529; }
   .file-thumb:hover { border-color: #1d9bd1; }
   .file-video-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; }
+  .file-video-placeholder { position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 200px; height: 120px; background: #1a1d21; border-radius: 6px; border: 1px solid #363940; text-decoration: none; gap: 8px; }
+  .file-video-placeholder:hover { border-color: #1d9bd1; }
+  .file-video-placeholder .play-icon { width: 36px; height: 36px; background: rgba(255,255,255,0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; padding-left: 2px; }
+  .file-video-placeholder .file-video-name { color: #ababad; font-size: 11px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-link { display: inline-block; color: #1d9bd1; font-size: 12px; text-decoration: none; padding: 2px 0; }
   .file-link:hover { text-decoration: underline; }
 </style>
@@ -770,7 +774,10 @@ function renderFiles(files) {
       if (isVideo) html += '<span class="file-video-badge">VIDEO</span>';
       html += '</a>';
     } else if (isVideo && f.url) {
-      html += `<a class="file-link" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">&#9654; ${name}</a>`;
+      html += `<a class="file-video-placeholder" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">`;
+      html += `<span class="play-icon">&#9654;</span>`;
+      html += `<span class="file-video-name">${name}</span>`;
+      html += `</a>`;
     } else if (f.url) {
       html += `<a class="file-link" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">&#128206; ${name}</a>`;
     }

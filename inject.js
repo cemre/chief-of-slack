@@ -155,7 +155,7 @@
     if (m.files?.length) {
       for (const f of m.files) {
         if (f.mode === 'tombstone') continue;
-        const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || null;
+        const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || f.thumb_video || null;
         const url = f.url_private || null;
         if (thumb || url) {
           files.push({ name: f.name || 'file', mimetype: f.mimetype || '', thumb, url });
@@ -171,7 +171,7 @@
           if (att.files?.length) {
             for (const f of att.files) {
               if (f.mode === 'tombstone') continue;
-              const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || null;
+              const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || f.thumb_video || null;
               const url = f.url_private || null;
               if (thumb || url) {
                 files.push({ name: f.name || 'file', mimetype: f.mimetype || '', thumb, url });
