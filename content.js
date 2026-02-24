@@ -176,9 +176,9 @@ shadow.innerHTML = `
   header h1 { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
   .last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
   .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
-  .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; display: none; }
+  .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
   .refresh-link:hover { text-decoration: underline; }
-  .last-updated-wrap:hover .refresh-link { display: inline; }
+  .last-updated.stale { color: #e01e5a; }
   .header-actions { display: flex; gap: 8px; }
   button {
     background: #007a5a;
@@ -502,6 +502,7 @@ function updateLastUpdated() {
   const secs = Math.floor((Date.now() - lastFetchTime) / 1000);
   if (secs < 60) lastUpdatedEl.textContent = `${secs}s ago`;
   else lastUpdatedEl.textContent = `${Math.floor(secs / 60)}m ago`;
+  lastUpdatedEl.classList.toggle('stale', secs >= 300);
 }
 
 const closeBtn = shadow.getElementById('close-btn');
@@ -1832,7 +1833,10 @@ async function kickoffVipSection(data) {
     const msgId = `vip-msgs-${i}`;
     let messagesHtml = '';
     for (const m of vip.messages) {
-      messagesHtml += `<div class="item-text"><span style="color:#616061;font-size:11px">#${escapeHtml(m.channel_name || '?')}</span> ${escapeHtml(m.text || '')}</div>`;
+      const channelLabel = m.permalink
+        ? `<a href="${escapeHtml(m.permalink)}" target="_blank" style="color:#616061">#${escapeHtml(m.channel_name || '?')}</a>`
+        : `#${escapeHtml(m.channel_name || '?')}`;
+      messagesHtml += `<div class="item-text"><span style="font-size:11px">${channelLabel}</span> ${escapeHtml(m.text || '')}</div>`;
     }
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
