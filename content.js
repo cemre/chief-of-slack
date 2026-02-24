@@ -521,23 +521,27 @@ let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
 let customEmojiMap = null;
+let channelNameMap = {};
 
-// Preload custom emoji from cache for instant render on showFromCache()
-chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs'], (cached) => {
+// Preload custom emoji + channel names from cache for instant render on showFromCache()
+chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels'], (cached) => {
   const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
   if (cached.fslackEmoji && cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS) {
     customEmojiMap = cached.fslackEmoji;
   }
+  if (cached.fslackChannels) channelNameMap = cached.fslackChannels;
 });
 
 function saveViewCache(data, popular, prioritized, savedItems = []) {
   cachedView = { data, popular, prioritized, saved: savedItems, ts: Date.now() };
-  // Always persist the timestamp (tiny, guaranteed to fit in storage)
-  chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts });
-  // Best-effort persist of full view cache (may fail if data is too large)
-  chrome.storage.local.set({ fslackViewCache: cachedView }, () => {
+  console.log('[fslack] saveViewCache ts:', cachedView.ts);
+  chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts, fslackViewCache: cachedView }, () => {
     if (chrome.runtime.lastError) {
-      console.warn('[fslack] View cache too large to persist:', chrome.runtime.lastError.message);
+      console.warn('[fslack] cache persist failed:', chrome.runtime.lastError.message);
+      // Fallback: persist just the timestamp
+      chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts });
+    } else {
+      console.log('[fslack] cache persisted OK');
     }
   });
 }
@@ -558,6 +562,7 @@ function removeCachedItem(channel, threadTs) {
 }
 
 function startFetch() {
+  console.log('[fslack] startFetch called', new Error().stack?.split('\n')[2]?.trim());
   if (fetchBtn.disabled) return;
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
@@ -585,6 +590,7 @@ function startFetch() {
 }
 
 function showFromCache() {
+  console.log('[fslack] showFromCache: cachedView?', !!cachedView, 'ts?', cachedView?.ts, 'age:', cachedView ? Date.now() - cachedView.ts : 'n/a', 'persistedFetchTs:', persistedFetchTs, 'age:', persistedFetchTs ? Date.now() - persistedFetchTs : 'n/a');
   // Full cache available and fresh — render it
   if (cachedView && Date.now() - cachedView.ts < 300000) {
     lastFetchTime = cachedView.ts;
@@ -593,6 +599,7 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
+    console.log('[fslack] showFromCache -> true (full cache)');
     return true;
   }
   // No full cache, but we fetched recently — skip auto-fetch
@@ -603,15 +610,19 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     const ago = Math.floor((Date.now() - persistedFetchTs) / 60000);
     bodyEl.innerHTML = `<div id="status">Last fetched ${ago < 1 ? 'just now' : ago + 'm ago'}. Click Fetch to refresh.</div>`;
+    console.log('[fslack] showFromCache -> true (timestamp only)');
     return true;
   }
+  console.log('[fslack] showFromCache -> false');
   return false;
 }
 
 function show() {
+  console.log('[fslack] show() called, injectReady:', injectReady);
   visible = true;
   overlay.classList.add('visible');
   if (showFromCache()) return;
+  console.log('[fslack] show() -> cache miss, injectReady:', injectReady);
   if (injectReady) startFetch();
 }
 function hide() { visible = false; overlay.classList.remove('visible'); }
@@ -652,7 +663,8 @@ let truncateId = 0;
 
 function cleanSlackText(text, users) {
   if (!text) return '';
-  text = text.replace(/<@(U[A-Z0-9]+)>/g, (_, id) => `@${users?.[id] || id}`);
+  text = text.replace(/<@(U[A-Z0-9]+)(?:\|([^>]+))?>/g, (_, id, displayName) => `@${displayName || users?.[id] || id}`);
+  text = text.replace(/<#(C[A-Z0-9]+)(?:\|([^>]+))?>/g, (_, id, label) => `#${label || channelNameMap?.[id] || id}`);
   text = text.replace(/<([^|>]+)\|([^>]+)>/g, (_, _url, label) => label);
   text = text.replace(/<([^>]+)>/g, (_, url) => url);
   return text;
@@ -667,9 +679,19 @@ function formatSlackHtml(text, users) {
   while ((match = regex.exec(text)) !== null) {
     result += escapeHtml(text.slice(lastIndex, match.index));
     const inner = match[1];
-    if (inner.match(/^@U[A-Z0-9]+$/)) {
-      const uid = inner.slice(1);
-      result += `@${escapeHtml(users?.[uid] || uid)}`;
+    if (inner.match(/^@U[A-Z0-9]+(\|.+)?$/)) {
+      const pipeIdx = inner.indexOf('|');
+      if (pipeIdx !== -1) {
+        result += `@${escapeHtml(inner.slice(pipeIdx + 1))}`;
+      } else {
+        const uid = inner.slice(1);
+        result += `@${escapeHtml(users?.[uid] || uid)}`;
+      }
+    } else if (inner.match(/^#C[A-Z0-9]+(\|.+)?$/)) {
+      const pipeIdx = inner.indexOf('|');
+      const cid = inner.slice(1, pipeIdx !== -1 ? pipeIdx : undefined);
+      const name = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : (channelNameMap?.[cid] || cid);
+      result += `<span class="item-channel" data-channel="${escapeHtml(cid)}">#${escapeHtml(name)}</span>`;
     } else if (inner.includes('|')) {
       const pipe = inner.indexOf('|');
       const url = inner.slice(0, pipe);
@@ -1894,12 +1916,12 @@ async function kickoffVipSection(data) {
   const filteredVips = vips.map((v) => ({
     ...v,
     messages: v.messages.filter((m) => {
+      const seenTs = vipSeenTimestamps[v.name];
+      if (seenTs && parseFloat(m.ts) <= parseFloat(seenTs)) return false;
       if (!m.channel_id || !data?.lastRead) return true;
       const lr = data.lastRead[m.channel_id];
       if (!lr) return true;
       if (parseFloat(m.ts) <= parseFloat(lr)) return false;
-      const seenTs = vipSeenTimestamps[v.name];
-      if (seenTs && parseFloat(m.ts) <= parseFloat(seenTs)) return false;
       return true;
     }),
   }));
@@ -1951,7 +1973,7 @@ async function kickoffVipSection(data) {
       const channelLabel = m.permalink
         ? `<a href="${escapeHtml(m.permalink)}" target="_blank" style="color:#616061">#${escapeHtml(m.channel_name || '?')}</a>`
         : `#${escapeHtml(m.channel_name || '?')}`;
-      messagesHtml += `<div class="item-text"><span style="font-size:11px">${channelLabel}</span> ${escapeHtml(m.text || '')}</div>`;
+      messagesHtml += `<div class="item-text"><span style="font-size:11px">${channelLabel}</span> ${formatSlackHtml(m.text || '', data?.users)}</div>`;
     }
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
@@ -2391,6 +2413,7 @@ window.addEventListener('message', (event) => {
       }
       if (Object.keys(toStore).length > 0) chrome.storage.local.set(toStore);
       customEmojiMap = msg.data.emoji || null;
+      if (msg.data.channels) channelNameMap = msg.data.channels;
     }
     tryPrioritize();
   }
@@ -2423,8 +2446,12 @@ window.addEventListener('message', (event) => {
 // Auto-show on load — load persisted cache first, then show
 window.addEventListener('message', (event) => {
   if (event.source === window && event.data?.type === `${FSLACK}:ready`) {
+    console.log('[fslack] ready received, visible:', visible);
     injectReady = true;
-    if (visible && !showFromCache()) startFetch();
+    if (visible && !showFromCache()) {
+      console.log('[fslack] ready -> startFetch');
+      startFetch();
+    }
   }
 });
 const _hideOnce = localStorage.getItem('fslack_hide_once');
@@ -2435,6 +2462,7 @@ if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
 } else {
   // Load persisted view cache, timestamp, and saved messages before showing
   chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen'], (result) => {
+    console.log('[fslack] storage loaded: viewCache?', !!result.fslackViewCache, 'lastFetchTs:', result.fslackLastFetchTs);
     if (result.fslackViewCache && !cachedView) {
       cachedView = result.fslackViewCache;
     }

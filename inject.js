@@ -84,8 +84,29 @@
     return data.emoji || {};
   }
 
+  const NOISE_SUBTYPES = new Set([
+    'channel_join', 'channel_leave', 'channel_topic', 'channel_purpose',
+    'channel_name', 'channel_archive', 'channel_unarchive',
+    'pinned_item', 'unpinned_item', 'group_join', 'group_leave',
+  ]);
+
   // Extract text from message, falling back to attachments/blocks
   function extractText(m) {
+    // For forwarded/shared messages, text is often empty or just a link —
+    // pull the real content from attachments first
+    if (m.attachments?.length) {
+      const att = m.attachments[0];
+      // Shared/forwarded messages: attachment has is_msg_unfurl or is_share
+      if (att.is_msg_unfurl || att.is_share) {
+        const shared = att.text || att.fallback || '';
+        if (shared) {
+          const author = att.author_subname || att.author_name || '';
+          const prefix = author ? `[fwd from ${author}] ` : '[fwd] ';
+          // If the outer message also has text (e.g. a comment on the forward), include both
+          return m.text ? `${m.text} ${prefix}${shared}` : `${prefix}${shared}`;
+        }
+      }
+    }
     if (m.text) return m.text;
     // Bot messages often store content in attachments
     if (m.attachments?.length) {
@@ -224,7 +245,7 @@
             oldest: ch.last_read,
           });
           const msgs = (hist.messages || [])
-            .filter((m) => !m.subtype || m.subtype === 'bot_message' || m.subtype === 'thread_broadcast')
+            .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))
             .filter((m) => m.user !== selfId)
             .map((m) => ({
               user: m.user,
@@ -248,7 +269,7 @@
                   channel: ch.id, oldest: ch.last_read, limit: '20',
                 });
                 const deepMsgs = (deepHist.messages || [])
-                  .filter((m) => !m.subtype || m.subtype === 'bot_message' || m.subtype === 'thread_broadcast')
+                  .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))
                   .filter((m) => m.user !== selfId)
                   .map((m) => ({
                     user: m.user,
@@ -293,12 +314,13 @@
 
     progress(4, `Done. ${channelPosts.length} channels with new posts.`);
 
-    // 5. Collect all user IDs and resolve names
+    // 5. Collect all user IDs and channel mentions, then resolve names
     const allUserIds = [];
+    const mentionedChannelIds = [];
     function collectMentions(text) {
       if (!text) return;
-      const matches = text.matchAll(/<@(U[A-Z0-9]+)>/g);
-      for (const m of matches) allUserIds.push(m[1]);
+      for (const m of text.matchAll(/<@(U[A-Z0-9]+)>/g)) allUserIds.push(m[1]);
+      for (const m of text.matchAll(/<#(C[A-Z0-9]+)(?:\|[^>]*)?>/g)) mentionedChannelIds.push(m[1]);
     }
     threads.forEach((t) => {
       if (t.root_user) allUserIds.push(t.root_user);
@@ -342,6 +364,7 @@
     const allChannelIds = [
       ...threads.map((t) => t.channel_id),
       ...channelPosts.map((cp) => cp.channel_id),
+      ...mentionedChannelIds,
     ];
     const channelIds = [...new Set(allChannelIds.filter(Boolean))];
     const channels = { ...cachedChannels };
@@ -373,6 +396,9 @@
     }
     for (const im of (counts.ims || [])) {
       if (im.last_read) lastRead[im.id] = im.last_read;
+    }
+    for (const mp of (counts.mpims || [])) {
+      if (mp.last_read) lastRead[mp.id] = mp.last_read;
     }
 
     // 7. Custom emoji
@@ -550,12 +576,10 @@
       const { requestId } = event.data;
       try {
         const result = await slackApi('saved.list', { limit: 25, filter: 'saved', include_tombstones: true });
-        console.log('[fslack] saved.list raw result:', JSON.stringify(result).slice(0, 2000));
         const cutoff = Math.floor(Date.now() / 1000) - 72 * 60 * 60;
         const items = (result.saved_items || []).filter(
           (item) => item.state !== 'completed' && (item.date_created || 0) >= cutoff
         );
-        console.log('[fslack] saved items after filter:', items.length, 'cutoff:', cutoff);
         const itemsWithMessages = await Promise.all(
           items.map(async (item) => {
             try {
@@ -582,17 +606,14 @@
               }
 
               if (message) message = { ...message, text: extractText(message) };
-              console.log('[fslack] saved msg fetch', item.item_id, item.ts, '→', message ? 'ok: ' + message.text?.slice(0, 50) : 'not found');
               return { ...item, message };
-            } catch (e) {
-              console.log('[fslack] saved msg fetch THREW', item.item_id, item.ts, e);
+            } catch {
               return item;
             }
           })
         );
         window.postMessage({ type: `${FSLACK}:savedResult`, requestId, items: itemsWithMessages }, '*');
-      } catch (e) {
-        console.log('[fslack] fetchSaved error:', e);
+      } catch {
         window.postMessage({ type: `${FSLACK}:savedResult`, requestId, items: [] }, '*');
       }
     }
