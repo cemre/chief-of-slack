@@ -964,7 +964,7 @@ function renderDmItem(dm, data, cssClass) {
       <span class="item-time">${formatTime(latest.ts)}</span>
     </div>
     <div class="item-right">`;
-  for (const m of dm.messages) {
+  for (const m of [...dm.messages].reverse()) {
     html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}${renderFiles(m.files)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
@@ -993,12 +993,12 @@ function renderChannelItem(cp, data, cssClass) {
     const zendesk = extractZendeskSummary(cp._summary);
     html += `<div class="item-text">${escapeHtml(zendesk || cp._summary)}</div>`;
   } else {
-    const visibleMsgs = cp.messages.slice(0, 3);
+    const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
       html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
     }
-    if (cp.messages.length > 3) {
-      html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 3} more messages</div>`;
+    if (cp.messages.length > 10) {
+      html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
     }
   }
   html += itemActions(cp.channel_id, latest?.ts, null, false, ch, cssClass === 'noise-item');
