@@ -229,6 +229,7 @@ shadow.innerHTML = `
   }
   .item-channel[data-channel] { cursor: pointer; }
   .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
+  .inline-channel { display: inline; }
   .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
   .item-actions {
     display: flex;
@@ -478,6 +479,13 @@ shadow.innerHTML = `
     object-fit: contain;
     margin: 0 0.05em;
   }
+  .msg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .file-thumb { position: relative; display: inline-block; border-radius: 6px; overflow: hidden; border: 1px solid #363940; max-width: 240px; }
+  .file-thumb img { display: block; max-width: 240px; max-height: 160px; object-fit: contain; background: #222529; }
+  .file-thumb:hover { border-color: #1d9bd1; }
+  .file-video-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; }
+  .file-link { display: inline-block; color: #1d9bd1; font-size: 12px; text-decoration: none; padding: 2px 0; }
+  .file-link:hover { text-decoration: underline; }
 </style>
 <div id="overlay">
   <header>
@@ -680,7 +688,7 @@ function formatSlackHtml(text, users) {
       const pipeIdx = inner.indexOf('|');
       const cid = inner.slice(1, pipeIdx !== -1 ? pipeIdx : undefined);
       const name = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : (channelNameMap?.[cid] || cid);
-      result += `<span class="item-channel" data-channel="${escapeHtml(cid)}">#${escapeHtml(name)}</span>`;
+      result += `<span class="item-channel inline-channel" data-channel="${escapeHtml(cid)}">#${escapeHtml(name)}</span>`;
     } else if (inner.includes('|')) {
       const pipe = inner.indexOf('|');
       const url = inner.slice(0, pipe);
@@ -748,6 +756,29 @@ function plainTruncate(text, max = 150, users) {
   return cleaned.slice(0, max) + '...';
 }
 
+function renderFiles(files) {
+  if (!files || files.length === 0) return '';
+  let html = '<div class="msg-files">';
+  for (const f of files) {
+    const isImage = f.mimetype?.startsWith('image/');
+    const isVideo = f.mimetype?.startsWith('video/');
+    const name = escapeHtml(f.name || 'file');
+    if ((isImage || isVideo) && f.thumb) {
+      const href = f.url || f.thumb;
+      html += `<a class="file-thumb" href="${escapeHtml(href)}" target="_blank" rel="noopener">`;
+      html += `<img src="${escapeHtml(f.thumb)}" alt="${name}" loading="lazy">`;
+      if (isVideo) html += '<span class="file-video-badge">VIDEO</span>';
+      html += '</a>';
+    } else if (isVideo && f.url) {
+      html += `<a class="file-link" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">&#9654; ${name}</a>`;
+    } else if (f.url) {
+      html += `<a class="file-link" href="${escapeHtml(f.url)}" target="_blank" rel="noopener">&#128206; ${name}</a>`;
+    }
+  }
+  html += '</div>';
+  return html;
+}
+
 function uname(uid, users) {
   if (!uid) return 'bot';
   return users[uid] || uid;
@@ -810,14 +841,14 @@ function renderThreadItem(t, data, cssClass) {
       <span class="item-time">${formatTime(markAllTs)}</span>
     </div>
     <div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, data.users)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, data.users)}${renderFiles(t.root_files)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
   for (const r of unread) {
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}${renderFiles(r.files)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
   }
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread);
   html += '</div></div>';
@@ -843,7 +874,7 @@ function renderDmItem(dm, data, cssClass) {
     </div>
     <div class="item-right">`;
   for (const m of dm.messages) {
-    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}${renderFiles(m.files)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div></div>';
@@ -872,7 +903,7 @@ function renderChannelItem(cp, data, cssClass) {
   } else {
     const visibleMsgs = cp.messages.slice(0, 3);
     for (const m of visibleMsgs) {
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
     }
     if (cp.messages.length > 3) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 3} more messages</div>`;
@@ -903,7 +934,7 @@ function renderDeepSummarizedItem(cp, data) {
     : formatTime(newestTs);
   let messagesHtml = '';
   for (const m of msgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -939,7 +970,7 @@ function renderSavedItem(item, data) {
     </div>
     <div class="item-right">
       <div class="msg-row">
-        <div class="msg-content item-text">${user ? userLink(uname(user, data.users), channel, ts) + ' ' : ''}${textHtml}</div>
+        <div class="msg-content item-text">${user ? userLink(uname(user, data.users), channel, ts) + ' ' : ''}${textHtml}${renderFiles(msg.files)}</div>
         <span class="action-btn action-complete-saved" data-item-id="${escapeHtml(channel)}" data-ts="${escapeHtml(ts)}" title="Mark complete">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"></polyline>
@@ -958,7 +989,7 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   let messagesHtml = '';
   for (const m of allMsgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
 
   let contentHtml;
@@ -1694,7 +1725,7 @@ window.addEventListener('message', (event) => {
   let html = '';
   for (const r of seenReplies) {
     const userName = data ? uname(r.user, data.users) : r.user;
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}</div>${msgActions(channel, r.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}${renderFiles(r.files)}</div>${msgActions(channel, r.ts)}</div>`;
   }
   container.innerHTML = html;
 
@@ -2030,7 +2061,7 @@ function runBotThreadSummarization(whenFreeItems, data) {
       const deepMsgId = `${key}-msgs`;
       let messagesHtml = '';
       for (const m of cp.messages) {
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
       }
       const rightEl = itemEl.querySelector('.item-right');
       const actionsEl = itemEl.querySelector('.item-actions');
@@ -2259,14 +2290,14 @@ function render(data) {
           <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
         </div>
         <div class="item-right">
-          <div class="item-text">${userLink(uname(t.root_user, users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, users)}</div>`;
+          <div class="item-text">${userLink(uname(t.root_user, users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, users)}${renderFiles(t.root_files)}</div>`;
       const seenCount = Math.max(0, (t.reply_count || 0) - unread.length);
       if (seenCount > 0) {
         html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unread.map(r => r.ts).join(',')}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
         html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
       }
       for (const r of unread) {
-        html += `<div class="item-reply">${userLink(uname(r.user, users), t.channel_id, r.ts)} ${truncate(r.text, 1000, users)}</div>`;
+        html += `<div class="item-reply">${userLink(uname(r.user, users), t.channel_id, r.ts)} ${truncate(r.text, 1000, users)}${renderFiles(r.files)}</div>`;
       }
       html += '</div></div>';
     }
@@ -2285,7 +2316,7 @@ function render(data) {
           <span class="item-time">${formatTime(lastMsg.ts)}</span>
         </div>
         <div class="item-right">
-          <div class="item-text">${userLink(lastMsg.subtype === 'bot_message' ? 'Bot' : uname(lastMsg.user, users), dm.channel_id, lastMsg.ts)} ${truncate(lastMsg.text, 1000, users)}</div>
+          <div class="item-text">${userLink(lastMsg.subtype === 'bot_message' ? 'Bot' : uname(lastMsg.user, users), dm.channel_id, lastMsg.ts)} ${truncate(lastMsg.text, 1000, users)}${renderFiles(lastMsg.files)}</div>
         </div>
       </div>`;
     }
@@ -2308,7 +2339,7 @@ function render(data) {
       html += `</div>
         <div class="item-right">`;
       for (const m of cp.messages.slice(0, 3)) {
-        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 200, users)}</div>`;
+        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 200, users)}${renderFiles(m.files)}</div>`;
       }
       if (cp.messages.length > 3) {
         html += `<div class="item-reply-count">+${cp.messages.length - 3} more</div>`;

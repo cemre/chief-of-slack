@@ -146,6 +146,45 @@
     return '';
   }
 
+  // Extract file/image/video metadata from a message for inline rendering
+  function extractFiles(m) {
+    if (!m) return null;
+    const files = [];
+
+    // 1. m.files[] — uploaded files
+    if (m.files?.length) {
+      for (const f of m.files) {
+        if (f.mode === 'tombstone') continue;
+        const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || null;
+        const url = f.url_private || null;
+        if (thumb || url) {
+          files.push({ name: f.name || 'file', mimetype: f.mimetype || '', thumb, url });
+        }
+      }
+    }
+
+    // 2. m.attachments[].image_url — attachment images (skip forwarded/shared avatars)
+    if (m.attachments?.length) {
+      for (const att of m.attachments) {
+        if (att.is_msg_unfurl || att.is_share) continue;
+        if (att.image_url) {
+          files.push({ name: att.title || 'image', mimetype: 'image/', thumb: att.image_url, url: att.image_url });
+        }
+      }
+    }
+
+    // 3. m.blocks[] with type === 'image' — image blocks
+    if (m.blocks?.length) {
+      for (const block of m.blocks) {
+        if (block.type === 'image' && block.image_url) {
+          files.push({ name: block.alt_text || block.title?.text || 'image', mimetype: 'image/', thumb: block.image_url, url: block.image_url });
+        }
+      }
+    }
+
+    return files.length > 0 ? files : null;
+  }
+
   function progress(step, detail) {
     window.postMessage({ type: `${FSLACK}:progress`, step, detail }, '*');
   }
@@ -170,6 +209,7 @@
           ts: r.ts,
           bot_id: r.bot_id,
           subtype: r.subtype,
+          files: extractFiles(r),
         }));
         // Filter: skip if all unread replies are from self
         const othersUnread = unread.filter((r) => r.user !== selfId);
@@ -180,6 +220,7 @@
           channel_id: t.root_msg?.channel,
           ts: t.root_msg?.ts,
           root_text: extractText(t.root_msg || {}),
+          root_files: extractFiles(t.root_msg || {}),
           root_user: t.root_msg?.user,
           reply_count: t.root_msg?.reply_count || 0,
           reply_users: t.root_msg?.reply_users || [],
@@ -212,6 +253,7 @@
             ts: m.ts,
             subtype: m.subtype,
             bot_id: m.bot_id,
+            files: extractFiles(m),
           }));
         if (msgs.length > 0) {
           dms.push({
@@ -255,6 +297,7 @@
               bot_id: m.bot_id,
               reply_count: m.reply_count || 0,
               reply_users: m.reply_users || [],
+              files: extractFiles(m),
             }));
           if (msgs.length > 0) {
             const channelPost = {
@@ -279,6 +322,7 @@
                     bot_id: m.bot_id,
                     reply_count: m.reply_count || 0,
                     reply_users: m.reply_users || [],
+                    files: extractFiles(m),
                   }));
                 const threadRoots = deepMsgs.filter((m) => m.reply_count > 0).slice(0, 5);
                 const deepThreads = await Promise.all(
@@ -291,6 +335,7 @@
                           user: reply.user,
                           text: extractText(reply),
                           ts: reply.ts,
+                          files: extractFiles(reply),
                         })),
                       };
                     } catch { return null; }
@@ -521,6 +566,7 @@
           user: m.user,
           text: extractText(m),
           ts: m.ts,
+          files: extractFiles(m),
         }));
         window.postMessage({ type: `${FSLACK}:repliesResult`, requestId, replies }, '*');
       } catch {
@@ -605,7 +651,7 @@
                 } catch {}
               }
 
-              if (message) message = { ...message, text: extractText(message) };
+              if (message) message = { ...message, text: extractText(message), files: extractFiles(message) };
               return { ...item, message };
             } catch {
               return item;
