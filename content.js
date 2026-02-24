@@ -273,6 +273,17 @@ shadow.innerHTML = `
     color: #1d9bd1;
     font-weight: 600;
   }
+  .msg-thread-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: #1d9bd1;
+    margin-left: 6px;
+    cursor: pointer;
+  }
+  .msg-thread-badge:hover { text-decoration: underline; }
+  .msg-thread-badge svg { flex-shrink: 0; }
   .item-reply {
     margin-top: 6px;
     padding-left: 12px;
@@ -908,6 +919,12 @@ function channelLink(label, channelId) {
   return `<span class="item-channel" data-channel="${channelId}">${label}</span>`;
 }
 
+function threadBadge(m, channel) {
+  if (!m.reply_count) return '';
+  const n = m.reply_count;
+  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${m.ts}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>${n} ${n === 1 ? 'reply' : 'replies'}</span>`;
+}
+
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
 function msgActions(channel, ts) {
   const saved = savedMsgKeys.has(`${channel}:${ts}`);
@@ -918,6 +935,7 @@ function msgActions(channel, ts) {
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="yellow_heart">💛</span>
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="eyes" title="eyes">👀</span>
     <span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="${fill}"></path></svg></span>
+    <span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg></span>
   </div>`;
 }
 
@@ -1024,7 +1042,7 @@ function renderChannelItem(cp, data, cssClass) {
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -1055,7 +1073,7 @@ function renderDeepSummarizedItem(cp, data) {
     : formatTime(newestTs);
   let messagesHtml = '';
   for (const m of msgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -1111,7 +1129,7 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   let messagesHtml = '';
   for (const m of allMsgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
 
   let contentHtml;
@@ -1575,6 +1593,15 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
+  // Thread badge: open thread in a new tab
+  const threadBadgeEl = e.target.closest('.msg-thread-badge');
+  if (threadBadgeEl) {
+    const { channel, ts } = threadBadgeEl.dataset;
+    localStorage.setItem('fslack_hide_once', Date.now());
+    window.open(`/archives/${channel}/p${ts.replace('.', '')}`, '_blank');
+    return;
+  }
+
   // Channel name: open channel in a new tab
   const channelEl = e.target.closest('.item-channel[data-channel]');
   if (channelEl) {
@@ -1651,6 +1678,39 @@ bodyEl.addEventListener('click', (e) => {
       chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
       window.postMessage({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` }, '*');
     }
+    return;
+  }
+
+  // Reply to individual message (threaded reply from gutter)
+  const msgReplyBtn = e.target.closest('.action-msg-reply');
+  if (msgReplyBtn) {
+    const msgRow = msgReplyBtn.closest('.msg-row');
+    if (!msgRow || msgRow.nextElementSibling?.classList.contains('reply-form')) return;
+    const { channel, ts } = msgReplyBtn.dataset;
+    const form = document.createElement('div');
+    form.className = 'reply-form';
+    form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="Reply in thread... (⌘Enter to send)"></textarea><button class="reply-send">Send</button>`;
+    msgRow.insertAdjacentElement('afterend', form);
+    const input = form.querySelector('.reply-input');
+    for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
+      input.addEventListener(evt, (ev) => ev.stopPropagation());
+    }
+    input.focus();
+    function autoResize() {
+      input.style.height = 'auto';
+      input.style.height = input.scrollHeight + 'px';
+    }
+    input.addEventListener('input', autoResize);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && input.value.trim()) {
+        ev.preventDefault();
+        sendReply(form, channel, ts, input.value.trim());
+      }
+      if (ev.key === 'Escape') form.remove();
+    });
+    form.querySelector('.reply-send').addEventListener('click', () => {
+      if (input.value.trim()) sendReply(form, channel, ts, input.value.trim());
+    });
     return;
   }
 
@@ -2052,7 +2112,10 @@ window.addEventListener('message', (event) => {
     if (msg.ok) {
       const text = form.querySelector('.reply-input').value;
       const item = form.closest('.item');
-      const replyHtml = `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
+      const isMsgLevel = form.previousElementSibling?.classList.contains('msg-row');
+      const replyHtml = isMsgLevel
+        ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div></div>`
+        : `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
       form.insertAdjacentHTML('beforebegin', replyHtml);
       form.remove();
       // Auto mark as read, same flow as clicking "mark read" (undo works for free)
@@ -2559,7 +2622,7 @@ function render(data) {
       html += `</div>
         <div class="item-right">`;
       for (const m of cp.messages.slice(0, 3)) {
-        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 200, users)}${renderFiles(m.files)}</div>`;
+        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 200, users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}</div>`;
       }
       if (cp.messages.length > 3) {
         html += `<div class="item-reply-count">+${cp.messages.length - 3} more</div>`;
