@@ -438,6 +438,7 @@ function showFromCache() {
   if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
   lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
   renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular);
+  runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
   return true;
 }
 
@@ -523,7 +524,19 @@ function formatSlackHtml(text, users) {
   return result;
 }
 
+function extractZendeskSummary(text) {
+  if (!text) return null;
+  const idx = text.indexOf('Request Summary');
+  if (idx === -1) return null;
+  let after = text.slice(idx + 'Request Summary'.length).replace(/^[\s:]+/, '');
+  const newline = after.indexOf('\n');
+  if (newline !== -1) after = after.slice(0, newline);
+  return after.trim() || null;
+}
+
 function truncate(text, max = 200, users) {
+  const zendesk = extractZendeskSummary(text);
+  if (zendesk) return escapeHtml(zendesk);
   const cleaned = cleanSlackText(text, users);
   if (cleaned.length <= max) return formatSlackHtml(text, users);
   const id = `trunc_${++truncateId}`;
@@ -692,7 +705,7 @@ function renderDeepSummarizedItem(cp, data) {
     ? `${formatTime(oldestTs)} → ${formatTime(newestTs)}`
     : formatTime(newestTs);
   let messagesHtml = '';
-  for (const m of msgs.slice(0, 10)) {
+  for (const m of msgs) {
     messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
@@ -715,11 +728,50 @@ function renderDeepSummarizedItem(cp, data) {
   </div>`;
 }
 
+function renderBotThreadItem(cp, data, cssClass) {
+  const ch = data.channels[cp.channel_id] || cp.channel_id;
+  const allMsgs = cp.messages;
+  const key = `bot-thread-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
+  const deepMsgId = `${key}-msgs`;
+
+  let messagesHtml = '';
+  for (const m of allMsgs) {
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+  }
+
+  let contentHtml;
+  if (cp._botSummary) {
+    contentHtml = `
+      <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
+      <div style="display:flex;gap:12px;margin-top:6px;">
+        <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${allMsgs.length} message${allMsgs.length === 1 ? '' : 's'} ↓</span>
+        <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" style="margin-top:0">mark as read</span>
+      </div>
+      <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>`;
+  } else {
+    contentHtml = `
+      <div id="${key}-summary" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Analyzing discussion...</div>
+      <div class="deep-messages" style="display:block">${messagesHtml}</div>`;
+  }
+
+  return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
+    <div class="item-left">
+      ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
+      <span class="item-time">${formatTime(allMsgs[allMsgs.length - 1]?.ts)}</span>
+    </div>
+    <div class="item-right">
+      ${contentHtml}
+      ${itemActions(cp.channel_id, allMsgs[allMsgs.length - 1]?.ts, null, false, ch, cssClass === 'noise-item')}
+    </div>
+  </div>`;
+}
+
 function renderAnyItem(item, data, cssClass) {
   if (item._type === 'thread') return renderThreadItem(item, data, cssClass);
   if (item._type === 'dm') return renderDmItem(item, data, cssClass);
   if (item._type === 'channel') {
     if (item._deepSummary) return renderDeepSummarizedItem(item, data);
+    if (item._isBotThread) return renderBotThreadItem(item, data, cssClass);
     return renderChannelItem(item, data, cssClass);
   }
   return '';
@@ -780,23 +832,25 @@ function applyPreFilters(data) {
     // #help-dia without @mention → hard drop (no LLM needed)
     if (chName === 'help-dia' && !cp._isMentioned) continue;
 
-    // All-bot messages → whenFree if 3+ replies, noise with summary otherwise (drop if no text)
+    // All-bot messages → extract individual engaged threads to whenFree, rest to noise
     if (cp.messages.every(isBot)) {
-      if (cp._deepAnalysis) {
-        noise.push(cp); // deep summarization path will handle it
-        continue;
+      const threadData = cp.fullMessages?.threads || [];
+      const engagedMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 2);
+      let elevated = 0;
+      for (const m of engagedMsgs) {
+        const thread = threadData.find((t) => t.rootTs === m.ts);
+        if (!thread || thread.messages.length === 0) continue;
+        whenFree.push({
+          _type: 'channel',
+          _isBotThread: true,
+          channel_id: cp.channel_id,
+          mention_count: 0,
+          messages: [m, ...thread.messages],
+          sort_ts: thread.messages[thread.messages.length - 1]?.ts || m.ts,
+        });
+        elevated++;
       }
-      const hasEngagement = cp.messages.some((m) => (m.reply_count || 0) >= 3);
-      if (hasEngagement) {
-        const replierIds = [...new Set(
-          cp.messages
-            .filter((m) => (m.reply_count || 0) >= 3)
-            .flatMap((m) => m.reply_users || [])
-        )];
-        cp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-        cp._replierOverflow = Math.max(0, replierIds.length - 3);
-        whenFree.push(cp);
-      } else {
+      if (elevated === 0) {
         const texts = cp.messages
           .map((m) => cleanSlackText(m.text || '', users))
           .filter(Boolean);
@@ -825,7 +879,7 @@ function applyPreFilters(data) {
 }
 
 // ── Serialize items for LLM ──
-function serializeForLlm(forLlm, data) {
+function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
   const items = [];
   const meta = data.channelMeta || {};
 
@@ -864,7 +918,7 @@ function serializeForLlm(forLlm, data) {
     const cp = forLlm.channelPosts[i];
     const ch = data.channels[cp.channel_id] || cp.channel_id;
     items.push({
-      id: `channel_${i}`,
+      id: `channel_${i + channelIndexOffset}`,
       type: 'channel',
       channel: ch,
       isPrivate: meta[cp.channel_id]?.isPrivate || false,
@@ -900,8 +954,8 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     if (cat === 'act_now') { actNow.push(item); return; }
     if (cat === 'priority') { priority.push(item); return; }
 
-    // High-volume channels need summarization — route to noise regardless of LLM cat
-    if (item._deepAnalysis) { noise.push(item); return; }
+    // Public channel posts without @mention always go to noise (deep summarization pipeline)
+    if (item._type === 'channel' && !isPrivate && !isMentioned) { noise.push(item); return; }
 
     if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
     if (cat === 'drop') return;
@@ -1643,6 +1697,52 @@ async function kickoffVipSection(data) {
   vipArea.dataset.loaded = '1';
 }
 
+// ── Async bot thread summarization ──
+function runBotThreadSummarization(whenFreeItems, data) {
+  const botThreads = whenFreeItems.filter((item) => item._isBotThread && !item._botSummary);
+  if (botThreads.length === 0) return;
+
+  (async () => {
+    for (const cp of botThreads) {
+      const ch = data.channels[cp.channel_id] || cp.channel_id;
+      const messages = cp.messages.map((m) => ({
+        user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
+        text: plainTruncate(m.text, 200, data.users),
+      }));
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeBotThread`, data: { channel: ch, messages } }, resolve)
+        );
+      } catch { continue; }
+      if (!response?.summary?.summary) continue;
+
+      cp._botSummary = response.summary.summary;
+      const key = `bot-thread-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
+      const itemEl = shadow.querySelector(`[data-bot-thread-key="${key}"]`);
+      if (!itemEl) continue;
+
+      // Replace loading content with summary + expandable messages
+      const deepMsgId = `${key}-msgs`;
+      let messagesHtml = '';
+      for (const m of cp.messages) {
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+      }
+      const rightEl = itemEl.querySelector('.item-right');
+      const actionsEl = itemEl.querySelector('.item-actions');
+      const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
+      rightEl.innerHTML = `
+        <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[cp.messages.length - 1]?.ts}" style="margin-top:0">mark as read</span>
+        </div>
+        <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
+        ${actionsHtml}`;
+    }
+  })();
+}
+
 // ── Main orchestration: pre-filter → LLM → render ──
 let pendingPopular = null;
 let pendingVips = null;
@@ -1650,12 +1750,22 @@ let pendingVips = null;
 function prioritizeAndRender(data) {
   const preFiltered = applyPreFilters(data);
   const { forLlm } = preFiltered;
+  const meta = data.channelMeta || {};
+
+  // Split channel posts: private go in call 1 (with threads/DMs), public go in call 2
+  const privateChannelPosts = forLlm.channelPosts.filter((cp) => meta[cp.channel_id]?.isPrivate);
+  const publicChannelPosts = forLlm.channelPosts.filter((cp) => !meta[cp.channel_id]?.isPrivate);
+  // Reorder so private come first — mapPriorities uses array index for IDs
+  forLlm.channelPosts = [...privateChannelPosts, ...publicChannelPosts];
+  const privateCount = privateChannelPosts.length;
+
   const totalItems = forLlm.threads.length + forLlm.dms.length + forLlm.channelPosts.length;
 
   if (totalItems === 0) {
     // Only noise/dropped/bot — render what we have
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise };
     renderPrioritized(prioritized, data, pendingPopular);
+    runBotThreadSummarization(prioritized.whenFree, data);
     saveViewCache(data, pendingPopular, prioritized);
     return;
   }
@@ -1663,34 +1773,56 @@ function prioritizeAndRender(data) {
   // Show loading while LLM works
   bodyEl.innerHTML = '<div id="status"><div class="detail">Analyzing messages with AI...</div></div>';
 
-  const llmItems = serializeForLlm(forLlm, data);
   const selfName = data.users?.[data.selfId] || '';
 
-  chrome.runtime.sendMessage(
-    { type: `${FSLACK}:prioritize`, data: llmItems, selfName },
-    (response) => {
-      if (chrome.runtime.lastError) {
+  // Call 1: threads, DMs, private channels (act_now/priority/when_free/noise)
+  const importantItems = serializeForLlm(
+    { threads: forLlm.threads, dms: forLlm.dms, channelPosts: privateChannelPosts },
+    data, 0
+  );
+  // Call 2: public channels only (when_free vs noise — noise ones get deep summarization)
+  const publicItems = serializeForLlm(
+    { threads: [], dms: [], channelPosts: publicChannelPosts },
+    data, privateCount
+  );
+
+  function sendPrioritize(items) {
+    return new Promise((resolve) => {
+      if (items.length === 0) { resolve({ priorities: {}, noiseOrder: [] }); return; }
+      chrome.runtime.sendMessage({ type: `${FSLACK}:prioritize`, data: items, selfName }, (resp) => {
+        if (chrome.runtime.lastError) { resolve({ error: 'extension_error' }); return; }
+        resolve(resp);
+      });
+    });
+  }
+
+  Promise.all([sendPrioritize(importantItems), sendPrioritize(publicItems)]).then(([importantResp, publicResp]) => {
+      if (importantResp?.error === 'extension_error' || publicResp?.error === 'extension_error') {
         render(data);
         return;
       }
 
-      if (response?.error === 'no_api_key') {
+      if (importantResp?.error === 'no_api_key' || publicResp?.error === 'no_api_key') {
         showApiKeyPrompt(data);
         return;
       }
 
-      if (response?.error) {
-        console.warn('FSlack prioritization error:', response.error);
+      const firstError = importantResp?.error || publicResp?.error;
+      if (firstError) {
+        console.warn('FSlack prioritization error:', firstError);
         render(data);
         const banner = document.createElement('div');
         banner.className = 'warning-banner';
-        banner.textContent = `Prioritization unavailable: ${response.error}`;
+        banner.textContent = `Prioritization unavailable: ${firstError}`;
         bodyEl.insertBefore(banner, bodyEl.firstChild);
         return;
       }
 
-      const prioritized = mapPriorities(response.priorities, forLlm, preFiltered.noise, preFiltered.whenFree, data);
-      prioritized.noise = sortNoiseItems(prioritized.noise, response.noiseOrder);
+      const mergedPriorities = { ...importantResp.priorities, ...publicResp.priorities };
+      const mergedNoiseOrder = [...(importantResp.noiseOrder || []), ...(publicResp.noiseOrder || [])];
+
+      const prioritized = mapPriorities(mergedPriorities, forLlm, preFiltered.noise, preFiltered.whenFree, data);
+      prioritized.noise = sortNoiseItems(prioritized.noise, mergedNoiseOrder);
       const deepNoise = prioritized.noise.filter((item) =>
         (item.fullMessages?.history || item.messages || []).length >= 3
       );
@@ -1700,12 +1832,14 @@ function prioritizeAndRender(data) {
 
       if (deepNoise.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular);
+        runBotThreadSummarization(prioritized.whenFree, data);
         saveViewCache(data, pendingPopular, prioritized);
         return;
       }
 
       // Render main sections; deep-noise area shows loading indicator
       renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, true);
+      runBotThreadSummarization(prioritized.whenFree, data);
 
       // Summarize each deep-noise channel individually with a byte cap on messages sent
       const MAX_PAYLOAD_BYTES = 3000;
@@ -1753,6 +1887,8 @@ function prioritizeAndRender(data) {
           return { cp, result: response?.summary, error: response?.error };
         }));
 
+        if (deepNoiseArea) deepNoiseArea.textContent = '';
+
         const summarizedItems = [];
         for (const { cp, result } of results) {
           if (result?.summary) {
@@ -1796,8 +1932,7 @@ function prioritizeAndRender(data) {
 
         saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise });
       })();
-    }
-  );
+  });
 }
 
 // ── Fallback: unprioritized render (original 3-section layout) ──

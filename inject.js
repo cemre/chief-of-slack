@@ -87,7 +87,10 @@
       const att = m.attachments[0];
       // title/text are more meaningful than fallback (which is often "[no preview available]")
       const candidate = att.title || att.text || att.pretext;
-      if (candidate) return candidate;
+      if (candidate) {
+        if (att.fields?.length) return candidate + '\n' + att.fields.map((f) => `${f.title}: ${f.value}`).join('\n');
+        return candidate;
+      }
       // structured fields (e.g. Zendesk ticket metadata)
       if (att.fields?.length) return att.fields.map((f) => `${f.title}: ${f.value}`).join(' · ');
       // blocks inside the attachment
@@ -216,7 +219,7 @@
             oldest: ch.last_read,
           });
           const msgs = (hist.messages || [])
-            .filter((m) => !m.subtype || m.subtype === 'bot_message')
+            .filter((m) => !m.subtype || m.subtype === 'bot_message' || m.subtype === 'thread_broadcast')
             .filter((m) => m.user !== selfId)
             .map((m) => ({
               user: m.user,
@@ -234,14 +237,13 @@
               messages: msgs,
               sort_ts: msgs[0]?.ts || '0',
             };
-            channelPost._deepAnalysis = true;
             if (msgs.length >= 4) {
               try {
                 const deepHist = await slackApi('conversations.history', {
                   channel: ch.id, oldest: ch.last_read, limit: '20',
                 });
                 const deepMsgs = (deepHist.messages || [])
-                  .filter((m) => !m.subtype || m.subtype === 'bot_message')
+                  .filter((m) => !m.subtype || m.subtype === 'bot_message' || m.subtype === 'thread_broadcast')
                   .filter((m) => m.user !== selfId)
                   .map((m) => ({
                     user: m.user,

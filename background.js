@@ -219,6 +219,57 @@ async function handleVipSummarize(item) {
   }
 }
 
+// ── Build bot thread summarization prompt ──
+function buildBotThreadPrompt(item) {
+  const serialized = JSON.stringify(item.messages, null, 0);
+  return `A bot posted an automated report in #${item.channel} and people replied in a thread.
+
+Summarize in 2-3 sentences:
+- What the issue or item is about (from the bot message)
+- Key points from the discussion — who said what, use first names
+- Current status: resolved, triaged, or still open
+
+MESSAGES (first is the bot post, rest are replies):
+${serialized}
+
+Respond with ONLY a JSON object: {"summary": "..."}
+No markdown fences, no explanation.`;
+}
+
+// ── Call Claude API for bot thread summarization ──
+async function handleBotThreadSummarize(item) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: buildBotThreadPrompt(item) }],
+      }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Message handler ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === `${FSLACK}:prioritize`) {
@@ -231,6 +282,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeVip`) {
     handleVipSummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:summarizeBotThread`) {
+    handleBotThreadSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {
