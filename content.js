@@ -1232,6 +1232,21 @@ function applyPreFilters(data) {
     cp._isMentioned = allCpTexts.includes(`<@${selfId}>`)
       || allCpLower.includes(' gem ') || allCpLower.includes(' cemre ');
 
+    // dia-dogfooding / dia-help: elevate posts with 10+ replies to whenFree
+    const chName = channels[cp.channel_id] || '';
+    if ((chName === 'dia-dogfooding' || chName === 'dia-help') && !cp._isMentioned) {
+      const hotThread = cp.messages.some((m) => (m.reply_count || 0) >= 10);
+      if (hotThread) {
+        const replierIds = [...new Set(
+          cp.messages.filter((m) => (m.reply_count || 0) >= 10).flatMap((m) => m.reply_users || [])
+        )];
+        cp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
+        cp._replierOverflow = Math.max(0, replierIds.length - 3);
+        whenFree.push(cp);
+        continue;
+      }
+    }
+
     // User-marked digest channels
     if (digestChannels[cp.channel_id]) {
       routeToDigest(cp);
