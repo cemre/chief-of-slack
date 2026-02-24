@@ -455,10 +455,10 @@
   }
 
   const VIP_QUERIES = [
-    { name: 'JM',     query: 'from:@jm' },
+    { name: 'JM',     query: 'from:<@U02KNNU0ZBN>' },
     { name: 'Josh',   query: 'from:@josh' },
     { name: 'Samir',  query: 'from:@samir' },
-    { name: 'Ori',    query: 'from:@Ori' },
+    { name: 'Ori',    query: 'from:<@U0ABNTRG4HJ>' },
     { name: 'Leith',  query: 'from:@leith' },
     { name: 'Jane',   query: 'from:@jane' },
     { name: 'Dustin', query: 'from:@dustin' },
