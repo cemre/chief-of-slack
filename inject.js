@@ -501,10 +501,34 @@
     if (msgType === `${FSLACK}:saveMessage`) {
       const { channel, ts, requestId } = event.data;
       try {
-        await slackApi('saved.add', { channel, timestamp: ts, item_type: 'message', date_created: Math.floor(Date.now() / 1000), due: '', complete: 'false' });
+        const now = Math.floor(Date.now() / 1000);
+        await slackApi('saved.add', {
+          channel,
+          timestamp: ts,
+          item_type: 'message',
+          item_id: channel,
+          date_created: now,
+          date_due: 0,
+          date_completed: 0,
+          date_updated: now,
+          is_archived: false,
+          date_snoozed_until: 0,
+          ts,
+          state: 'in_progress',
+        });
         window.postMessage({ type: `${FSLACK}:saveResult`, requestId, ok: true }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:saveResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:unsaveMessage`) {
+      const { channel, ts, requestId } = event.data;
+      try {
+        await slackApi('saved.delete', { channel, ts, item_type: 'message', item_id: channel });
+        window.postMessage({ type: `${FSLACK}:unsaveResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:unsaveResult`, requestId, ok: false }, '*');
       }
     }
 

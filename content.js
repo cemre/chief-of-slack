@@ -277,7 +277,7 @@ shadow.innerHTML = `
   .action-btn:hover { background: #363940; color: #d1d2d3; }
   .action-btn.active { color: #ecb22e; }
   .action-btn.reacted { opacity: 0.3; pointer-events: none; }
-  .action-btn.saved { color: #ecb22e; pointer-events: none; }
+  .action-btn.saved { color: #ecb22e; }
   .item.read-done { opacity: 0.4; }
   .reply-form {
     display: flex;
@@ -1193,19 +1193,27 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Save action
+  // Save / unsave toggle
   const saveBtn = e.target.closest('.action-save');
-  if (saveBtn && !saveBtn.classList.contains('saved')) {
+  if (saveBtn) {
     const { channel, ts } = saveBtn.dataset;
-    // Save locally immediately so the icon fills right away
-    saveBtn.classList.add('saved');
-    const svgPath = saveBtn.querySelector('svg path');
-    if (svgPath) svgPath.setAttribute('fill', 'currentColor');
     const key = `${channel}:${ts}`;
-    savedMsgKeys.add(key);
-    chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
-    // Best-effort sync to Slack in background
-    window.postMessage({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` }, '*');
+    const svgPath = saveBtn.querySelector('svg path');
+    if (saveBtn.classList.contains('saved')) {
+      // Unsave
+      saveBtn.classList.remove('saved');
+      if (svgPath) svgPath.setAttribute('fill', 'none');
+      savedMsgKeys.delete(key);
+      chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
+      window.postMessage({ type: `${FSLACK}:unsaveMessage`, channel, ts, requestId: `unsave_${Date.now()}` }, '*');
+    } else {
+      // Save
+      saveBtn.classList.add('saved');
+      if (svgPath) svgPath.setAttribute('fill', 'currentColor');
+      savedMsgKeys.add(key);
+      chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
+      window.postMessage({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` }, '*');
+    }
     return;
   }
 
