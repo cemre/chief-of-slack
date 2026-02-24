@@ -422,6 +422,7 @@ shadow.innerHTML = `
     align-items: flex-end;
     gap: 8px;
     margin-top: 8px;
+    margin-bottom: 16px;
   }
   .reply-input {
     flex: 1;
@@ -1041,7 +1042,9 @@ function renderChannelItem(cp, data, cssClass) {
     <div class="item-right">`;
   if (cp._summary) {
     const zendesk = extractZendeskSummary(cp._summary);
-    html += `<div class="item-text">${escapeHtml(zendesk || cp._summary)}</div>`;
+    const summaryMsg = cp.messages[0];
+    const senderName = summaryMsg ? (summaryMsg.subtype === 'bot_message' ? 'Bot' : uname(summaryMsg.user, data.users)) : 'Bot';
+    html += `<div class="msg-row"><div class="msg-content item-text">${userLink(senderName, cp.channel_id, summaryMsg?.ts)} ${escapeHtml(zendesk || cp._summary)}</div>${summaryMsg ? msgActions(cp.channel_id, summaryMsg.ts) : ''}</div>`;
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
