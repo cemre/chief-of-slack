@@ -20,6 +20,7 @@ background.js → Claude API
 - **Overlay, not popup**: Chrome popups close when you click away. Shadow DOM isolates from Slack's CSS.
 - **No `chrome.runtime.onMessage` in content.js**: Orphaned content scripts (after extension reload) cause "Could not establish connection" errors. content.js uses `chrome.runtime.sendMessage` with callback (one-shot) instead.
 - **inject.js in page context**: Content scripts can't access `localStorage` or send cookies. inject.js runs where Slack's auth state lives.
+- **Manual extension reload required**: Claude cannot reload the local unpacked extension. After code changes, the user must go to `chrome://extensions` and click the reload button (or press Cmd+R on the extension card) for changes to take effect.
 
 ## Slack API
 
