@@ -649,6 +649,7 @@ let digestChannels = {};     // { [channelId]: channelName } — always force to
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
 let customEmojiMap = null;
+let standardEmojiMap = null;
 let channelNameMap = {};
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
@@ -659,6 +660,12 @@ chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels'], (ca
   }
   if (cached.fslackChannels) channelNameMap = cached.fslackChannels;
 });
+
+// Load standard emoji map (bundled JSON) async
+fetch(chrome.runtime.getURL('standard-emoji.json'))
+  .then(r => r.json())
+  .then(map => { standardEmojiMap = map; })
+  .catch(e => console.warn('[fslack] failed to load standard emoji:', e));
 
 function saveViewCache(data, popular, prioritized, savedItems = []) {
   cachedView = { data, popular, prioritized, saved: savedItems, ts: Date.now() };
@@ -863,7 +870,7 @@ function applyEmoji(html, customEmojis) {
         return `<img class="slack-emoji" src="${customUrl}" alt=":${lname}:" title=":${lname}:">`;
       }
     }
-    const unicode = EMOJI_MAP[lname];
+    const unicode = EMOJI_MAP[lname] || standardEmojiMap?.[lname];
     if (unicode) return unicode;
     return match; // not found — leave as-is
   });
