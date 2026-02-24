@@ -107,10 +107,8 @@ shadow.innerHTML = `
     font-size: 13px;
     color: #ababad;
     font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     display: block;
+    word-break: break-word;
   }
   .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
   .item-actions {
@@ -332,7 +330,7 @@ shadow.innerHTML = `
   .show-messages-link:hover { text-decoration: underline; }
   .deep-messages { display: none; margin-top: 8px; }
 
-  #bankruptcy-footer {
+  .noise-section-footer {
     padding: 32px 24px;
     display: flex;
     justify-content: center;
@@ -340,14 +338,14 @@ shadow.innerHTML = `
     border-top: 1px solid #2c2d30;
     margin-top: 8px;
   }
-  #bankruptcy-footer button {
+  .noise-section-footer button {
     background: transparent;
     border: 1px solid #3d3f42;
     color: #616061;
     font-size: 12px;
     font-weight: 500;
   }
-  #bankruptcy-footer button:hover:not(:disabled) {
+  .noise-section-footer button:hover:not(:disabled) {
     border-color: #565856;
     color: #ababad;
     background: transparent;
@@ -390,6 +388,7 @@ let injectReady = false;
 let cachedView = null; // { data, popular, prioritized, ts }
 let noiseChannels = {};      // { [channelId]: channelName } — always force to noise
 let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
+let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 
 function saveViewCache(data, popular, prioritized) {
   cachedView = { data, popular, prioritized, ts: Date.now() };
@@ -418,9 +417,10 @@ function startFetch() {
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
   resetFetchState();
   // Load cached names and pass to inject.js
-  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackSavedMsgs'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
+    savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     window.postMessage({
       type: `${FSLACK}:fetch`,
       cachedUsers: cached.fslackUsers || {},
@@ -429,7 +429,6 @@ function startFetch() {
     }, '*');
   });
   window.postMessage({ type: `${FSLACK}:fetchPopular` }, '*');
-  window.postMessage({ type: `${FSLACK}:fetchVips` }, '*');
 }
 
 function showFromCache() {
@@ -551,11 +550,14 @@ function userLink(name, channel, ts) {
 
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
 function msgActions(channel, ts) {
+  const saved = savedMsgKeys.has(`${channel}:${ts}`);
+  const saveClass = saved ? ' saved' : '';
+  const fill = saved ? 'currentColor' : 'none';
   return `<div class="msg-actions">
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍</span>
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="yellow_heart">💛</span>
     <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="eyes" title="eyes">👀</span>
-    <span class="action-btn action-save" data-channel="${channel}" data-ts="${ts}" title="Save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg></span>
+    <span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="${fill}"></path></svg></span>
   </div>`;
 }
 
@@ -675,6 +677,7 @@ function renderDeepSummarizedItem(cp, data) {
     heated_discussion: 'Heated Discussion',
     needs_attention: 'Needs Attention',
     feedback_digest: 'Feedback Digest',
+    activity_digest: 'Activity Digest',
   };
   const typeBadge = cp._deepType ? (typeLabels[cp._deepType] || cp._deepType) : '';
   const msgs = cp.fullMessages?.history || cp.messages;
@@ -700,9 +703,7 @@ function renderDeepSummarizedItem(cp, data) {
         <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${msgs.length} message${msgs.length === 1 ? '' : 's'} ↓</span>
         <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
-      </div>
-      <div class="item-actions" style="visibility:visible">
-        <span class="action-never-noise" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}">never noise</span>
+        <span class="show-messages-link action-never-noise" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">never noise</span>
       </div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
     </div>
@@ -904,16 +905,25 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     noise.push(item);
   }
 
-  forLlm.threads.forEach((t, i) => place(t, priorities[`thread_${i}`]));
-  forLlm.dms.forEach((dm, i) => place(dm, priorities[`dm_${i}`]));
-  forLlm.channelPosts.forEach((cp, i) => place(cp, priorities[`channel_${i}`]));
+  forLlm.threads.forEach((t, i) => { t._llmId = `thread_${i}`; place(t, priorities[`thread_${i}`]); });
+  forLlm.dms.forEach((dm, i) => { dm._llmId = `dm_${i}`; place(dm, priorities[`dm_${i}`]); });
+  forLlm.channelPosts.forEach((cp, i) => { cp._llmId = `channel_${i}`; place(cp, priorities[`channel_${i}`]); });
 
   return { actNow, priority, whenFree, noise };
 }
 
+function getItemSortTs(item) {
+  return parseFloat(item.sort_ts || item.messages?.[0]?.ts || '0');
+}
+
 // ── Render prioritized view ──
-function sortNoiseItems(items) {
+function sortNoiseItems(items, noiseOrder = []) {
+  const orderMap = new Map(noiseOrder.map((id, i) => [id, i]));
   return [...items].sort((a, b) => {
+    const aPos = orderMap.has(a._llmId) ? orderMap.get(a._llmId) : Infinity;
+    const bPos = orderMap.has(b._llmId) ? orderMap.get(b._llmId) : Infinity;
+    if (aPos !== bPos) return aPos - bPos;
+    // Fallback for pre-filtered items with no LLM ID (deterministic noise channels)
     const aMsgs = (a.fullMessages?.history || a.messages || []).length;
     const bMsgs = (b.fullMessages?.history || b.messages || []).length;
     if (bMsgs !== aMsgs) return bMsgs - aMsgs;
@@ -971,17 +981,30 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '<div id="status"><div class="detail">Analyzing remaining messages with AI...</div></div>';
   }
 
-  // Noise (collapsed by default) — only show when not loading
+  // Noise (collapsed by default) — split into recent (last 24h) and older
   if (!loading && (noise.length > 0 || deepNoiseLoading)) {
+    const noiseCutoff = Date.now() / 1000 - 86400;
+    const noiseRecent = noise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+    const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
     html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="noise-toggle">Show ${noise.length} noise item${noise.length === 1 ? '' : 's'}</div>`;
-    html += '<div class="noise-items" id="noise-items">';
-    for (const item of noise) html += renderAnyItem(item, data, 'noise-item');
-    if (deepNoiseLoading) {
-      html += '<div id="deep-noise-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Analyzing busy channels...</div>';
+    if (noiseRecent.length > 0 || deepNoiseLoading) {
+      html += `<div class="section-toggle" id="noise-recent-toggle">Show ${noiseRecent.length} noise item${noiseRecent.length === 1 ? '' : 's'} (last 24h)</div>`;
+      html += '<div class="noise-items" id="noise-recent-items">';
+      for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
+      if (deepNoiseLoading) {
+        html += '<div id="deep-noise-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Analyzing busy channels...</div>';
+      }
+      html += '</div>';
+      html += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent noise as read</button></div>`;
     }
-    html += `<div id="bankruptcy-footer"><button id="noise-mark-all-btn">Mark all noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
-    html += '</div></section>';
+    if (noiseOlder.length > 0) {
+      html += `<div class="section-toggle" id="noise-older-toggle">Show ${noiseOlder.length} older noise item${noiseOlder.length === 1 ? '' : 's'}</div>`;
+      html += '<div class="noise-items" id="noise-older-items">';
+      for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
+      html += '</div>';
+      html += `<div class="noise-section-footer"><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
+    }
+    html += '</section>';
   }
 
   // All clear
@@ -991,24 +1014,29 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 
   // VIP section placeholder (filled in async by kickoffVipSection)
   if (!loading) {
-    html += '<div id="vip-area"><div class="section-toggle" style="color:#3d3f42;cursor:default">Creeping on VIPs...</div></div>';
+    html += `<div id="vip-area">
+  <div class="section-toggle" id="vip-toggle">Creeping on VIPs ↓</div>
+  <div id="vip-items" style="display:none"></div>
+</div>`;
   }
 
   bodyEl.innerHTML = html;
   lastRenderData = data;
 
-  // Wire up noise toggle
-  const noiseToggle = shadow.getElementById('noise-toggle');
-  const noiseItems = shadow.getElementById('noise-items');
-  if (noiseToggle && noiseItems) {
-    noiseToggle.addEventListener('click', () => {
-      const expanded = noiseItems.classList.toggle('expanded');
-      const count = noiseItems.querySelectorAll('.item').length;
-      noiseToggle.textContent = expanded
-        ? `Hide ${count} noise item${count === 1 ? '' : 's'}`
-        : `Show ${count} noise item${count === 1 ? '' : 's'}`;
-    });
+  // Wire up noise toggles
+  function wireNoiseToggle(toggleId, itemsId, label) {
+    const toggle = shadow.getElementById(toggleId);
+    const items = shadow.getElementById(itemsId);
+    if (toggle && items) {
+      toggle.addEventListener('click', () => {
+        const expanded = items.classList.toggle('expanded');
+        const count = items.querySelectorAll('.item').length;
+        toggle.textContent = `${expanded ? 'Hide' : 'Show'} ${count} ${label}${count === 1 ? '' : 's'}`;
+      });
+    }
   }
+  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'noise item (last 24h)');
+  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'older noise item');
 }
 
 // ── Seen replies lazy loading ──
@@ -1018,6 +1046,27 @@ let replyRequestId = 0;
 bodyEl.addEventListener('click', (e) => {
   // Let links in messages open normally
   if (e.target.closest('a[href]')) return;
+
+  // VIP section lazy-load toggle
+  const vipToggle = e.target.closest('#vip-toggle');
+  if (vipToggle) {
+    const vipItems = shadow.getElementById('vip-items');
+    if (!vipItems) return;
+    const isExpanded = vipItems.style.display !== 'none';
+    if (isExpanded) {
+      vipItems.style.display = 'none';
+      vipToggle.textContent = 'Creeping on VIPs ↓';
+    } else {
+      vipItems.style.display = '';
+      vipToggle.textContent = 'Creeping on VIPs ↑';
+      if (!vipItems.dataset.loaded) {
+        vipItems.innerHTML = '<div style="padding:8px 24px;font-size:12px;color:#3d3f42">Loading VIP activity...</div>';
+        window.postMessage({ type: `${FSLACK}:fetchVips` }, '*');
+        kickoffVipSection(lastRenderData);
+      }
+    }
+    return;
+  }
 
   // Permalink: click username to navigate to message in Slack
   const userEl = e.target.closest('.item-user[data-channel]');
@@ -1200,10 +1249,11 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Mark all noise items as read
-  const noiseMarkAll = e.target.closest('#noise-mark-all-btn');
-  if (noiseMarkAll && !noiseMarkAll.disabled) {
-    const noiseItemEls = bodyEl.querySelectorAll('.item.noise-item:not(.read-done)');
+  // Mark recent noise as read
+  const noiseMarkRecent = e.target.closest('#noise-mark-recent-btn');
+  if (noiseMarkRecent && !noiseMarkRecent.disabled) {
+    const section = shadow.getElementById('noise-recent-items');
+    const noiseItemEls = section ? section.querySelectorAll('.item.noise-item:not(.read-done)') : [];
     let count = 0;
     for (const item of noiseItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
@@ -1214,8 +1264,28 @@ bodyEl.addEventListener('click', (e) => {
       window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
-    noiseMarkAll.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
-    noiseMarkAll.disabled = true;
+    noiseMarkRecent.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
+    noiseMarkRecent.disabled = true;
+    return;
+  }
+
+  // Mark older noise as read
+  const noiseMarkOlder = e.target.closest('#noise-mark-older-btn');
+  if (noiseMarkOlder && !noiseMarkOlder.disabled) {
+    const section = shadow.getElementById('noise-older-items');
+    const noiseItemEls = section ? section.querySelectorAll('.item.noise-item:not(.read-done)') : [];
+    let count = 0;
+    for (const item of noiseItemEls) {
+      const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
+      if (!markAll) continue;
+      const { channel, ts, threadTs } = markAll.dataset;
+      markAll.textContent = '...';
+      markAll.dataset.pending = 'true';
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      count++;
+    }
+    noiseMarkOlder.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
+    noiseMarkOlder.disabled = true;
     return;
   }
 
@@ -1337,6 +1407,9 @@ window.addEventListener('message', (event) => {
         btn.classList.add('saved');
         const svg = btn.querySelector('svg path');
         if (svg) svg.setAttribute('fill', 'currentColor');
+        const key = `${btn.dataset.channel}:${btn.dataset.ts}`;
+        savedMsgKeys.add(key);
+        chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
       }
     }
   }
@@ -1472,7 +1545,7 @@ async function kickoffVipSection(data) {
   }
   if (!vips) vips = [];
 
-  const vipArea = shadow.getElementById('vip-area');
+  const vipArea = shadow.getElementById('vip-items');
   if (!vipArea) return;
 
   // Filter out messages the user has already read in that channel
@@ -1489,6 +1562,7 @@ async function kickoffVipSection(data) {
   const relevantVips = filteredVips.filter((v) => v.messages.length > 0);
   if (relevantVips.length === 0) {
     vipArea.innerHTML = '';
+    vipArea.dataset.loaded = '1';
     return;
   }
 
@@ -1546,10 +1620,12 @@ async function kickoffVipSection(data) {
 
   if (!hasContent) {
     vipArea.innerHTML = '';
+    vipArea.dataset.loaded = '1';
     return;
   }
   vipHtml += '</section>';
   vipArea.innerHTML = vipHtml;
+  vipArea.dataset.loaded = '1';
 }
 
 // ── Main orchestration: pre-filter → LLM → render ──
@@ -1566,7 +1642,6 @@ function prioritizeAndRender(data) {
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise };
     renderPrioritized(prioritized, data, pendingPopular);
     saveViewCache(data, pendingPopular, prioritized);
-    kickoffVipSection(data);
     return;
   }
 
@@ -1600,19 +1675,22 @@ function prioritizeAndRender(data) {
       }
 
       const prioritized = mapPriorities(response.priorities, forLlm, preFiltered.noise, preFiltered.whenFree, data);
-      const regularNoise = prioritized.noise.filter((item) => !item._deepAnalysis);
-      const deepNoise = prioritized.noise.filter((item) => item._deepAnalysis);
+      prioritized.noise = sortNoiseItems(prioritized.noise, response.noiseOrder);
+      const deepNoise = prioritized.noise.filter((item) =>
+        (item.fullMessages?.history || item.messages || []).length >= 3
+      );
+      const regularNoise = prioritized.noise.filter((item) =>
+        (item.fullMessages?.history || item.messages || []).length < 3
+      );
 
       if (deepNoise.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular);
         saveViewCache(data, pendingPopular, prioritized);
-        kickoffVipSection(data);
         return;
       }
 
       // Render main sections; deep-noise area shows loading indicator
       renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, true);
-      kickoffVipSection(data);
 
       // Summarize each deep-noise channel individually with a byte cap on messages sent
       const MAX_PAYLOAD_BYTES = 3000;
@@ -1636,9 +1714,11 @@ function prioritizeAndRender(data) {
 
       (async () => {
         const deepNoiseArea = shadow.getElementById('deep-noise-area');
-        const noiseItemsEl = shadow.getElementById('noise-items');
-        const noiseToggleEl = shadow.getElementById('noise-toggle');
-        if (!noiseItemsEl) return;
+        const noiseRecentEl = shadow.getElementById('noise-recent-items');
+        const noiseOlderEl = shadow.getElementById('noise-older-items');
+        const noiseRecentToggleEl = shadow.getElementById('noise-recent-toggle');
+        const noiseOlderToggleEl = shadow.getElementById('noise-older-toggle');
+        if (!noiseRecentEl && !noiseOlderEl) return;
 
         let done = 0;
         if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... 0/${deepNoise.length}`;
@@ -1660,7 +1740,7 @@ function prioritizeAndRender(data) {
 
         const summarizedItems = [];
         for (const { cp, result } of results) {
-          if (result?.relevant) {
+          if (result?.summary) {
             cp._deepSummary = result.summary;
             cp._deepType = result.type;
           }
@@ -1668,17 +1748,30 @@ function prioritizeAndRender(data) {
         }
 
         // Sort ALL noise items by message count desc, then recency desc
-        const allNoise = sortNoiseItems([...regularNoise, ...summarizedItems]);
-        let sortedHtml = '';
-        for (const item of allNoise) sortedHtml += renderAnyItem(item, data, 'noise-item');
-        sortedHtml += `<div id="bankruptcy-footer"><button id="noise-mark-all-btn">Mark all noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
-        noiseItemsEl.innerHTML = sortedHtml;
+        const allNoise = sortNoiseItems([...regularNoise, ...summarizedItems], response.noiseOrder);
+        const noiseCutoff = Date.now() / 1000 - 86400;
+        const allNoiseRecent = allNoise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+        const allNoiseOlder = allNoise.filter((item) => getItemSortTs(item) < noiseCutoff);
 
-        // Update toggle count
-        if (noiseToggleEl) {
-          const total = allNoise.length;
-          const expanded = noiseItemsEl.classList.contains('expanded');
-          noiseToggleEl.textContent = (expanded ? 'Hide' : 'Show') + ` ${total} noise item${total === 1 ? '' : 's'}`;
+        if (noiseRecentEl) {
+          let recentHtml = '';
+          for (const item of allNoiseRecent) recentHtml += renderAnyItem(item, data, 'noise-item');
+          noiseRecentEl.innerHTML = recentHtml;
+          if (noiseRecentToggleEl) {
+            const count = allNoiseRecent.length;
+            const expanded = noiseRecentEl.classList.contains('expanded');
+            noiseRecentToggleEl.textContent = `${expanded ? 'Hide' : 'Show'} ${count} noise item${count === 1 ? '' : 's'} (last 24h)`;
+          }
+        }
+        if (noiseOlderEl) {
+          let olderHtml = '';
+          for (const item of allNoiseOlder) olderHtml += renderAnyItem(item, data, 'noise-item');
+          noiseOlderEl.innerHTML = olderHtml;
+          if (noiseOlderToggleEl) {
+            const count = allNoiseOlder.length;
+            const expanded = noiseOlderEl.classList.contains('expanded');
+            noiseOlderToggleEl.textContent = `${expanded ? 'Hide' : 'Show'} ${count} older noise item${count === 1 ? '' : 's'}`;
+          }
         }
 
         saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise });

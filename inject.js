@@ -526,10 +526,13 @@
     if (msgType === `${FSLACK}:muteChannel`) {
       const { channel, requestId } = event.data;
       try {
-        await slackApi('users.prefs.setNotifications', {
-          channel_ids: channel,
-          global: 'false',
-          prefs: JSON.stringify([{ name: 'muted', value: 'true' }]),
+        const boot = await slackApi('client.userBoot');
+        const current = boot.prefs?.muted_channels || '';
+        const muted = current ? current.split(',') : [];
+        if (!muted.includes(channel)) muted.push(channel);
+        await slackApi('users.prefs.set', {
+          name: 'muted_channels',
+          value: muted.join(','),
         });
         window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: true }, '*');
       } catch {

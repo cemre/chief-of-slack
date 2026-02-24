@@ -45,7 +45,7 @@ IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, cl
 ITEMS:
 ${serialized}
 
-Respond with ONLY a JSON object mapping each item's "id" to its category. No explanation, no markdown fences, just the JSON object.`;
+Respond with ONLY a JSON object mapping each item's "id" to its category, plus a "_noiseOrder" key: an array of all noise/drop item IDs sorted from most work-relevant (informational announcements, decisions, discussions in work channels) to least relevant (social banter, #random chatter, celebrations, memes, off-topic). No explanation, no markdown fences, just the JSON object.`;
 }
 
 // ── Call Claude API ──
@@ -82,7 +82,10 @@ async function handlePrioritize(payload, selfName) {
     const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return { priorities: JSON.parse(jsonMatch[0]) };
+      const parsed = JSON.parse(jsonMatch[0]);
+      const noiseOrder = Array.isArray(parsed._noiseOrder) ? parsed._noiseOrder : [];
+      delete parsed._noiseOrder;
+      return { priorities: parsed, noiseOrder };
     }
     return { error: 'parse_error', raw: text };
   } catch (err) {
@@ -93,24 +96,27 @@ async function handlePrioritize(payload, selfName) {
 // ── Build single-channel summarization prompt ──
 function buildSummarizePrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `Determine if this Slack channel has something worth surfacing: an intentional update or announcement, a decision made, a heated discussion, a situation that needs attention, or a collection of user feedback / support tickets. If not, return relevant: false.
+  return `Summarize what's happening in this Slack channel in 1-2 sentences, and pick the best type.
 
 Channel: #${item.channel}
 
-Types: "key_update" | "decision" | "heated_discussion" | "needs_attention" | "feedback_digest"
+Types:
+- "key_update": intentional announcement or update from a person
+- "decision": a decision was made
+- "heated_discussion": back-and-forth debate
+- "needs_attention": something requires action
+- "feedback_digest": user feedback, bug reports, or support tickets (e.g. Zendesk)
+- "activity_digest": automated activity feed (e.g. Linear, GitHub, Jira) — summarize active work areas or people involved
 
-Use "feedback_digest" when the channel contains multiple user feedback items, bug reports, or support tickets (e.g. Zendesk). Summarize the common themes or top issues.
-
-For relevant content, write a concise 1-2 sentence summary of what happened.
-- If multiple people are actively discussing something, name them and describe the back-and-forth (e.g. "Callan triaged it, Connor is looking into it").
-- If it's a one-way announcement or bot output, just summarize the content.
-- Use first names when available.
+If multiple people are discussing something, name them and describe the back-and-forth.
+For bot/automated channels, summarize the themes, active areas, or people mentioned.
+Use first names when available.
 
 MESSAGES:
 ${serialized}
 
 Respond with ONLY a JSON object:
-{"relevant": true, "type": "...", "summary": "..."} or {"relevant": false}
+{"relevant": true, "type": "...", "summary": "..."}
 No explanation, no markdown fences, just the JSON object.`;
 }
 
