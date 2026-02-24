@@ -387,6 +387,8 @@ shadow.getElementById('refresh-link').addEventListener('click', startFetch);
 let visible = false;
 let injectReady = false;
 let cachedView = null; // { data, popular, prioritized, ts }
+let noiseChannels = {};      // { [channelId]: channelName } — always force to noise
+let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
 
 function saveViewCache(data, popular, prioritized) {
   cachedView = { data, popular, prioritized, ts: Date.now() };
@@ -415,7 +417,9 @@ function startFetch() {
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
   resetFetchState();
   // Load cached names and pass to inject.js
-  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels'], (cached) => {
+    noiseChannels = cached.fslackNoiseChannels || {};
+    neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
     window.postMessage({
       type: `${FSLACK}:fetch`,
       cachedUsers: cached.fslackUsers || {},
@@ -553,12 +557,14 @@ function msgActions(channel, ts) {
   </div>`;
 }
 
-function itemActions(channel, markTs, threadTs, isDm) {
+function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false) {
   return `<div class="item-actions">
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}>mark read</span>
     <span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>reply</span>
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}">mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}">mute channel</span>` : ''}
+    ${!threadTs && !isDm && !isNoise ? `<span class="action-always-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">always noise</span>` : ''}
+    ${!threadTs && !isDm && isNoise ? `<span class="action-never-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">never noise</span>` : ''}
   </div>`;
 }
 
@@ -653,7 +659,7 @@ function renderChannelItem(cp, data, cssClass) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 3} more messages</div>`;
     }
   }
-  html += itemActions(cp.channel_id, latest?.ts, null, false);
+  html += itemActions(cp.channel_id, latest?.ts, null, false, ch, cssClass === 'noise-item');
   html += '</div></div>';
   return html;
 }
@@ -691,6 +697,9 @@ function renderDeepSummarizedItem(cp, data) {
         <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${msgs.length} message${msgs.length === 1 ? '' : 's'} ↓</span>
         <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
+      </div>
+      <div class="item-actions" style="visibility:visible">
+        <span class="action-never-noise" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}">never noise</span>
       </div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
     </div>
@@ -743,6 +752,17 @@ function applyPreFilters(data) {
   for (const cp of channelPosts) {
     cp._type = 'channel';
     const chName = channels[cp.channel_id] || '';
+
+    // Persistent channel preferences — bypass LLM entirely
+    if (noiseChannels[cp.channel_id]) {
+      noise.push(cp);
+      continue;
+    }
+    if (neverNoiseChannels[cp.channel_id]) {
+      whenFree.push(cp);
+      continue;
+    }
+
     const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
     const allCpLower = allCpTexts.toLowerCase();
     cp._isMentioned = allCpTexts.includes(`<@${selfId}>`)
@@ -1112,6 +1132,38 @@ bodyEl.addEventListener('click', (e) => {
       window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
     }
     window.postMessage({ type: `${FSLACK}:muteChannel`, channel, requestId: `mutech_${Date.now()}` }, '*');
+    return;
+  }
+
+  // "always noise"
+  const alwaysNoiseBtn = e.target.closest('.action-always-noise');
+  if (alwaysNoiseBtn && !alwaysNoiseBtn.dataset.pending) {
+    const { channel, channelName } = alwaysNoiseBtn.dataset;
+    alwaysNoiseBtn.dataset.pending = 'true';
+    alwaysNoiseBtn.textContent = '...';
+    noiseChannels[channel] = channelName || channel;
+    delete neverNoiseChannels[channel];
+    chrome.storage.local.set({ fslackNoiseChannels: noiseChannels, fslackNeverNoiseChannels: neverNoiseChannels }, () => {
+      alwaysNoiseBtn.closest('.item')?.remove();
+      cachedView = null;
+      chrome.storage.local.remove('fslackViewCache');
+    });
+    return;
+  }
+
+  // "never noise"
+  const neverNoiseBtn = e.target.closest('.action-never-noise');
+  if (neverNoiseBtn && !neverNoiseBtn.dataset.pending) {
+    const { channel, channelName } = neverNoiseBtn.dataset;
+    neverNoiseBtn.dataset.pending = 'true';
+    neverNoiseBtn.textContent = '...';
+    neverNoiseChannels[channel] = channelName || channel;
+    delete noiseChannels[channel];
+    chrome.storage.local.set({ fslackNeverNoiseChannels: neverNoiseChannels, fslackNoiseChannels: noiseChannels }, () => {
+      neverNoiseBtn.closest('.item')?.remove();
+      cachedView = null;
+      chrome.storage.local.remove('fslackViewCache');
+    });
     return;
   }
 
