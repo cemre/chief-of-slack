@@ -386,6 +386,8 @@ shadow.innerHTML = `
   }
   .msg-row:hover { background: rgba(255,255,255,0.04); }
   .msg-row:hover .msg-actions { opacity: 1; }
+  .msg-time { color: #616061; font-size: 11px; margin-left: 6px; opacity: 0; transition: opacity 0.15s; white-space: nowrap; }
+  .msg-row:hover .msg-time { opacity: 1; }
   .action-btn {
     cursor: pointer;
     font-size: 13px;
@@ -740,6 +742,24 @@ function formatTime(ts) {
   return `${Math.floor(diffHours / 24)}d`;
 }
 
+function formatTimeTooltip(ts) {
+  if (!ts) return '';
+  const d = new Date(parseFloat(ts) * 1000);
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `Today ${time}`;
+  const yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+  if (diffMs < 7 * 86400000) {
+    return `${d.toLocaleDateString([], { weekday: 'long' })} ${time}`;
+  }
+  return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+}
+
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
@@ -898,6 +918,11 @@ function msgActions(channel, ts) {
   </div>`;
 }
 
+function msgTime(ts) {
+  const t = formatTimeTooltip(ts);
+  return t ? `<span class="msg-time">${t}</span>` : '';
+}
+
 function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false) {
   return `<div class="item-actions">
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}>mark read</span>
@@ -932,14 +957,14 @@ function renderThreadItem(t, data, cssClass) {
       <span class="item-time">${formatTime(markAllTs)}</span>
     </div>
     <div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, data.users)}${renderFiles(t.root_files)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
   for (const r of unread) {
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}${renderFiles(r.files)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
   }
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread);
   html += '</div></div>';
@@ -965,7 +990,7 @@ function renderDmItem(dm, data, cssClass) {
     </div>
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
-    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}${renderFiles(m.files)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div></div>';
@@ -995,7 +1020,7 @@ function renderChannelItem(cp, data, cssClass) {
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -1026,7 +1051,7 @@ function renderDeepSummarizedItem(cp, data) {
     : formatTime(newestTs);
   let messagesHtml = '';
   for (const m of msgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -1062,7 +1087,7 @@ function renderSavedItem(item, data) {
     </div>
     <div class="item-right">
       <div class="msg-row">
-        <div class="msg-content item-text">${user ? userLink(uname(user, data.users), channel, ts) + ' ' : ''}${textHtml}${renderFiles(msg.files)}</div>
+        <div class="msg-content item-text">${user ? userLink(uname(user, data.users), channel, ts) + ' ' : ''}${textHtml}${renderFiles(msg.files)}${msgTime(ts)}</div>
         <span class="action-btn action-complete-saved" data-item-id="${escapeHtml(channel)}" data-ts="${escapeHtml(ts)}" title="Mark complete">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"></polyline>
@@ -1081,7 +1106,7 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   let messagesHtml = '';
   for (const m of allMsgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
 
   let contentHtml;
@@ -1373,7 +1398,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
           <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
         </div>
         <div class="item-right">
-          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 200, data.users)}${renderFiles(p.files)}</div>${msgActions(p.channel_id, p.ts)}</div>
+          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 200, data.users)}${renderFiles(p.files)}${msgTime(p.ts)}</div>${msgActions(p.channel_id, p.ts)}</div>
         </div>
       </div>`;
     }
@@ -1829,7 +1854,7 @@ window.addEventListener('message', (event) => {
   let html = '';
   for (const r of seenReplies) {
     const userName = data ? uname(r.user, data.users) : r.user;
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}${renderFiles(r.files)}</div>${msgActions(channel, r.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 200, data?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(channel, r.ts)}</div>`;
   }
   container.innerHTML = html;
 
@@ -2165,7 +2190,7 @@ function runBotThreadSummarization(whenFreeItems, data) {
       const deepMsgId = `${key}-msgs`;
       let messagesHtml = '';
       for (const m of cp.messages) {
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
       }
       const rightEl = itemEl.querySelector('.item-right');
       const actionsEl = itemEl.querySelector('.item-actions');
