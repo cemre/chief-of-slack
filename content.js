@@ -110,6 +110,8 @@ shadow.innerHTML = `
     display: block;
     word-break: break-word;
   }
+  .item-channel[data-channel] { cursor: pointer; }
+  .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
   .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
   .item-actions {
     display: flex;
@@ -335,8 +337,6 @@ shadow.innerHTML = `
     display: flex;
     justify-content: center;
     gap: 12px;
-    border-top: 1px solid #2c2d30;
-    margin-top: 8px;
   }
   .noise-section-footer button {
     background: transparent;
@@ -548,6 +548,11 @@ function userLink(name, channel, ts) {
   return `<span class="item-user" data-channel="${channel}" data-ts="${ts}">${name}:</span>`;
 }
 
+function channelLink(label, channelId) {
+  if (!channelId) return `<span class="item-channel">${label}</span>`;
+  return `<span class="item-channel" data-channel="${channelId}">${label}</span>`;
+}
+
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
 function msgActions(channel, ts) {
   const saved = savedMsgKeys.has(`${channel}:${ts}`);
@@ -591,7 +596,7 @@ function renderThreadItem(t, data, cssClass) {
   const markAllTs = lastUnread?.ts || t.ts;
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      <span class="item-channel">${channelLabel}</span>
+      ${channelLink(channelLabel, t.channel_id)}
       <span class="item-time">${formatTime(markAllTs)}</span>
     </div>
     <div class="item-right">
@@ -623,7 +628,7 @@ function renderDmItem(dm, data, cssClass) {
   const partner = dmPartnerName(dm, data);
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      <span class="item-channel">${escapeHtml(partner)}</span>
+      ${channelLink(escapeHtml(partner), dm.channel_id)}
       <span class="item-time">${formatTime(latest.ts)}</span>
     </div>
     <div class="item-right">`;
@@ -640,7 +645,7 @@ function renderChannelItem(cp, data, cssClass) {
   const latest = cp.messages[0];
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      <span class="item-channel">#${ch}</span>
+      ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
       <span class="item-time">${formatTime(latest?.ts)}</span>`;
   if (cp.mention_count > 0) {
     html += `<div class="item-mention">@${cp.mention_count}x</div>`;
@@ -693,7 +698,7 @@ function renderDeepSummarizedItem(cp, data) {
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
-      <span class="item-channel">#${escapeHtml(ch)}</span>
+      ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
       <span class="item-time">${timeDisplay}</span>
     </div>
     <div class="item-right">
@@ -964,12 +969,12 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     for (const p of popular) {
       html += `<div class="item interesting">
         <div class="item-left">
-          <span class="item-channel">#${p.channel_name || p.channel_id}</span>
+          ${channelLink('#' + escapeHtml(p.channel_name || p.channel_id), p.channel_id)}
           <span class="item-time">${formatTime(p.ts)}</span>
           <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
         </div>
         <div class="item-right">
-          <div class="msg-row"><div class="msg-content item-text">${truncate(p.text, 200, data.users)}</div>${msgActions(p.channel_id, p.ts)}</div>
+          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 200, data.users)}</div>${msgActions(p.channel_id, p.ts)}</div>
         </div>
       </div>`;
     }
@@ -988,21 +993,23 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
     html += '<section class="priority-section">';
     if (noiseRecent.length > 0 || deepNoiseLoading) {
-      html += `<div class="section-toggle" id="noise-recent-toggle">Show ${noiseRecent.length} noise item${noiseRecent.length === 1 ? '' : 's'} (last 24h)</div>`;
+      html += `<div class="section-toggle" id="noise-recent-toggle">Show ${noiseRecent.length} recent noise item${noiseRecent.length === 1 ? '' : 's'}</div>`;
       html += '<div class="noise-items" id="noise-recent-items">';
       for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
       if (deepNoiseLoading) {
         html += '<div id="deep-noise-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Analyzing busy channels...</div>';
       }
-      html += '</div>';
       html += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent noise as read</button></div>`;
+      html += '</div>';
     }
-    if (noiseOlder.length > 0) {
-      html += `<div class="section-toggle" id="noise-older-toggle">Show ${noiseOlder.length} older noise item${noiseOlder.length === 1 ? '' : 's'}</div>`;
+    // Always render older section when deepNoiseLoading so it's ready to receive items; hide if empty
+    if (noiseOlder.length > 0 || deepNoiseLoading) {
+      const olderHidden = noiseOlder.length === 0;
+      html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Show ${noiseOlder.length} older noise item${noiseOlder.length === 1 ? '' : 's'}</div>`;
       html += '<div class="noise-items" id="noise-older-items">';
       for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
+      html += `<div class="noise-section-footer" id="noise-older-footer"${olderHidden ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
       html += '</div>';
-      html += `<div class="noise-section-footer"><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
     }
     html += '</section>';
   }
@@ -1035,7 +1042,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       });
     }
   }
-  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'noise item (last 24h)');
+  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'recent noise item');
   wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'older noise item');
 }
 
@@ -1068,13 +1075,21 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Permalink: click username to navigate to message in Slack
+  // Permalink: click username to open message in a new tab
   const userEl = e.target.closest('.item-user[data-channel]');
   if (userEl) {
     const { channel, ts } = userEl.dataset;
-    hide();
-    sessionStorage.setItem('fslack_hide', '1');
-    window.location.href = `/archives/${channel}/p${ts.replace('.', '')}`;
+    localStorage.setItem('fslack_hide_once', Date.now());
+    window.open(`/archives/${channel}/p${ts.replace('.', '')}`, '_blank');
+    return;
+  }
+
+  // Channel name: open channel in a new tab
+  const channelEl = e.target.closest('.item-channel[data-channel]');
+  if (channelEl) {
+    const { channel } = channelEl.dataset;
+    localStorage.setItem('fslack_hide_once', Date.now());
+    window.open(`/archives/${channel}`, '_blank');
     return;
   }
 
@@ -1233,7 +1248,7 @@ bodyEl.addEventListener('click', (e) => {
   if (sendBtn) return; // handled by direct listener above
 
   // Show/hide full messages for deep-summarized items
-  const showMsgsLink = e.target.closest('.show-messages-link');
+  const showMsgsLink = e.target.closest('.show-messages-link[data-target]');
   if (showMsgsLink) {
     const targetId = showMsgsLink.dataset.target;
     const msgsDiv = shadow.getElementById(targetId);
@@ -1760,13 +1775,18 @@ function prioritizeAndRender(data) {
           if (noiseRecentToggleEl) {
             const count = allNoiseRecent.length;
             const expanded = noiseRecentEl.classList.contains('expanded');
-            noiseRecentToggleEl.textContent = `${expanded ? 'Hide' : 'Show'} ${count} noise item${count === 1 ? '' : 's'} (last 24h)`;
+            noiseRecentToggleEl.textContent = `${expanded ? 'Hide' : 'Show'} ${count} recent noise item${count === 1 ? '' : 's'}`;
           }
         }
         if (noiseOlderEl) {
           let olderHtml = '';
           for (const item of allNoiseOlder) olderHtml += renderAnyItem(item, data, 'noise-item');
           noiseOlderEl.innerHTML = olderHtml;
+          if (allNoiseOlder.length > 0) {
+            if (noiseOlderToggleEl) noiseOlderToggleEl.style.display = '';
+            const olderFooter = shadow.getElementById('noise-older-footer');
+            if (olderFooter) olderFooter.style.display = '';
+          }
           if (noiseOlderToggleEl) {
             const count = allNoiseOlder.length;
             const expanded = noiseOlderEl.classList.contains('expanded');
@@ -1794,7 +1814,7 @@ function render(data) {
       const lastUnread = unread[unread.length - 1];
       html += `<div class="item">
         <div class="item-left">
-          <span class="item-channel">#${ch}</span>
+          <span class="item-channel" data-channel="${t.channel_id}">#${ch}</span>
           <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
         </div>
         <div class="item-right">
@@ -1820,7 +1840,7 @@ function render(data) {
       if (!lastMsg) continue;
       html += `<div class="item">
         <div class="item-left">
-          <span class="item-channel">DM</span>
+          <span class="item-channel" data-channel="${dm.channel_id}">DM</span>
           <span class="item-time">${formatTime(lastMsg.ts)}</span>
         </div>
         <div class="item-right">
@@ -1839,7 +1859,7 @@ function render(data) {
       const latest = cp.messages[0];
       html += `<div class="item">
         <div class="item-left">
-          <span class="item-channel">#${ch}</span>
+          <span class="item-channel" data-channel="${cp.channel_id}">#${ch}</span>
           <span class="item-time">${formatTime(latest?.ts)}</span>`;
       if (cp.mention_count > 0) {
         html += `<div class="item-mention">@${cp.mention_count}x</div>`;
@@ -1970,7 +1990,10 @@ window.addEventListener('message', (event) => {
     if (visible && !showFromCache()) startFetch();
   }
 });
-if (sessionStorage.getItem('fslack_hide')) {
+const _hideOnce = localStorage.getItem('fslack_hide_once');
+if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
+  localStorage.removeItem('fslack_hide_once');
+} else if (sessionStorage.getItem('fslack_hide')) {
   sessionStorage.removeItem('fslack_hide');
 } else {
   // Load persisted view cache before showing — avoids unnecessary fetch

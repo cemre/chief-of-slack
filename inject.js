@@ -62,9 +62,21 @@
     return users;
   }
 
-  async function getSelfId() {
+  async function getSelfIdAndMuted() {
     const boot = await slackApi('client.userBoot');
-    return boot.self?.id;
+    const muted = new Set();
+    // New-style: all_notifications_prefs.channels[id].muted (Slack moved away from muted_channels)
+    try {
+      const notifPrefs = JSON.parse(boot.prefs?.all_notifications_prefs || '{}');
+      for (const [id, prefs] of Object.entries(notifPrefs.channels || {})) {
+        if (prefs.muted === true) muted.add(id);
+      }
+    } catch {}
+    // Legacy fallback: comma-separated muted_channels pref
+    for (const id of (boot.prefs?.muted_channels || '').split(',')) {
+      if (id) muted.add(id);
+    }
+    return { selfId: boot.self?.id, muted };
   }
 
   // Extract text from message, falling back to attachments/blocks
@@ -112,9 +124,9 @@
   async function fetchUnreads({ cachedUsers = {}, cachedChannels = {}, cachedChannelMeta = {} } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
-    const [counts, selfId] = await Promise.all([
+    const [counts, { selfId, muted }] = await Promise.all([
       slackApi('client.counts'),
-      getSelfId(),
+      getSelfIdAndMuted(),
     ]);
     progress(1, `Done. ${(counts.channels||[]).filter(c=>c.has_unreads).length} unread channels, self=${selfId}`);
 
@@ -189,7 +201,7 @@
     // 4. Get unread channel messages — most recent channels first
     progress(4, 'Fetching channel messages...');
     const unreadChannels = (counts.channels || [])
-      .filter((c) => c.has_unreads)
+      .filter((c) => c.has_unreads && !muted.has(c.id))
       .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
 
     const channelPosts = [];
