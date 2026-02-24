@@ -79,6 +79,11 @@
     return { selfId: boot.self?.id, muted };
   }
 
+  async function fetchEmojiList() {
+    const data = await slackApi('emoji.list');
+    return data.emoji || {};
+  }
+
   // Extract text from message, falling back to attachments/blocks
   function extractText(m) {
     if (m.text) return m.text;
@@ -124,7 +129,7 @@
     window.postMessage({ type: `${FSLACK}:progress`, step, detail }, '*');
   }
 
-  async function fetchUnreads({ cachedUsers = {}, cachedChannels = {}, cachedChannelMeta = {} } = {}) {
+  async function fetchUnreads({ cachedUsers = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
     const [counts, { selfId, muted }] = await Promise.all([
@@ -370,6 +375,12 @@
       if (im.last_read) lastRead[im.id] = im.last_read;
     }
 
+    // 7. Custom emoji
+    let emoji = cachedEmoji;
+    if (!emoji) {
+      try { emoji = await fetchEmojiList(); } catch { emoji = {}; }
+    }
+
     return {
       selfId,
       badges: counts.channel_badges,
@@ -381,6 +392,8 @@
       channels,
       channelMeta,
       lastRead,
+      emoji,
+      emojiFromCache: cachedEmoji !== null,
     };
   }
 
@@ -462,6 +475,7 @@
           cachedUsers: event.data.cachedUsers || {},
           cachedChannels: event.data.cachedChannels || {},
           cachedChannelMeta: event.data.cachedChannelMeta || {},
+          cachedEmoji: event.data.cachedEmoji || null,
         };
         const result = await fetchUnreads(cached);
         window.postMessage({ type: `${FSLACK}:result`, data: result }, '*');

@@ -2,6 +2,123 @@
 
 const FSLACK = 'fslack';
 
+const EMOJI_MAP = {
+  thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎',
+  heart: '❤️', hearts: '❤️', orange_heart: '🧡', yellow_heart: '💛',
+  green_heart: '💚', blue_heart: '💙', purple_heart: '💜', black_heart: '🖤',
+  white_heart: '🤍', brown_heart: '🤎', heavy_heart_exclamation: '❣️',
+  two_hearts: '💕', revolving_hearts: '💞', heartbeat: '💓', heartpulse: '💗',
+  sparkling_heart: '💖', cupid: '💘', gift_heart: '💝', heart_decoration: '💟',
+  fire: '🔥', tada: '🎉', sparkles: '✨', star: '⭐', star2: '🌟',
+  dizzy: '💫', boom: '💥', clap: '👏', eyes: '👀', pray: '🙏',
+  muscle: '💪', point_up: '☝️', point_up_2: '👆', point_down: '👇',
+  point_left: '👈', point_right: '👉', wave: '👋', ok_hand: '👌',
+  v: '✌️', crossed_fingers: '🤞', raised_hands: '🙌', open_hands: '👐',
+  raised_hand: '✋', vulcan_salute: '🖖', writing_hand: '✍️',
+  rocket: '🚀', airplane: '✈️', car: '🚗', house: '🏠', tree: '🌳',
+  sun: '☀️', sunny: '☀️', cloud: '☁️', snowflake: '❄️', rain: '🌧️',
+  zap: '⚡', rainbow: '🌈', earth_americas: '🌎', earth_africa: '🌍',
+  earth_asia: '🌏', globe_with_meridians: '🌐',
+  smile: '😄', smiley: '😃', grinning: '😀', laughing: '😆', sweat_smile: '😅',
+  joy: '😂', rofl: '🤣', slightly_smiling_face: '🙂', upside_down_face: '🙃',
+  wink: '😉', blush: '😊', innocent: '😇', heart_eyes: '😍', kissing_heart: '😘',
+  kissing: '😗', kissing_smiling_eyes: '😙', kissing_closed_eyes: '😚',
+  yum: '😋', stuck_out_tongue: '😛', stuck_out_tongue_winking_eye: '😜',
+  stuck_out_tongue_closed_eyes: '😝', money_mouth_face: '🤑', hugs: '🤗',
+  thinking: '🤔', thinking_face: '🤔', zipper_mouth_face: '🤐',
+  raised_eyebrow: '🤨', neutral_face: '😐', expressionless: '😑',
+  no_mouth: '😶', smirk: '😏', unamused: '😒', roll_eyes: '🙄',
+  grimacing: '😬', lying_face: '🤥', relieved: '😌', pensive: '😔',
+  sleepy: '😪', drooling_face: '🤤', sleeping: '😴', mask: '😷',
+  face_with_thermometer: '🤒', face_with_head_bandage: '🤕', nauseated_face: '🤢',
+  sneezing_face: '🤧', hot_face: '🥵', cold_face: '🥶', woozy_face: '🥴',
+  dizzy_face: '😵', exploding_head: '🤯', cowboy_hat_face: '🤠',
+  partying_face: '🥳', sunglasses: '😎', nerd_face: '🤓', monocle_face: '🧐',
+  confused: '😕', worried: '😟', slightly_frowning_face: '🙁', frowning_face: '☹️',
+  open_mouth: '😮', hushed: '😯', astonished: '😲', flushed: '😳',
+  pleading_face: '🥺', anguished: '😧', fearful: '😨', cold_sweat: '😰',
+  disappointed_relieved: '😥', cry: '😢', sob: '😭', scream: '😱',
+  confounded: '😖', persevere: '😣', disappointed: '😞', sweat: '😓',
+  weary: '😩', tired_face: '😫', yawning_face: '🥱', triumph: '😤',
+  rage: '😡', angry: '😠', skull: '💀', skull_and_crossbones: '☠️',
+  ghost: '👻', alien: '👽', space_invader: '👾', robot: '🤖', poop: '💩',
+  smiling_imp: '😈', imp: '👿', japanese_ogre: '👹', japanese_goblin: '👺',
+  clown_face: '🤡', lying_face2: '🤥', see_no_evil: '🙈', hear_no_evil: '🙉',
+  speak_no_evil: '🙊', kiss: '💋', love_letter: '💌', zzz: '💤',
+  anger: '💢', speech_balloon: '💬', thought_balloon: '💭',
+  white_check_mark: '✅', heavy_check_mark: '✔️', x: '❌', negative_squared_cross_mark: '❎',
+  warning: '⚠️', stop_sign: '🛑', no_entry: '⛔', prohibited: '🚫',
+  bulb: '💡', question: '❓', grey_question: '❔', grey_exclamation: '❕',
+  exclamation: '❗', heavy_exclamation_mark: '❗', bangbang: '‼️',
+  interrobang: '⁉️', recycle: '♻️', sos: '🆘', up: '🆙', cool: '🆒',
+  new: '🆕', free: '🆓', zero: '0️⃣', one: '1️⃣', two: '2️⃣', three: '3️⃣',
+  four: '4️⃣', five: '5️⃣', six: '6️⃣', seven: '7️⃣', eight: '8️⃣', nine: '9️⃣',
+  keycap_ten: '🔟', hash: '#️⃣', asterisk: '*️⃣',
+  100: '💯', 1234: '🔢', arrow_forward: '▶️', arrow_backward: '◀️',
+  arrow_up: '⬆️', arrow_down: '⬇️', arrow_left: '⬅️', arrow_right: '➡️',
+  arrows_clockwise: '🔃', arrows_counterclockwise: '🔄',
+  repeat: '🔁', repeat_one: '🔂', twisted_rightwards_arrows: '🔀',
+  information_source: 'ℹ️', abc: '🔤', abcd: '🔡', capital_abcd: '🔠',
+  chart: '💹', chart_with_upwards_trend: '📈', chart_with_downwards_trend: '📉',
+  bar_chart: '📊', clipboard: '📋', memo: '📝', pencil: '✏️', pencil2: '✏️',
+  paperclip: '📎', scissors: '✂️', calendar: '📅', date: '📅',
+  pushpin: '📌', round_pushpin: '📍', bookmark: '🔖', label: '🏷️',
+  moneybag: '💰', yen: '💴', dollar: '💵', euro: '💶', pound: '💷',
+  money_with_wings: '💸', credit_card: '💳', gem: '💎', trophy: '🏆',
+  medal_sports: '🏅', first_place_medal: '🥇', second_place_medal: '🥈',
+  third_place_medal: '🥉', ticket: '🎫', circus_tent: '🎪',
+  musical_note: '🎵', notes: '🎶', microphone: '🎤', headphones: '🎧',
+  radio: '📻', saxophone: '🎷', guitar: '🎸', musical_keyboard: '🎹',
+  trumpet: '🎺', violin: '🎻', banjo: '🪕', drum: '🥁',
+  iphone: '📱', calling: '📲', phone: '☎️', telephone_receiver: '📞',
+  pager: '📟', fax: '📠', battery: '🔋', electric_plug: '🔌',
+  computer: '💻', desktop_computer: '🖥️', printer: '🖨️', keyboard: '⌨️',
+  computer_mouse: '🖱️', trackball: '🖲️', minidisc: '💽', floppy_disk: '💾',
+  cd: '💿', dvd: '📀', abacus: '🧮', movie_camera: '🎥', film_strip: '🎞️',
+  film_projector: '📽️', clapper: '🎬', tv: '📺', camera: '📷',
+  camera_flash: '📸', video_camera: '📹', microscope: '🔬', telescope: '🔭',
+  satellite: '📡', syringe: '💉', pill: '💊', door: '🚪', bed: '🛏️',
+  couch_and_lamp: '🛋️', toilet: '🚽', shower: '🚿', bathtub: '🛁',
+  shopping_cart: '🛒', hammer: '🔨', wrench: '🔧', nut_and_bolt: '🔩',
+  toolbox: '🧰', link: '🔗', chains: '⛓️', hook: '🪝', ladder: '🪜',
+  thread: '🧵', spool: '🪡', yarn: '🧶', safety_pin: '🧷',
+  lock: '🔒', unlock: '🔓', key: '🔑', old_key: '🗝️', hammer_and_wrench: '🛠️',
+  dagger: '🗡️', sword: '⚔️', shield: '🛡️', smoking: '🚬', coffin: '⚰️',
+  urn: '⚱️', amphora: '🏺', crystal_ball: '🔮', mag: '🔍', mag_right: '🔎',
+  microscope2: '🔬', telescope2: '🔭', satellite_antenna: '📡',
+  syringe2: '💉', pill2: '💊', stethoscope: '🩺', adhesive_bandage: '🩹',
+  drop_of_blood: '🩸', test_tube: '🧪', petri_dish: '🧫', dna: '🧬',
+  safety_vest: '🦺', goggles: '🥽', lab_coat: '🥼',
+  bug: '🐛', ant: '🐜', bee: '🐝', butterfly: '🦋', snail: '🐌',
+  shell: '🐚', shamrock: '☘️', four_leaf_clover: '🍀', seedling: '🌱',
+  herb: '🌿', leaves: '🍃', maple_leaf: '🍁', fallen_leaf: '🍂',
+  mushroom: '🍄', chestnut: '🌰', apple: '🍎', green_apple: '🍏',
+  pear: '🍐', tangerine: '🍊', lemon: '🍋', banana: '🍌', watermelon: '🍉',
+  grapes: '🍇', strawberry: '🍓', melon: '🍈', cherries: '🍒',
+  peach: '🍑', mango: '🥭', pineapple: '🍍', coconut: '🥥',
+  kiwi_fruit: '🥝', tomato: '🍅', eggplant: '🍆', avocado: '🥑',
+  broccoli: '🥦', leafy_green: '🥬', cucumber: '🥒', hot_pepper: '🌶️',
+  corn: '🌽', carrot: '🥕', garlic: '🧄', onion: '🧅', potato: '🥔',
+  sweet_potato: '🍠', croissant: '🥐', bagel: '🥯', bread: '🍞',
+  baguette_bread: '🥖', pretzel: '🥨', cheese: '🧀', egg: '🥚',
+  cooking: '🍳', pancakes: '🥞', waffle: '🧇', bacon: '🥓',
+  cut_of_meat: '🥩', poultry_leg: '🍗', meat_on_bone: '🍖', hotdog: '🌭',
+  hamburger: '🍔', fries: '🍟', pizza: '🍕', sandwich: '🥪', stuffed_flatbread: '🥙',
+  falafel: '🧆', taco: '🌮', burrito: '🌯', salad: '🥗', shallow_pan_of_food: '🥘',
+  spaghetti: '🍝', ramen: '🍜', stew: '🍲', curry: '🍛', sushi: '🍣',
+  bento: '🍱', dumpling: '🥟', fried_shrimp: '🍤', rice_ball: '🍙',
+  rice: '🍚', rice_cracker: '🍘', fish_cake: '🍥', fortune_cookie: '🥠',
+  moon_cake: '🥮', oden: '🍢', dango: '🍡', shaved_ice: '🍧',
+  ice_cream: '🍨', icecream: '🍦', pie: '🥧', shortcake: '🍰', cake: '🎂',
+  cupcake: '🧁', candy: '🍬', lollipop: '🍭', chocolate_bar: '🍫',
+  popcorn: '🍿', doughnut: '🍩', cookie: '🍪', honey_pot: '🍯',
+  salt: '🧂', beer: '🍺', beers: '🍻', clinking_glasses: '🥂',
+  wine_glass: '🍷', cocktail: '🍸', tropical_drink: '🍹', beverage_box: '🧃',
+  mate: '🧉', cup_with_straw: '🥤', bubble_tea: '🧋', coffee: '☕',
+  tea: '🍵', sake: '🍶', champagne: '🍾', milk_glass: '🥛',
+};
+
+
 // Suppress "Could not establish connection" errors from orphaned content scripts
 // after extension reload. These are unhandled promise rejections from Chrome internals.
 window.addEventListener('unhandledrejection', (e) => {
@@ -350,6 +467,14 @@ shadow.innerHTML = `
     color: #ababad;
     background: transparent;
   }
+  .slack-emoji {
+    display: inline-block;
+    width: 1.2em;
+    height: 1.2em;
+    vertical-align: -0.25em;
+    object-fit: contain;
+    margin: 0 0.05em;
+  }
 </style>
 <div id="overlay">
   <header>
@@ -389,6 +514,15 @@ let cachedView = null; // { data, popular, prioritized, ts }
 let noiseChannels = {};      // { [channelId]: channelName } — always force to noise
 let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
+let customEmojiMap = null;
+
+// Preload custom emoji from cache for instant render on showFromCache()
+chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs'], (cached) => {
+  const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
+  if (cached.fslackEmoji && cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS) {
+    customEmojiMap = cached.fslackEmoji;
+  }
+});
 
 function saveViewCache(data, popular, prioritized) {
   cachedView = { data, popular, prioritized, ts: Date.now() };
@@ -417,15 +551,19 @@ function startFetch() {
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
   resetFetchState();
   // Load cached names and pass to inject.js
-  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackSavedMsgs'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
+    const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
+    const cachedEmoji = (cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS)
+      ? (cached.fslackEmoji || {}) : null;
     window.postMessage({
       type: `${FSLACK}:fetch`,
       cachedUsers: cached.fslackUsers || {},
       cachedChannels: cached.fslackChannels || {},
       cachedChannelMeta: cached.fslackChannelMeta || {},
+      cachedEmoji,
     }, '*');
   });
   window.postMessage({ type: `${FSLACK}:fetchPopular` }, '*');
@@ -521,7 +659,27 @@ function formatSlackHtml(text, users) {
     lastIndex = match.index + match[0].length;
   }
   result += escapeHtml(text.slice(lastIndex));
-  return result;
+  return applyEmoji(result, customEmojiMap);
+}
+
+function applyEmoji(html, customEmojis) {
+  return html.replace(/(<[^>]*>)|(:([a-z0-9_\-+']+):)/gi, (match, tag, _, name) => {
+    if (tag) return tag; // skip HTML tags unchanged
+    const lname = name.toLowerCase();
+    const customUrl = customEmojis?.[lname];
+    if (customUrl) {
+      if (customUrl.startsWith('alias:')) {
+        const aliasUrl = customEmojis?.[customUrl.slice(6)];
+        if (aliasUrl && !aliasUrl.startsWith('alias:'))
+          return `<img class="slack-emoji" src="${aliasUrl}" alt=":${lname}:" title=":${lname}:">`;
+      } else {
+        return `<img class="slack-emoji" src="${customUrl}" alt=":${lname}:" title=":${lname}:">`;
+      }
+    }
+    const unicode = EMOJI_MAP[lname];
+    if (unicode) return unicode;
+    return match; // not found — leave as-is
+  });
 }
 
 function extractZendeskSummary(text) {
@@ -540,7 +698,7 @@ function truncate(text, max = 200, users) {
   const cleaned = cleanSlackText(text, users);
   if (cleaned.length <= max) return formatSlackHtml(text, users);
   const id = `trunc_${++truncateId}`;
-  const short = escapeHtml(cleaned.slice(0, max));
+  const short = applyEmoji(escapeHtml(cleaned.slice(0, max)), customEmojiMap);
   const full = formatSlackHtml(text, users).replace(/\n/g, '<br>');
   return `<span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span>`;
 }
@@ -2083,7 +2241,7 @@ window.addEventListener('message', (event) => {
 
   if (msg.type === `${FSLACK}:progress`) {
     bodyEl.innerHTML = `<div id="status">
-      <div class="step">Step ${msg.step}/6</div>
+      <div class="step">Step ${msg.step}/7</div>
       <div class="detail">${msg.detail || ''}</div>
     </div>`;
   }
@@ -2091,13 +2249,18 @@ window.addEventListener('message', (event) => {
   if (msg.type === `${FSLACK}:result`) {
     pendingUnreads = msg.data;
     gotUnreads = true;
-    // Cache resolved user/channel names for next fetch
+    // Cache resolved user/channel names + emoji for next fetch
     if (msg.data) {
       const toStore = {};
       if (msg.data.users) toStore.fslackUsers = msg.data.users;
       if (msg.data.channels) toStore.fslackChannels = msg.data.channels;
       if (msg.data.channelMeta) toStore.fslackChannelMeta = msg.data.channelMeta;
+      if (msg.data.emoji && !msg.data.emojiFromCache) {
+        toStore.fslackEmoji = msg.data.emoji;
+        toStore.fslackEmojiTs = Date.now();
+      }
       if (Object.keys(toStore).length > 0) chrome.storage.local.set(toStore);
+      customEmojiMap = msg.data.emoji || null;
     }
     tryPrioritize();
   }
