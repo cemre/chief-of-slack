@@ -223,6 +223,7 @@
               sort_ts: msgs[0]?.ts || '0',
             };
             if (msgs.length >= 4) {
+              channelPost._deepAnalysis = true;
               try {
                 const deepHist = await slackApi('conversations.history', {
                   channel: ch.id, oldest: ch.last_read, limit: '20',
@@ -255,10 +256,10 @@
                     } catch { return null; }
                   })
                 );
-                channelPost._deepAnalysis = true;
                 channelPost.fullMessages = { history: deepMsgs, threads: deepThreads.filter(Boolean) };
               } catch {
-                // Deep fetch failed — proceed without deep analysis
+                // Deep fetch failed — fullMessages unavailable, summarization falls back to cp.messages
+                channelPost._deepFetchFailed = true;
               }
             }
             channelPosts.push(channelPost);
@@ -455,9 +456,9 @@
         } else {
           await slackApi('conversations.mark', { channel, ts });
         }
-        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: true }, '*');
+        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: true }, '*');
       } catch {
-        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, ok: false }, '*');
+        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: false }, '*');
       }
     }
 

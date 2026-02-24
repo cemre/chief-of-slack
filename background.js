@@ -90,29 +90,34 @@ async function handlePrioritize(payload, selfName) {
   }
 }
 
-// ── Build deep-analysis summarization prompt ──
-function buildSummarizePrompt(items) {
-  const serialized = JSON.stringify(items, null, 0);
-  return `For each busy channel below, determine if there is something worth surfacing: an intentional update or announcement, a decision made, a heated discussion, or a situation that needs attention. If not, return relevant: false.
+// ── Build single-channel summarization prompt ──
+function buildSummarizePrompt(item) {
+  const serialized = JSON.stringify(item.messages, null, 0);
+  return `Determine if this Slack channel has something worth surfacing: an intentional update or announcement, a decision made, a heated discussion, or a situation that needs attention. If not, return relevant: false.
+
+Channel: #${item.channel}
 
 Types: "key_update" | "decision" | "heated_discussion" | "needs_attention"
 
-For relevant items, write a concise 1-2 sentence summary of what happened.
+For relevant content, write a concise 1-2 sentence summary of what happened.
+- If multiple people are actively discussing something, name them and describe the back-and-forth (e.g. "Callan triaged it, Connor is looking into it").
+- If it's a one-way announcement or bot output, just summarize the content.
+- Use first names when available.
 
-ITEMS:
+MESSAGES:
 ${serialized}
 
-Respond with ONLY a JSON object mapping each item's "id" to its result:
-{"channel_0": {"relevant": true, "type": "...", "summary": "..."}, "channel_1": {"relevant": false}}
+Respond with ONLY a JSON object:
+{"relevant": true, "type": "...", "summary": "..."} or {"relevant": false}
 No explanation, no markdown fences, just the JSON object.`;
 }
 
-// ── Call Claude API for deep summarization ──
-async function handleSummarize(items) {
+// ── Call Claude API for single-channel summarization ──
+async function handleSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const prompt = buildSummarizePrompt(items);
+  const prompt = buildSummarizePrompt(item);
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
@@ -124,7 +129,7 @@ async function handleSummarize(items) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+        max_tokens: 256,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -139,7 +144,7 @@ async function handleSummarize(items) {
     const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return { summaries: JSON.parse(jsonMatch[0]) };
+      return { summary: JSON.parse(jsonMatch[0]) };
     }
     return { error: 'parse_error', raw: text };
   } catch (err) {
