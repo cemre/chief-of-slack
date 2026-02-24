@@ -1184,6 +1184,7 @@ function applyPreFilters(data) {
   function isBot(m) { return m.bot_id || m.subtype === 'bot_message'; }
 
   // Threads: annotate metadata for LLM
+  const diaChannelNames = new Set(['dia-dogfooding', 'help-dia']);
   for (const t of threads) {
     t._userReplied = (t.reply_users || []).includes(selfId);
     t._type = 'thread';
@@ -1193,6 +1194,17 @@ function applyPreFilters(data) {
     const textsLower = allTexts.toLowerCase();
     t._isMentioned = allTexts.includes(`<@${selfId}>`) || allTexts.includes(`@${selfId}`)
       || textsLower.includes(' gem ') || textsLower.includes(' cemre ');
+
+    // dia-dogfooding / help-dia threads: only surface if 10+ replies, rest → noise
+    const tChName = channels[t.channel_id] || '';
+    if (diaChannelNames.has(tChName)) {
+      if ((t.reply_count || 0) >= 10) {
+        whenFree.push(t);
+      } else {
+        noise.push(t);
+      }
+      continue;
+    }
 
     // All-bot unread replies → when free
     if ((t.unread_replies || []).every(isBot)) {
@@ -1232,19 +1244,20 @@ function applyPreFilters(data) {
     cp._isMentioned = allCpTexts.includes(`<@${selfId}>`)
       || allCpLower.includes(' gem ') || allCpLower.includes(' cemre ');
 
-    // dia-dogfooding / dia-help: only surface posts with 10+ replies (whenFree), rest → noise
+    // dia-dogfooding / help-dia: split — individual posts with 10+ replies → whenFree, rest → noise
     const chName = channels[cp.channel_id] || '';
-    if ((chName === 'dia-dogfooding' || chName === 'dia-help') && !cp._isMentioned) {
-      const hotThread = cp.messages.some((m) => (m.reply_count || 0) >= 10);
-      if (hotThread) {
-        const replierIds = [...new Set(
-          cp.messages.filter((m) => (m.reply_count || 0) >= 10).flatMap((m) => m.reply_users || [])
-        )];
-        cp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-        cp._replierOverflow = Math.max(0, replierIds.length - 3);
-        whenFree.push(cp);
-      } else {
-        noise.push(cp);
+    if (diaChannelNames.has(chName)) {
+      const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 10);
+      const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 10);
+      if (hotMsgs.length > 0) {
+        const hotCp = { ...cp, messages: hotMsgs, _type: 'channel' };
+        const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
+        hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
+        hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
+        whenFree.push(hotCp);
+      }
+      if (coldMsgs.length > 0) {
+        noise.push({ ...cp, messages: coldMsgs, _type: 'channel' });
       }
       continue;
     }
