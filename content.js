@@ -155,6 +155,9 @@ let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or 
 let customEmojiMap = null;
 let standardEmojiMap = null;
 let channelNameMap = {};
+let reactionRequestCounter = 0;
+const pendingReactButtons = {};
+const pendingUnreactButtons = {};
 let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
@@ -1650,12 +1653,18 @@ bodyEl.addEventListener('click', (e) => {
     if (reactBtn.classList.contains('reacted')) {
       reactBtn.style.opacity = '0.4';
       reactBtn.classList.remove('reacted');
-      window.postMessage({ type: `${FSLACK}:removeReaction`, channel, ts, emoji, requestId: `unreact_${Date.now()}` }, '*');
-      reactBtn.dataset.pending = 'unreact';
+      const requestId = `unreact_${Date.now()}_${++reactionRequestCounter}`;
+      pendingUnreactButtons[requestId] = reactBtn;
+      window.postMessage({ type: `${FSLACK}:removeReaction`, channel, ts, emoji, requestId }, '*');
+      reactBtn.dataset.pending = requestId;
+      reactBtn.dataset.pendingKind = 'unreact';
     } else {
       reactBtn.style.opacity = '0.4';
-      window.postMessage({ type: `${FSLACK}:addReaction`, channel, ts, emoji, requestId: `react_${Date.now()}` }, '*');
-      reactBtn.dataset.pending = 'react';
+      const requestId = `react_${Date.now()}_${++reactionRequestCounter}`;
+      pendingReactButtons[requestId] = reactBtn;
+      window.postMessage({ type: `${FSLACK}:addReaction`, channel, ts, emoji, requestId }, '*');
+      reactBtn.dataset.pending = requestId;
+      reactBtn.dataset.pendingKind = 'react';
     }
     return;
   }
@@ -2175,9 +2184,12 @@ window.addEventListener('message', (event) => {
   const msg = event.data || {};
 
   if (msg.type === `${FSLACK}:reactResult`) {
-    const btn = bodyEl.querySelector('.action-react[data-pending="react"]');
+    const btn = (msg.requestId && pendingReactButtons[msg.requestId])
+      || bodyEl.querySelector('.action-react[data-pending-kind="react"]');
+    if (msg.requestId) delete pendingReactButtons[msg.requestId];
     if (btn) {
       delete btn.dataset.pending;
+      delete btn.dataset.pendingKind;
       btn.style.opacity = '';
       if (msg.ok) {
         btn.classList.add('reacted');
@@ -2189,9 +2201,12 @@ window.addEventListener('message', (event) => {
   }
 
   if (msg.type === `${FSLACK}:unreactResult`) {
-    const btn = bodyEl.querySelector('.action-react[data-pending="unreact"]');
+    const btn = (msg.requestId && pendingUnreactButtons[msg.requestId])
+      || bodyEl.querySelector('.action-react[data-pending-kind="unreact"]');
+    if (msg.requestId) delete pendingUnreactButtons[msg.requestId];
     if (btn) {
       delete btn.dataset.pending;
+      delete btn.dataset.pendingKind;
       btn.style.opacity = '';
       if (!msg.ok) btn.classList.add('reacted'); // revert on failure
     }
