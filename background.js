@@ -226,6 +226,59 @@ async function handleVipSummarize(item) {
   }
 }
 
+// ── Build thread reply summarization prompt ──
+function buildThreadReplySummarizePrompt(item) {
+  const serialized = JSON.stringify(item.replies, null, 0);
+  return `A thread in #${item.channel} has new unread replies. The original message and replies are below.
+
+Summarize the unread replies in 1-2 terse sentences. Focus on:
+- What was discussed or decided
+- Key points from different people (use first names)
+- Current status if relevant
+
+ORIGINAL POST by ${item.rootUser}: ${item.rootText}
+
+UNREAD REPLIES:
+${serialized}
+
+Respond with ONLY a JSON object: {"summary": "..."}
+No markdown fences, no explanation.`;
+}
+
+// ── Call Claude API for thread reply summarization ──
+async function handleThreadReplySummarize(item) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: buildThreadReplySummarizePrompt(item) }],
+      }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Build bot thread summarization prompt ──
 function buildBotThreadPrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
@@ -293,6 +346,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeBotThread`) {
     handleBotThreadSummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:summarizeThreadReplies`) {
+    handleThreadReplySummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {

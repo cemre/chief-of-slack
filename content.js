@@ -234,6 +234,7 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
+    runThreadReplySummarization([...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])], cachedView.data);
     return true;
   }
   // No full cache, but we fetched recently — skip auto-fetch
@@ -793,15 +794,37 @@ function renderThreadItem(t, data, cssClass) {
   html += `</div>
     <div class="item-right">
       <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 400, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+  // Thread reply summarization for non-DM threads with 5+ unread replies
+  const shouldSummarize = !t._isDmThread && unread.length >= 5;
+  const threadKey = shouldSummarize ? `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}` : '';
+  const repliesMsgId = shouldSummarize ? `${threadKey}-replies` : '';
+
   html += '<div class="thread-replies-container">';
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
+
+  if (shouldSummarize) {
+    if (t._threadSummary) {
+      html += `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(t._threadSummary)}</div>`;
+      html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
+    } else {
+      html += `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies...</div>`;
+      html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
+    }
+    html += `<div class="deep-messages" id="${repliesMsgId}">`;
+  }
+
   for (const r of unread) {
     html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
   }
+
+  if (shouldSummarize) {
+    html += '</div>';
+  }
+
   html += '</div>';
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread);
   html += '</div></div>';
@@ -1811,12 +1834,13 @@ bodyEl.addEventListener('click', (e) => {
     const targetId = showMsgsLink.dataset.target;
     const msgsDiv = shadow.getElementById(targetId);
     if (msgsDiv) {
+      if (!showMsgsLink.dataset.showText) showMsgsLink.dataset.showText = showMsgsLink.textContent;
       if (msgsDiv.style.display === 'block') {
         msgsDiv.style.display = 'none';
-        showMsgsLink.textContent = 'show messages ↓';
+        showMsgsLink.textContent = showMsgsLink.dataset.showText;
       } else {
         msgsDiv.style.display = 'block';
-        showMsgsLink.textContent = 'hide messages ↑';
+        showMsgsLink.textContent = 'hide ↑';
       }
     }
     return;
@@ -2371,6 +2395,53 @@ function runBotThreadSummarization(whenFreeItems, data) {
   })();
 }
 
+// ── Async thread reply summarization (non-DM threads with 5+ unread) ──
+function runThreadReplySummarization(allItems, data) {
+  const threads = allItems.filter((item) => item._type === 'thread' && !item._isDmThread && !item._threadSummary && (item.unread_replies || []).length >= 5);
+  if (threads.length === 0) return;
+
+  const MAX_PAYLOAD_BYTES = 3000;
+
+  (async () => {
+    for (const t of threads) {
+      const ch = data.channels[t.channel_id] || t.channel_id;
+      const unread = t.unread_replies || [];
+      const replies = [];
+      let bytes = 0;
+      for (const r of unread) {
+        const entry = { user: uname(r.user, data.users), text: plainTruncate(r.text, 400, data.users) };
+        const s = JSON.stringify(entry);
+        if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
+        bytes += s.length;
+        replies.push(entry);
+      }
+
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({
+            type: `${FSLACK}:summarizeThreadReplies`,
+            data: { channel: ch, rootUser: uname(t.root_user, data.users), rootText: plainTruncate(t.root_text, 400, data.users), replies }
+          }, resolve)
+        );
+      } catch { continue; }
+      if (!response?.summary?.summary) continue;
+
+      t._threadSummary = response.summary.summary;
+      const threadKey = `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
+      const loadingEl = shadow.getElementById(`${threadKey}-loading`);
+      if (!loadingEl) continue;
+
+      // Replace loading text with summary
+      const summaryEl = document.createElement('div');
+      summaryEl.className = 'deep-summary';
+      summaryEl.style.cssText = 'margin:6px 0 2px';
+      summaryEl.textContent = t._threadSummary;
+      loadingEl.replaceWith(summaryEl);
+    }
+  })();
+}
+
 // ── Main orchestration: pre-filter → LLM → render ──
 let pendingPopular = null;
 let pendingVips = null;
@@ -2419,6 +2490,7 @@ function prioritizeAndRender(data) {
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise, digests: preFiltered.digests };
     renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
     runBotThreadSummarization(prioritized.whenFree, data);
+    runThreadReplySummarization([...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree], data);
     saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
     return;
   }
@@ -2485,9 +2557,12 @@ function prioritizeAndRender(data) {
       );
       const digestItems = prioritized.digests || [];
 
+      const allElevated = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
+
       if (deepNoise.length === 0 && digestItems.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
         runBotThreadSummarization(prioritized.whenFree, data);
+        runThreadReplySummarization(allElevated, data);
         saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
         return;
       }
@@ -2495,6 +2570,7 @@ function prioritizeAndRender(data) {
       // Render main sections; loading indicators show for each type
       renderPrioritized({ ...prioritized, noise: regularNoise, digests: digestItems }, data, pendingPopular, false, deepNoise.length > 0, pendingSaved || [], digestItems.length > 0);
       runBotThreadSummarization(prioritized.whenFree, data);
+      runThreadReplySummarization(allElevated, data);
 
       // Summarize each deep-noise and digest channel individually with a byte cap on messages sent
       const MAX_PAYLOAD_BYTES = 3000;
