@@ -3,6 +3,7 @@
 const FSLACK = 'fslack';
 const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
 const SEEN_REPLIES_CHUNK = 10;
+const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
 
 
 // Suppress "Could not establish connection" errors from orphaned content scripts
@@ -155,18 +156,20 @@ let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or 
 let customEmojiMap = null;
 let standardEmojiMap = null;
 let channelNameMap = {};
+let cachedUserMap = {};
 let reactionRequestCounter = 0;
 const pendingReactButtons = {};
 const pendingUnreactButtons = {};
 let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
-chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels'], (cached) => {
+chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers'], (cached) => {
   const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
   if (cached.fslackEmoji && cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS) {
     customEmojiMap = cached.fslackEmoji;
   }
   if (cached.fslackChannels) channelNameMap = cached.fslackChannels;
+  if (cached.fslackUsers) mergeCachedUsers(cached.fslackUsers);
 });
 
 // Load standard emoji map (bundled JSON) async
@@ -214,6 +217,7 @@ function startFetch() {
     digestChannels = cached.fslackDigestChannels || {};
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     vipSeenTimestamps = cached.fslackVipSeen || {};
+    mergeCachedUsers(cached.fslackUsers || {});
     const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
     const cachedEmoji = (cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS)
       ? (cached.fslackEmoji || {}) : null;
@@ -1530,6 +1534,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   focusedItemIndex = -1;
   resetThreadUnreadIndex();
   lastRenderData = data;
+  mentionLookupDirty = true;
 
   // Wire up noise toggles
   function wireNoiseToggle(toggleId, itemsId, label) {
@@ -1553,6 +1558,75 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 let lastRenderData = null;
 let threadUnreadIndex = null;
 let threadUnreadIndexSource = null;
+let mentionLookupCache = null;
+let mentionLookupDirty = true;
+
+function normalizeMentionToken(token) {
+  return token ? token.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+}
+
+function mergeCachedUsers(users) {
+  if (!users) return;
+  let changed = false;
+  for (const [uid, name] of Object.entries(users || {})) {
+    if (!uid || !name || cachedUserMap[uid] === name) continue;
+    cachedUserMap[uid] = name;
+    changed = true;
+  }
+  if (changed) mentionLookupDirty = true;
+}
+
+function buildMentionLookup(users = {}) {
+  const map = new Map();
+  for (const [uid, name] of Object.entries(users || {})) {
+    if (!uid || !name) continue;
+    const rawParts = name.match(/[A-Za-z0-9]+/g) || [];
+    const candidates = new Set([name, name.replace(/\s+/g, '')]);
+    rawParts.forEach((p) => candidates.add(p));
+    if (rawParts.length >= 2) {
+      const first = rawParts[0];
+      const last = rawParts[rawParts.length - 1];
+      if (first && last) candidates.add(first + last[0]);
+    }
+    for (const candidate of candidates) {
+      const norm = normalizeMentionToken(candidate);
+      if (!norm) continue;
+      const existing = map.get(norm);
+      if (!existing) map.set(norm, uid);
+      else if (existing !== uid) map.set(norm, null); // ambiguous token
+    }
+  }
+  return map;
+}
+
+function ensureMentionLookup() {
+  if (!mentionLookupDirty && mentionLookupCache) return mentionLookupCache;
+  const users = { ...cachedUserMap, ...(lastRenderData?.users || {}) };
+  if (Object.keys(users).length === 0) {
+    mentionLookupCache = null;
+    mentionLookupDirty = false;
+    return null;
+  }
+  mentionLookupCache = buildMentionLookup(users);
+  mentionLookupDirty = false;
+  return mentionLookupCache;
+}
+
+function convertUserMentions(text) {
+  if (!text) return text;
+  const lookup = ensureMentionLookup();
+  if (!lookup || lookup.size === 0) return text;
+  return text.replace(/@([A-Za-z0-9._'-]+)/g, (match, rawName, offset, full) => {
+    const prevChar = offset > 0 ? full[offset - 1] : '';
+    if (prevChar === '<' || (prevChar && /[A-Za-z0-9._-]/.test(prevChar))) return match;
+    if (RESERVED_MENTIONS.has(rawName.toLowerCase())) return match;
+    const norm = normalizeMentionToken(rawName);
+    if (!norm) return match;
+    const userId = lookup.get(norm);
+    if (!userId) return match;
+    return `<@${userId}>`;
+  });
+}
 
 function resetThreadUnreadIndex() {
   threadUnreadIndex = null;
@@ -2280,27 +2354,31 @@ window.addEventListener('message', (event) => {
 });
 
 // ── Send reply helper ──
-function autoMarkItemRead(item, { requireThread = false } = {}) {
+function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   if (!item) return;
   const markAll = item.querySelector('.mark-all-read');
   if (!markAll) return;
   if (requireThread && !markAll.dataset.threadTs) return;
   if (markAll.classList.contains('done') || markAll.dataset.pending) return;
   const { channel, ts, threadTs } = markAll.dataset;
+  const markTs = overrideTs || ts;
+  if (overrideTs) markAll.dataset.ts = markTs;
   markAll.textContent = '...';
   markAll.dataset.pending = 'true';
-  window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+  window.postMessage({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
 }
 
 function sendReply(form, channel, threadTs, text) {
   const input = form.querySelector('.reply-input');
   const btn = form.querySelector('.reply-send');
+  const finalText = convertUserMentions(text);
+  input.value = finalText;
   input.disabled = true;
   btn.disabled = true;
   btn.textContent = '...';
   const reqId = `post_${Date.now()}`;
   form.dataset.requestId = reqId;
-  window.postMessage({ type: `${FSLACK}:postReply`, channel, thread_ts: threadTs, text, requestId: reqId }, '*');
+  window.postMessage({ type: `${FSLACK}:postReply`, channel, thread_ts: threadTs, text: finalText, requestId: reqId }, '*');
 }
 
 // ── Action result listeners ──
@@ -2429,7 +2507,7 @@ window.addEventListener('message', (event) => {
       form.insertAdjacentHTML('beforebegin', replyHtml);
       form.remove();
       // Auto mark as read, same flow as clicking "mark read" (undo works for free)
-      autoMarkItemRead(item);
+      autoMarkItemRead(item, { overrideTs: msg.ts });
     } else {
       const btn = form.querySelector('.reply-send');
       btn.textContent = 'Failed';
@@ -3089,6 +3167,11 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   const msg = event.data || {};
 
+  if (msg.type === `${FSLACK}:toggleOverlay`) {
+    toggle();
+    return;
+  }
+
   if (msg.type === `${FSLACK}:progress`) {
     bodyEl.innerHTML = `<div id="status">
       <div class="step">Step ${msg.step}/7</div>
@@ -3102,7 +3185,10 @@ window.addEventListener('message', (event) => {
     // Cache resolved user/channel names + emoji for next fetch
     if (msg.data) {
       const toStore = {};
-      if (msg.data.users) toStore.fslackUsers = msg.data.users;
+      if (msg.data.users) {
+        mergeCachedUsers(msg.data.users);
+        toStore.fslackUsers = cachedUserMap;
+      }
       if (msg.data.channels) toStore.fslackChannels = msg.data.channels;
       if (msg.data.channelMeta) toStore.fslackChannelMeta = msg.data.channelMeta;
       if (msg.data.emoji && !msg.data.emojiFromCache) {

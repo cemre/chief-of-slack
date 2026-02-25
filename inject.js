@@ -838,8 +838,9 @@
       try {
         const params = { channel, text };
         if (thread_ts) params.thread_ts = thread_ts;
-        await slackApi('chat.postMessage', params);
-        window.postMessage({ type: `${FSLACK}:postReplyResult`, requestId, ok: true }, '*');
+        const resp = await slackApi('chat.postMessage', params);
+        const postedTs = resp?.ts || resp?.message?.ts || '';
+        window.postMessage({ type: `${FSLACK}:postReplyResult`, requestId, ok: true, ts: postedTs }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:postReplyResult`, requestId, ok: false }, '*');
       }

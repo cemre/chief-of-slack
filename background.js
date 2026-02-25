@@ -9,8 +9,18 @@ chrome.action.onClicked.addListener(async (tab) => {
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => {
-        document.getElementById('fslack-host')?.__fslackToggle?.();
+      args: [`${FSLACK}:toggleOverlay`],
+      func: (toggleMessageType) => {
+        const host = document.getElementById('fslack-host');
+        if (host && typeof host.__fslackToggle === 'function') {
+          try {
+            host.__fslackToggle();
+            return;
+          } catch (_err) {
+            // Fall back to message dispatch below
+          }
+        }
+        window.postMessage({ type: toggleMessageType }, '*');
       },
     });
   } catch {
