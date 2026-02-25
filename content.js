@@ -1,122 +1,7 @@
 // content.js — overlay UI on top of Slack + bridge to inject.js + LLM prioritization
 
 const FSLACK = 'fslack';
-
-const EMOJI_MAP = {
-  thumbsup: '👍', '+1': '👍', thumbsdown: '👎', '-1': '👎',
-  heart: '❤️', hearts: '❤️', orange_heart: '🧡', yellow_heart: '💛',
-  green_heart: '💚', blue_heart: '💙', purple_heart: '💜', black_heart: '🖤',
-  white_heart: '🤍', brown_heart: '🤎', heavy_heart_exclamation: '❣️',
-  two_hearts: '💕', revolving_hearts: '💞', heartbeat: '💓', heartpulse: '💗',
-  sparkling_heart: '💖', cupid: '💘', gift_heart: '💝', heart_decoration: '💟',
-  fire: '🔥', tada: '🎉', sparkles: '✨', star: '⭐', star2: '🌟',
-  dizzy: '💫', boom: '💥', clap: '👏', eyes: '👀', pray: '🙏',
-  muscle: '💪', point_up: '☝️', point_up_2: '👆', point_down: '👇',
-  point_left: '👈', point_right: '👉', wave: '👋', ok_hand: '👌',
-  v: '✌️', crossed_fingers: '🤞', raised_hands: '🙌', open_hands: '👐',
-  raised_hand: '✋', vulcan_salute: '🖖', writing_hand: '✍️',
-  rocket: '🚀', airplane: '✈️', car: '🚗', house: '🏠', tree: '🌳',
-  sun: '☀️', sunny: '☀️', cloud: '☁️', snowflake: '❄️', rain: '🌧️',
-  zap: '⚡', rainbow: '🌈', earth_americas: '🌎', earth_africa: '🌍',
-  earth_asia: '🌏', globe_with_meridians: '🌐',
-  smile: '😄', smiley: '😃', grinning: '😀', laughing: '😆', sweat_smile: '😅',
-  joy: '😂', rofl: '🤣', slightly_smiling_face: '🙂', upside_down_face: '🙃',
-  wink: '😉', blush: '😊', innocent: '😇', heart_eyes: '😍', kissing_heart: '😘',
-  kissing: '😗', kissing_smiling_eyes: '😙', kissing_closed_eyes: '😚',
-  yum: '😋', stuck_out_tongue: '😛', stuck_out_tongue_winking_eye: '😜',
-  stuck_out_tongue_closed_eyes: '😝', money_mouth_face: '🤑', hugs: '🤗',
-  thinking: '🤔', thinking_face: '🤔', zipper_mouth_face: '🤐',
-  raised_eyebrow: '🤨', neutral_face: '😐', expressionless: '😑',
-  no_mouth: '😶', smirk: '😏', unamused: '😒', roll_eyes: '🙄',
-  grimacing: '😬', lying_face: '🤥', relieved: '😌', pensive: '😔',
-  sleepy: '😪', drooling_face: '🤤', sleeping: '😴', mask: '😷',
-  face_with_thermometer: '🤒', face_with_head_bandage: '🤕', nauseated_face: '🤢',
-  sneezing_face: '🤧', hot_face: '🥵', cold_face: '🥶', woozy_face: '🥴',
-  dizzy_face: '😵', exploding_head: '🤯', cowboy_hat_face: '🤠',
-  partying_face: '🥳', sunglasses: '😎', nerd_face: '🤓', monocle_face: '🧐',
-  confused: '😕', worried: '😟', slightly_frowning_face: '🙁', frowning_face: '☹️',
-  open_mouth: '😮', hushed: '😯', astonished: '😲', flushed: '😳',
-  pleading_face: '🥺', anguished: '😧', fearful: '😨', cold_sweat: '😰',
-  disappointed_relieved: '😥', cry: '😢', sob: '😭', scream: '😱',
-  confounded: '😖', persevere: '😣', disappointed: '😞', sweat: '😓',
-  weary: '😩', tired_face: '😫', yawning_face: '🥱', triumph: '😤',
-  rage: '😡', angry: '😠', skull: '💀', skull_and_crossbones: '☠️',
-  ghost: '👻', alien: '👽', space_invader: '👾', robot: '🤖', poop: '💩',
-  smiling_imp: '😈', imp: '👿', japanese_ogre: '👹', japanese_goblin: '👺',
-  clown_face: '🤡', lying_face2: '🤥', see_no_evil: '🙈', hear_no_evil: '🙉',
-  speak_no_evil: '🙊', kiss: '💋', love_letter: '💌', zzz: '💤',
-  anger: '💢', speech_balloon: '💬', thought_balloon: '💭',
-  white_check_mark: '✅', heavy_check_mark: '✔️', x: '❌', negative_squared_cross_mark: '❎',
-  warning: '⚠️', stop_sign: '🛑', no_entry: '⛔', prohibited: '🚫',
-  bulb: '💡', question: '❓', grey_question: '❔', grey_exclamation: '❕',
-  exclamation: '❗', heavy_exclamation_mark: '❗', bangbang: '‼️',
-  interrobang: '⁉️', recycle: '♻️', sos: '🆘', up: '🆙', cool: '🆒',
-  new: '🆕', free: '🆓', zero: '0️⃣', one: '1️⃣', two: '2️⃣', three: '3️⃣',
-  four: '4️⃣', five: '5️⃣', six: '6️⃣', seven: '7️⃣', eight: '8️⃣', nine: '9️⃣',
-  keycap_ten: '🔟', hash: '#️⃣', asterisk: '*️⃣',
-  100: '💯', 1234: '🔢', arrow_forward: '▶️', arrow_backward: '◀️',
-  arrow_up: '⬆️', arrow_down: '⬇️', arrow_left: '⬅️', arrow_right: '➡️',
-  arrows_clockwise: '🔃', arrows_counterclockwise: '🔄',
-  repeat: '🔁', repeat_one: '🔂', twisted_rightwards_arrows: '🔀',
-  information_source: 'ℹ️', abc: '🔤', abcd: '🔡', capital_abcd: '🔠',
-  chart: '💹', chart_with_upwards_trend: '📈', chart_with_downwards_trend: '📉',
-  bar_chart: '📊', clipboard: '📋', memo: '📝', pencil: '✏️', pencil2: '✏️',
-  paperclip: '📎', scissors: '✂️', calendar: '📅', date: '📅',
-  pushpin: '📌', round_pushpin: '📍', bookmark: '🔖', label: '🏷️',
-  moneybag: '💰', yen: '💴', dollar: '💵', euro: '💶', pound: '💷',
-  money_with_wings: '💸', credit_card: '💳', gem: '💎', trophy: '🏆',
-  medal_sports: '🏅', first_place_medal: '🥇', second_place_medal: '🥈',
-  third_place_medal: '🥉', ticket: '🎫', circus_tent: '🎪',
-  musical_note: '🎵', notes: '🎶', microphone: '🎤', headphones: '🎧',
-  radio: '📻', saxophone: '🎷', guitar: '🎸', musical_keyboard: '🎹',
-  trumpet: '🎺', violin: '🎻', banjo: '🪕', drum: '🥁',
-  iphone: '📱', calling: '📲', phone: '☎️', telephone_receiver: '📞',
-  pager: '📟', fax: '📠', battery: '🔋', electric_plug: '🔌',
-  computer: '💻', desktop_computer: '🖥️', printer: '🖨️', keyboard: '⌨️',
-  computer_mouse: '🖱️', trackball: '🖲️', minidisc: '💽', floppy_disk: '💾',
-  cd: '💿', dvd: '📀', abacus: '🧮', movie_camera: '🎥', film_strip: '🎞️',
-  film_projector: '📽️', clapper: '🎬', tv: '📺', camera: '📷',
-  camera_flash: '📸', video_camera: '📹', microscope: '🔬', telescope: '🔭',
-  satellite: '📡', syringe: '💉', pill: '💊', door: '🚪', bed: '🛏️',
-  couch_and_lamp: '🛋️', toilet: '🚽', shower: '🚿', bathtub: '🛁',
-  shopping_cart: '🛒', hammer: '🔨', wrench: '🔧', nut_and_bolt: '🔩',
-  toolbox: '🧰', link: '🔗', chains: '⛓️', hook: '🪝', ladder: '🪜',
-  thread: '🧵', spool: '🪡', yarn: '🧶', safety_pin: '🧷',
-  lock: '🔒', unlock: '🔓', key: '🔑', old_key: '🗝️', hammer_and_wrench: '🛠️',
-  dagger: '🗡️', sword: '⚔️', shield: '🛡️', smoking: '🚬', coffin: '⚰️',
-  urn: '⚱️', amphora: '🏺', crystal_ball: '🔮', mag: '🔍', mag_right: '🔎',
-  microscope2: '🔬', telescope2: '🔭', satellite_antenna: '📡',
-  syringe2: '💉', pill2: '💊', stethoscope: '🩺', adhesive_bandage: '🩹',
-  drop_of_blood: '🩸', test_tube: '🧪', petri_dish: '🧫', dna: '🧬',
-  safety_vest: '🦺', goggles: '🥽', lab_coat: '🥼',
-  bug: '🐛', ant: '🐜', bee: '🐝', butterfly: '🦋', snail: '🐌',
-  shell: '🐚', shamrock: '☘️', four_leaf_clover: '🍀', seedling: '🌱',
-  herb: '🌿', leaves: '🍃', maple_leaf: '🍁', fallen_leaf: '🍂',
-  mushroom: '🍄', chestnut: '🌰', apple: '🍎', green_apple: '🍏',
-  pear: '🍐', tangerine: '🍊', lemon: '🍋', banana: '🍌', watermelon: '🍉',
-  grapes: '🍇', strawberry: '🍓', melon: '🍈', cherries: '🍒',
-  peach: '🍑', mango: '🥭', pineapple: '🍍', coconut: '🥥',
-  kiwi_fruit: '🥝', tomato: '🍅', eggplant: '🍆', avocado: '🥑',
-  broccoli: '🥦', leafy_green: '🥬', cucumber: '🥒', hot_pepper: '🌶️',
-  corn: '🌽', carrot: '🥕', garlic: '🧄', onion: '🧅', potato: '🥔',
-  sweet_potato: '🍠', croissant: '🥐', bagel: '🥯', bread: '🍞',
-  baguette_bread: '🥖', pretzel: '🥨', cheese: '🧀', egg: '🥚',
-  cooking: '🍳', pancakes: '🥞', waffle: '🧇', bacon: '🥓',
-  cut_of_meat: '🥩', poultry_leg: '🍗', meat_on_bone: '🍖', hotdog: '🌭',
-  hamburger: '🍔', fries: '🍟', pizza: '🍕', sandwich: '🥪', stuffed_flatbread: '🥙',
-  falafel: '🧆', taco: '🌮', burrito: '🌯', salad: '🥗', shallow_pan_of_food: '🥘',
-  spaghetti: '🍝', ramen: '🍜', stew: '🍲', curry: '🍛', sushi: '🍣',
-  bento: '🍱', dumpling: '🥟', fried_shrimp: '🍤', rice_ball: '🍙',
-  rice: '🍚', rice_cracker: '🍘', fish_cake: '🍥', fortune_cookie: '🥠',
-  moon_cake: '🥮', oden: '🍢', dango: '🍡', shaved_ice: '🍧',
-  ice_cream: '🍨', icecream: '🍦', pie: '🥧', shortcake: '🍰', cake: '🎂',
-  cupcake: '🧁', candy: '🍬', lollipop: '🍭', chocolate_bar: '🍫',
-  popcorn: '🍿', doughnut: '🍩', cookie: '🍪', honey_pot: '🍯',
-  salt: '🧂', beer: '🍺', beers: '🍻', clinking_glasses: '🥂',
-  wine_glass: '🍷', cocktail: '🍸', tropical_drink: '🍹', beverage_box: '🧃',
-  mate: '🧉', cup_with_straw: '🥤', bubble_tea: '🧋', coffee: '☕',
-  tea: '🍵', sake: '🍶', champagne: '🍾', milk_glass: '🥛',
-};
+const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
 
 
 // Suppress "Could not establish connection" errors from orphaned content scripts
@@ -148,396 +33,7 @@ document.body.appendChild(host);
 const shadow = host.attachShadow({ mode: 'closed' });
 
 shadow.innerHTML = `
-<style>
-  :host { all: initial; }
-  #overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 999999;
-    background: #1a1d21;
-    color: #d1d2d3;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 14px;
-    overflow-y: auto;
-  }
-  #overlay.visible { display: flex; flex-direction: column; }
-  header {
-    padding: 16px 24px;
-    background: #1a1d21;
-    border-bottom: 1px solid #363940;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-  }
-  header h1 { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
-  .last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
-  .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
-  .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
-  .refresh-link:hover { text-decoration: underline; }
-  .last-updated.stale { color: #e01e5a; }
-  .header-actions { display: flex; gap: 8px; }
-  button {
-    background: #007a5a;
-    color: #fff;
-    border: none;
-    padding: 6px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-  button:hover { background: #148567; }
-  button:disabled { opacity: 0.5; cursor: wait; }
-  button.secondary {
-    background: transparent;
-    border: 1px solid #565856;
-    color: #d1d2d3;
-  }
-  button.secondary:hover { background: #363940; }
-  #body { flex: 1; padding: 0; }
-  section { padding: 8px 0; }
-  section h2 {
-    padding: 8px 24px;
-    font-size: 12px;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: #ababad;
-    letter-spacing: 0.5px;
-    margin: 0;
-  }
-  .item {
-    display: flex;
-    padding: 10px 24px;
-    border-bottom: 1px solid #2c2d30;
-    cursor: default;
-    gap: 16px;
-  }
-  .item-left {
-    flex: 0 0 140px;
-    min-width: 0;
-  }
-  .item-channel {
-    font-size: 13px;
-    color: #ababad;
-    font-weight: 700;
-    display: block;
-    word-break: break-word;
-  }
-  .item-channel[data-channel] { cursor: pointer; }
-  .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
-  .inline-channel { display: inline; }
-  .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
-  .item-actions {
-    display: flex;
-    visibility: hidden;
-    height: 20px;
-    margin-top: 8px;
-    font-size: 12px;
-    color: #616061;
-    gap: 16px;
-  }
-  .item:hover .item-actions { visibility: visible; }
-  .item-actions span { cursor: pointer; }
-  .item-actions span:hover { color: #d1d2d3; }
-  .item-actions .mark-all-read.done { color: #4a9c6d; }
-  .item-actions .mark-all-read.done:hover { color: #e01e5a; }
-  .item-mention {
-    font-size: 11px;
-    font-weight: 700;
-    color: #e01e5a;
-    margin-top: 2px;
-  }
-  .item-replied {
-    font-size: 11px;
-    color: #ababad;
-    margin-top: 4px;
-  }
-  .item-right {
-    flex: 1;
-    min-width: 0;
-  }
-  .item-user { font-weight: 700; color: #fff; }
-  .item-user[data-channel] { cursor: pointer; }
-  .item-user[data-channel]:hover { text-decoration: underline; }
-  .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }
-  .item-text a, .item-reply a { color: #1d9bd1; text-decoration: none; }
-  .item-text a:hover, .item-reply a:hover { text-decoration: underline; }
-  .item-text:first-child { margin-top: 0; }
-  .item-reply-count {
-    margin-top: 6px;
-    font-size: 12px;
-    color: #1d9bd1;
-    font-weight: 600;
-  }
-  .msg-thread-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #1d9bd1;
-    margin-left: 8px;
-    vertical-align: -2px;
-    cursor: pointer;
-  }
-  .msg-thread-badge:hover { text-decoration: underline; }
-  .msg-thread-badge svg { flex-shrink: 0; }
-  .msg-thread-badge.loading { color: #565856; cursor: wait; }
-  .msg-thread-badge.expanded { color: #ababad; }
-  .thread-replies-container:empty {
-    display: none;
-  }
-  .thread-replies-container {
-    margin-top: 2px;
-    margin-bottom: 16px;
-    font-size: 12px;
-    width: 100%;
-  }
-  .thread-replies-container .msg-row + .msg-row { margin-top: 5px; }
-  .thread-replies-container .item-reply { margin-top: 0; }
-  .item-reply {
-    margin-top: 6px;
-    padding-left: 12px;
-    border-left: 2px solid #363940;
-    color: #ababad;
-    line-height: 1.46;
-    word-break: break-word;
-  }
-  .item-reply .item-user { color: #d1d2d3; }
-  #status {
-    padding: 40px 24px;
-    text-align: center;
-    color: #ababad;
-  }
-  #status .step { font-size: 16px; color: #fff; }
-  #status .detail { margin-top: 6px; font-size: 13px; color: #ababad; }
-  .error { color: #e01e5a; }
-
-  /* Priority section styles */
-  .priority-section h2.act-now { color: #e01e5a; }
-  .priority-section h2.priority-header { color: #e8912d; }
-  .priority-section h2.when-free { color: #ecb22e; }
-  .priority-section h2.interesting { color: #1d9bd1; }
-  .priority-section h2.noise-header { color: #616061; }
-  .item.act-now { border-left: 3px solid #e01e5a; }
-  .item.priority-item { border-left: 3px solid #e8912d; }
-  .item.when-free { border-left: 3px solid #ecb22e; }
-  .item.interesting { border-left: 3px solid #1d9bd1; }
-  .item.noise-item { border-left: 3px solid #616061; opacity: 0.7; }
-  .noise-items { display: none; }
-  .noise-items.expanded { display: block; }
-  .saved-items-list { display: none; }
-  .saved-items-list.expanded { display: block; }
-  .item.saved-item { border-left: 3px solid #27ae60; }
-  .section-toggle {
-    padding: 6px 24px;
-    font-size: 12px;
-    color: #616061;
-    cursor: pointer;
-    user-select: none;
-  }
-  .section-toggle:hover { color: #ababad; }
-  .priority-badge {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 1px 6px;
-    border-radius: 3px;
-    margin-left: 8px;
-    vertical-align: middle;
-  }
-  .priority-badge.act-now { background: #e01e5a; color: #fff; }
-  .priority-badge.when-free { background: #ecb22e; color: #1a1d21; }
-  .engagement-stats {
-    font-size: 11px;
-    color: #616061;
-    margin-top: 4px;
-  }
-  .api-key-form {
-    padding: 40px 24px;
-    text-align: center;
-  }
-  .api-key-form input {
-    width: 360px;
-    padding: 8px 12px;
-    border: 1px solid #565856;
-    border-radius: 6px;
-    background: #222529;
-    color: #fff;
-    font-size: 14px;
-    margin-bottom: 12px;
-    font-family: inherit;
-  }
-  .api-key-form input:focus {
-    outline: none;
-    border-color: #1d9bd1;
-  }
-  .see-more, .see-less {
-    color: #1d9bd1;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    padding-right: 15px;
-  }
-  .see-more:hover, .see-less:hover { text-decoration: underline; }
-  .seen-replies-toggle {
-    margin-top: 6px;
-    font-size: 12px;
-    color: #616061;
-    cursor: pointer;
-    user-select: none;
-  }
-  .seen-replies-toggle:hover { color: #ababad; }
-  .seen-replies-toggle.loading { color: #565856; cursor: wait; }
-  .seen-replies-container .item-reply { color: #717274; }
-  .msg-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    position: relative;
-  }
-  .msg-row + .msg-row { margin-top: 1em; }
-  .msg-content { flex: 1; min-width: 0; padding-right: 66px; }
-  .msg-actions {
-    position: absolute;
-    right: 0;
-    top: 0;
-    display: grid;
-    grid-template-columns: repeat(3, 22px);
-    grid-template-rows: repeat(2, 22px);
-    opacity: 0;
-    transition: opacity 0.15s;
-  }
-  .msg-row:hover { background: rgba(255,255,255,0.04); }
-  .msg-row:hover .msg-actions { opacity: 1; }
-  .msg-time { color: #616061; font-size: 11px; margin-left: 6px; opacity: 0; transition: opacity 0.15s; white-space: nowrap; }
-  .msg-row:hover .msg-time { opacity: 1; }
-  .action-btn {
-    cursor: pointer;
-    font-size: 13px;
-    color: #616061;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    user-select: none;
-  }
-  .action-btn:hover { background: #363940; color: #d1d2d3; }
-  .action-btn.active { color: #ecb22e; }
-  .action-btn.reacted { opacity: 0.3; pointer-events: none; }
-  .action-btn.saved { color: #ecb22e; }
-  .item.read-done { opacity: 0.4; }
-  .reply-form {
-    display: flex;
-    align-items: flex-end;
-    gap: 8px;
-    margin-top: 8px;
-    margin-bottom: 16px;
-  }
-  .reply-input {
-    flex: 1;
-    padding: 6px 10px;
-    background: #222529;
-    border: 1px solid #565856;
-    border-radius: 6px;
-    color: #fff;
-    font-size: 13px;
-    font-family: inherit;
-    resize: none;
-    overflow: hidden;
-    min-height: 32px;
-    max-height: 200px;
-    line-height: 1.4;
-  }
-  .reply-input:focus { outline: none; border-color: #1d9bd1; }
-  .warning-banner {
-    padding: 8px 24px;
-    background: #2c2d30;
-    color: #ecb22e;
-    font-size: 12px;
-    border-bottom: 1px solid #363940;
-  }
-  .deep-summary { font-style: italic; color: #ababad; margin-top: 4px; line-height: 1.46; }
-  ul.deep-summary { margin: 4px 0; padding-left: 18px; }
-  .deep-type-badge {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: #363940;
-    color: #ababad;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-  }
-  .show-messages-link {
-    color: #1d9bd1;
-    cursor: pointer;
-    font-size: 12px;
-    margin-top: 6px;
-    display: inline-block;
-    user-select: none;
-  }
-  .show-messages-link:hover { text-decoration: underline; }
-  .deep-messages { display: none; margin-top: 8px; }
-
-  .noise-section-footer {
-    padding: 32px 24px;
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-  }
-  .noise-section-footer button {
-    background: transparent;
-    border: 1px solid #3d3f42;
-    color: #616061;
-    font-size: 12px;
-    font-weight: 500;
-  }
-  .noise-section-footer button:hover:not(:disabled) {
-    border-color: #565856;
-    color: #ababad;
-    background: transparent;
-  }
-  .slack-emoji {
-    display: inline-block;
-    width: 1.2em;
-    height: 1.2em;
-    vertical-align: -0.25em;
-    object-fit: contain;
-    margin: 0 0.05em;
-  }
-  .msg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-  .file-thumb { position: relative; display: inline-block; border-radius: 6px; overflow: hidden; border: 1px solid #363940; max-width: 240px; }
-  .file-thumb img { display: block; max-width: 240px; max-height: 160px; object-fit: contain; background: #222529; }
-  .file-thumb:hover { border-color: #1d9bd1; }
-  .file-video-badge { position: absolute; bottom: 4px; left: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 3px; }
-  .file-video-placeholder { position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; width: 200px; height: 120px; background: #1a1d21; border-radius: 6px; border: 1px solid #363940; text-decoration: none; gap: 8px; }
-  .file-video-placeholder:hover { border-color: #1d9bd1; }
-  .file-video-placeholder .play-icon { width: 36px; height: 36px; background: rgba(255,255,255,0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 16px; padding-left: 2px; }
-  .file-video-placeholder .file-video-name { color: #ababad; font-size: 11px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .file-link { display: inline-block; color: #1d9bd1; font-size: 12px; text-decoration: none; padding: 2px 0; }
-  .file-link:hover { text-decoration: underline; }
-
-  /* Lightbox */
-  #lightbox { display: none; position: fixed; inset: 0; z-index: 9999999; }
-  #lightbox.open { display: flex; align-items: center; justify-content: center; }
-  .lb-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.85); }
-  .lb-close { position: absolute; top: 12px; right: 16px; color: #fff; font-size: 28px; cursor: pointer; z-index: 2; line-height: 1; opacity: 0.7; background: none; border: none; }
-  .lb-close:hover { opacity: 1; }
-  .lb-counter { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); color: #ababad; font-size: 13px; z-index: 2; user-select: none; }
-  .lb-arrow { position: absolute; top: 50%; transform: translateY(-50%); color: #fff; font-size: 32px; cursor: pointer; z-index: 2; opacity: 0.5; background: none; border: none; padding: 16px; user-select: none; }
-  .lb-arrow:hover { opacity: 1; }
-  .lb-arrow.prev { left: 8px; }
-  .lb-arrow.next { right: 8px; }
-  .lb-media { position: relative; z-index: 1; max-width: 90vw; max-height: 88vh; display: flex; align-items: center; justify-content: center; }
-  .lb-media img { max-width: 90vw; max-height: 88vh; object-fit: contain; border-radius: 4px; }
-  .lb-media video { max-width: 90vw; max-height: 88vh; border-radius: 4px; outline: none; }
-</style>
+<style id="fslack-style"></style>
 <div id="overlay">
   <header>
     <h1>Flack <span class="last-updated-wrap"><span id="last-updated" class="last-updated"></span><span id="refresh-link" class="refresh-link">refresh</span></span></h1>
@@ -559,6 +55,12 @@ shadow.innerHTML = `
   <div class="lb-media"></div>
 </div>
 `;
+
+// Load CSS into shadow DOM
+fetch(chrome.runtime.getURL('content.css'))
+  .then(r => r.text())
+  .then(css => { shadow.getElementById('fslack-style').textContent = css; })
+  .catch(e => console.warn('[fslack] failed to load CSS:', e));
 
 const overlay = shadow.getElementById('overlay');
 const bodyEl = shadow.getElementById('body');
@@ -647,10 +149,12 @@ let noiseChannels = {};      // { [channelId]: channelName } — always force to
 let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
 let digestChannels = {};     // { [channelId]: channelName } — always force to digest section
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
+let myReactionsMap = {};     // { "channel:ts": ["+1", "yellow_heart", ...] }
 let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
 let customEmojiMap = null;
 let standardEmojiMap = null;
 let channelNameMap = {};
+let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
 chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels'], (cached) => {
@@ -768,6 +272,247 @@ document.addEventListener('keydown', (e) => {
   }
 }, true);
 
+// ── Keyboard navigation ──
+// Navigate message-by-message (msg-row). Items without visible msg-rows
+// (deep summaries, bot thread summaries) are navigated as whole items.
+// Section toggles (collapsed headers) are also navigable so you can
+// arrow into them and press Enter to expand.
+function getNavigableElements() {
+  const result = [];
+  // Collect .item and .section-toggle elements in DOM order
+  const nodes = [...bodyEl.querySelectorAll('.item, .section-toggle')].filter(el => el.offsetHeight > 0);
+  for (const node of nodes) {
+    if (node.classList.contains('section-toggle')) {
+      result.push(node);
+    } else {
+      const rows = [...node.querySelectorAll('.msg-row')].filter(row => row.offsetHeight > 0);
+      if (rows.length > 0) {
+        result.push(...rows);
+      } else {
+        result.push(node);
+      }
+    }
+  }
+  return result;
+}
+
+
+function isTextExpanded(scopeEl) {
+  if (!scopeEl) return false;
+  // Check if any truncated text block within scope is in expanded state
+  // The short span is hidden when expanded; the full span is shown
+  const shortSpan = scopeEl.querySelector('[id$="-short"]');
+  return shortSpan ? shortSpan.style.display === 'none' : false;
+}
+
+function isThreadExpanded(scopeEl) {
+  if (!scopeEl) return false;
+  const badge = scopeEl.querySelector('.msg-thread-badge.expanded');
+  if (!badge) return false;
+  // Badge keeps .expanded after first load, but container display is toggled
+  const { channel, ts } = badge.dataset;
+  if (!channel || !ts) return false;
+  const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+  return container ? container.style.display !== 'none' : false;
+}
+
+function focusItem(index) {
+  const els = getNavigableElements();
+  if (els.length === 0) return;
+  index = Math.max(0, Math.min(els.length - 1, index));
+  const oldFocused = bodyEl.querySelector('.kb-focused');
+  if (oldFocused) oldFocused.classList.remove('kb-focused');
+
+  const el = els[index];
+  el.classList.add('kb-focused');
+  focusedItemIndex = index;
+  el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function unfocusItem() {
+  const oldFocused = bodyEl.querySelector('.kb-focused');
+  if (oldFocused) oldFocused.classList.remove('kb-focused');
+  focusedItemIndex = -1;
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!visible) return;
+  if (lightbox.classList.contains('open')) return;
+  if (document.activeElement === host) return;  // typing in input inside shadow
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  const key = e.key;
+
+  if (key === 'j' || key === 'ArrowDown') {
+    e.preventDefault();
+    e.stopPropagation();
+    focusItem(focusedItemIndex + 1);
+    return;
+  }
+  if (key === 'k' || key === 'ArrowUp') {
+    e.preventDefault();
+    e.stopPropagation();
+    focusItem(Math.max(0, focusedItemIndex - 1));
+    return;
+  }
+  if (key === 'Escape') {
+    if (focusedItemIndex >= 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      unfocusItem();
+    }
+    return;
+  }
+
+  // Enter: toggle section toggles
+  if (key === 'Enter') {
+    if (focusedItemIndex < 0) return;
+    const focused = bodyEl.querySelector('.kb-focused');
+    if (!focused || !focused.classList.contains('section-toggle')) return;
+    e.preventDefault(); e.stopPropagation();
+    focused.click();
+    // Re-focus: find the toggle's new index (may shift after items expand/collapse)
+    requestAnimationFrame(() => {
+      const els = getNavigableElements();
+      const newIdx = els.indexOf(focused);
+      if (newIdx >= 0) focusItem(newIdx);
+    });
+    return;
+  }
+
+  // Arrow left/right: collapse/expand (no focus required beyond having a focused item)
+  if (key === 'ArrowRight' || key === 'ArrowLeft') {
+    if (focusedItemIndex < 0) return;
+    const focused = bodyEl.querySelector('.kb-focused');
+    if (!focused) return;
+    // Section toggles: right=expand, left=collapse
+    if (focused.classList.contains('section-toggle')) {
+      e.preventDefault(); e.stopPropagation();
+      const items = focused.nextElementSibling;
+      const isVip = focused.id === 'vip-toggle';
+      const isExpanded = isVip ? (items && items.style.display !== 'none') : (items && items.classList.contains('expanded'));
+      if (key === 'ArrowRight' && !isExpanded) focused.click();
+      if (key === 'ArrowLeft' && isExpanded) focused.click();
+      return;
+    }
+    const isRow = focused.classList.contains('msg-row');
+    const parentItem = isRow ? focused.closest('.item') : focused;
+    const scope = isRow ? focused : focused;
+    const showMsgsLink = (isRow ? focused : parentItem)?.querySelector('.show-messages-link[data-target]');
+    const showMsgsTarget = showMsgsLink ? shadow.getElementById(showMsgsLink.dataset.target) : null;
+    const isExpanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block');
+    if (key === 'ArrowRight' && !isExpanded) {
+      e.preventDefault(); e.stopPropagation();
+      const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
+      if (threadBadge) {
+        threadBadge.click();
+      } else {
+        const seeMore = scope?.querySelector('.see-more:not([style*="display:none"])');
+        if (seeMore) seeMore.click();
+      }
+      if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
+    } else if (key === 'ArrowLeft' && isExpanded) {
+      e.preventDefault(); e.stopPropagation();
+      const seeLess = scope?.querySelector('.see-less');
+      if (seeLess) {
+        seeLess.click();
+      } else {
+        const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
+        if (threadBadge) threadBadge.click();
+      }
+      if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
+    } else if (key === 'ArrowLeft' && !isExpanded && isRow) {
+      const threadContainer = focused.closest('.thread-replies-container');
+      if (threadContainer) {
+        e.preventDefault(); e.stopPropagation();
+        const { channel, ts } = threadContainer.dataset;
+        if (channel && ts) {
+          const parentBadge = bodyEl.querySelector(`.msg-thread-badge.expanded[data-channel="${channel}"][data-ts="${ts}"]`);
+          if (parentBadge) {
+            parentBadge.click();
+            requestAnimationFrame(() => {
+              const parentRow = parentBadge.closest('.msg-row');
+              if (parentRow) {
+                const els = getNavigableElements();
+                const newIdx = els.indexOf(parentRow);
+                if (newIdx >= 0) focusItem(newIdx);
+              }
+            });
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  // Action keys require a focused element
+  if (focusedItemIndex < 0) return;
+  const focused = bodyEl.querySelector('.kb-focused');
+  if (!focused) return;
+  // Section toggles: only 'e' to toggle expand/collapse
+  if (focused.classList.contains('section-toggle')) {
+    if (key.toLowerCase() === 'e') { e.preventDefault(); e.stopPropagation(); focused.click(); }
+    return;
+  }
+
+  const k = key.toLowerCase();
+  if (k.length !== 1) return;
+
+  const isRow = focused.classList.contains('msg-row');
+  const parentItem = isRow ? focused.closest('.item') : focused;
+
+  // Message-level actions (only when a msg-row is focused, not on VIP items)
+  const isVip = !!parentItem?.classList.contains('vip-item');
+  if (isRow && !isVip && 'lhsr'.includes(k)) {
+    e.preventDefault(); e.stopPropagation();
+    if (k === 'l') focused.querySelector('.action-react[data-emoji="+1"]')?.click();
+    else if (k === 'h') focused.querySelector('.action-react[data-emoji="yellow_heart"]')?.click();
+    else if (k === 's') focused.querySelector('.action-save')?.click();
+    else if (k === 'r') (focused.querySelector('.action-msg-reply') || parentItem?.querySelector('.action-reply'))?.click();
+    return;
+  }
+
+  // Expand / Collapse toggle — scope to focused row when applicable
+  if (k === 'e') {
+    e.preventDefault(); e.stopPropagation();
+    const scope = isRow ? focused : parentItem;
+    const showMsgsLink = (isRow ? focused : parentItem)?.querySelector('.show-messages-link[data-target]');
+    const showMsgsTarget = showMsgsLink ? shadow.getElementById(showMsgsLink.dataset.target) : null;
+    const expanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block');
+    if (expanded) {
+      // Collapse — thread badge, see-less, or show-messages-link
+      const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
+      if (threadBadge) {
+        threadBadge.click();
+      } else {
+        const seeLess = scope?.querySelector('.see-less');
+        if (seeLess) seeLess.click();
+      }
+      if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
+    } else {
+      // Expand — thread badge (not yet loaded, or loaded but collapsed), see-more, or show-messages-link
+      const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
+      if (threadBadge) {
+        threadBadge.click();
+      } else {
+        const seeMore = scope?.querySelector('.see-more:not([style*="display:none"])');
+        if (seeMore) seeMore.click();
+      }
+      if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
+    }
+    return;
+  }
+
+  // Item-level actions (work for both msg-rows and summary items)
+  if ('mto'.includes(k)) {
+    e.preventDefault(); e.stopPropagation();
+    if (k === 'm') (parentItem?.querySelector('.mark-all-read') || parentItem?.querySelector('.vip-mark-seen'))?.click();
+    else if (k === 't' && !isVip) (parentItem?.querySelector('.action-mute') || parentItem?.querySelector('.action-mute-channel'))?.click();
+    else if (k === 'o' && !parentItem?.classList.contains('vip-item')) parentItem?.querySelector('.item-channel[data-channel]')?.click();
+    return;
+  }
+}, true);
+
 // ── Render helpers ──
 function formatTime(ts) {
   if (!ts) return '';
@@ -870,7 +615,7 @@ function applyEmoji(html, customEmojis) {
         return `<img class="slack-emoji" src="${customUrl}" alt=":${lname}:" title=":${lname}:">`;
       }
     }
-    const unicode = EMOJI_MAP[lname] || standardEmojiMap?.[lname];
+    const unicode = standardEmojiMap?.[lname];
     if (unicode) return unicode;
     return match; // not found — leave as-is
   });
@@ -886,7 +631,7 @@ function extractZendeskSummary(text) {
   return after.trim() || null;
 }
 
-function truncate(text, max = 200, users) {
+function truncate(text, max = 400, users) {
   const zendesk = extractZendeskSummary(text);
   if (zendesk) return escapeHtml(zendesk);
   const cleaned = cleanSlackText(text, users);
@@ -907,6 +652,12 @@ function renderFiles(files) {
   if (!files || files.length === 0) return '';
   let html = '<div class="msg-files">';
   for (const f of files) {
+    if (f.voice) {
+      const dur = f.duration_ms ? ` (${Math.round(f.duration_ms / 1000)}s)` : '';
+      const txt = f.transcript ? escapeHtml(f.transcript) : 'No transcript available';
+      html += `<div class="voice-msg"><span class="voice-msg-label">&#127908; Voice message${dur}</span><span class="voice-msg-transcript">${txt}</span></div>`;
+      continue;
+    }
     const isImage = f.mimetype?.startsWith('image/');
     const isVideo = f.mimetype?.startsWith('video/');
     const name = escapeHtml(f.name || 'file');
@@ -944,10 +695,33 @@ function channelLink(label, channelId) {
   return `<span class="item-channel" data-channel="${channelId}">${label}</span>`;
 }
 
-function threadBadge(m, channel) {
+function threadBadge(m, channel, truncId) {
   if (!m.reply_count) return '';
   const n = m.reply_count;
-  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${m.ts}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>${n} ${n === 1 ? 'reply' : 'replies'}</span>`;
+  const seeMore = truncId ? ' · See more' : '';
+  const truncAttr = truncId ? ` data-trunc-id="${truncId}"` : '';
+  const time = formatTimeTooltip(m.ts);
+  const timeHtml = time ? `<span class="msg-time">${time}</span>` : '';
+  const timeAttr = time ? ` data-time="${escapeHtml(time)}"` : '';
+  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${m.ts}"${truncAttr}${timeAttr}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>${n} ${n === 1 ? 'reply' : 'replies'}${seeMore}${timeHtml}</span>`;
+}
+
+// Render message text + files + thread badge with merged "See more" / "N replies"
+function renderMsgBody(m, channel, users, maxLen = 400) {
+  const prevId = truncateId;
+  let textHtml = truncate(m.text, maxLen, users);
+  const wasTruncated = truncateId > prevId;
+  let truncIdForBadge = null;
+  if (wasTruncated && m.reply_count) {
+    truncIdForBadge = `trunc_${truncateId}`;
+    // Hide standalone "See more" — it's merged into the thread badge
+    textHtml = textHtml.replace(
+      `<span class="see-more" data-trunc-id="${truncIdForBadge}">See more</span>`,
+      `<span class="see-more" data-trunc-id="${truncIdForBadge}" style="display:none">See more</span>`
+    );
+  }
+  const badge = threadBadge(m, channel, truncIdForBadge);
+  return textHtml + renderFiles(m.files) + badge + (badge ? '' : msgTime(m.ts));
 }
 
 function threadRepliesContainer(m, channel) {
@@ -960,14 +734,16 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   const saved = savedMsgKeys.has(`${channel}:${ts}`);
   const saveClass = saved ? ' saved' : '';
   const fill = saved ? 'currentColor' : 'none';
+  const myReactions = myReactionsMap[`${channel}:${ts}`] || [];
+  const likeClass = myReactions.includes('+1') ? ' reacted' : '';
+  const heartClass = myReactions.includes('yellow_heart') ? ' reacted' : '';
   const replyBtn = showReply
-    ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"></polyline><path d="M20 20v-7a4 4 0 0 0-4-4H4"></path></svg></span>`
+    ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread"><kbd>R</kbd> reply</span>`
     : '';
   return `<div class="msg-actions">
-    <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍</span>
-    <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="yellow_heart">💛</span>
-    <span class="action-btn action-react" data-channel="${channel}" data-ts="${ts}" data-emoji="eyes" title="eyes">👀</span>
-    <span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" fill="${fill}"></path></svg></span>
+    <span class="action-btn action-react${likeClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1"><kbd>L</kbd> 👍</span>
+    <span class="action-btn action-react${heartClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="yellow_heart"><kbd>H</kbd> 💛</span>
+    <span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="${saved ? 'Saved' : 'Save'}"><kbd>S</kbd> save</span>
     ${replyBtn}
   </div>`;
 }
@@ -979,10 +755,10 @@ function msgTime(ts) {
 
 function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false) {
   return `<div class="item-actions">
-    <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}>mark read</span>
+    <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}><kbd>M</kbd> mark read</span>
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>reply</span>` : ''}
-    ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}">mute thread</span>` : ''}
-    ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}">mute channel</span>` : ''}
+    ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
+    ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
     ${!threadTs && !isDm && !isNoise ? `<span class="action-always-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark noise</span>` : ''}
     ${!threadTs && !isDm && isNoise ? `<span class="action-never-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">never noise</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mark-digest" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark digest</span>` : ''}
@@ -1012,7 +788,8 @@ function renderThreadItem(t, data, cssClass) {
       <span class="item-time">${formatTime(markAllTs)}</span>
     </div>
     <div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+      <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 400, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+  html += '<div class="thread-replies-container">';
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
@@ -1021,6 +798,7 @@ function renderThreadItem(t, data, cssClass) {
   for (const r of unread) {
     html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${truncate(r.text, 1000, data.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
   }
+  html += '</div>';
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread);
   html += '</div></div>';
   return html;
@@ -1073,11 +851,11 @@ function renderChannelItem(cp, data, cssClass) {
     const zendesk = extractZendeskSummary(cp._summary);
     const summaryMsg = cp.messages[0];
     const senderName = summaryMsg ? (summaryMsg.subtype === 'bot_message' ? 'Bot' : uname(summaryMsg.user, data.users)) : 'Bot';
-    html += `<div class="msg-row"><div class="msg-content item-text">${userLink(senderName, cp.channel_id, summaryMsg?.ts)} ${escapeHtml(zendesk || cp._summary)}</div>${summaryMsg ? msgActions(cp.channel_id, summaryMsg.ts, { showReply: false }) : ''}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${userLink(senderName, cp.channel_id, summaryMsg?.ts)} ${escapeHtml(zendesk || cp._summary)}</div>${summaryMsg ? msgActions(cp.channel_id, summaryMsg.ts) : ''}</div>`;
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -1108,7 +886,7 @@ function renderDeepSummarizedItem(cp, data) {
     : formatTime(newestTs);
   let messagesHtml = '';
   for (const m of msgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -1117,15 +895,17 @@ function renderDeepSummarizedItem(cp, data) {
       <span class="item-time">${timeDisplay}</span>
     </div>
     <div class="item-right">
-      <div>${typeBadge ? `<span class="deep-type-badge">${escapeHtml(typeBadge)}</span>` : ''}${cp._deepFetchFailed ? `<span class="error" style="font-size:11px;margin-left:6px;">⚠ fetch failed, limited context</span>` : ''}</div>
-      <div class="deep-summary">${escapeHtml(cp._deepSummary || '')}</div>
-      <div style="display:flex;gap:12px;margin-top:6px;">
-        <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${msgs.length} message${msgs.length === 1 ? '' : 's'} ↓</span>
-        <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
-        <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
-        <span class="show-messages-link action-never-noise" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">never noise</span>
-        <span class="show-messages-link action-mark-digest" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">mark digest</span>
-      </div>
+      <div class="msg-row"><div class="msg-content">
+        <div>${typeBadge ? `<span class="deep-type-badge">${escapeHtml(typeBadge)}</span>` : ''}${cp._deepFetchFailed ? `<span class="error" style="font-size:11px;margin-left:6px;">⚠ fetch failed, limited context</span>` : ''}</div>
+        <div class="deep-summary">${escapeHtml(cp._deepSummary || '')}</div>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${msgs.length} message${msgs.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
+          <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
+          <span class="show-messages-link action-never-noise" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">never noise</span>
+          <span class="show-messages-link action-mark-digest" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">mark digest</span>
+        </div>
+      </div></div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
     </div>
   </div>`;
@@ -1137,7 +917,7 @@ function renderSavedItem(item, data) {
   const ch = data.channels?.[channel] || channel;
   const msg = item.message || {};
   const user = msg.user;
-  const textHtml = msg.text ? truncate(msg.text, 200, data.users) : '';
+  const textHtml = msg.text ? truncate(msg.text, 400, data.users) : '';
   return `<div class="item saved-item" data-complete-request-id="">
     <div class="item-left">
       ${channelLink('#' + escapeHtml(ch), channel)}
@@ -1164,21 +944,25 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   let messagesHtml = '';
   for (const m of allMsgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id)}</div>`;
   }
 
   let contentHtml;
   if (cp._botSummary) {
     contentHtml = `
-      <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
-      <div style="display:flex;gap:12px;margin-top:6px;">
-        <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${allMsgs.length} message${allMsgs.length === 1 ? '' : 's'} ↓</span>
-        <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" style="margin-top:0">mark as read</span>
-      </div>
+      <div class="msg-row"><div class="msg-content">
+        <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${allMsgs.length} message${allMsgs.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" style="margin-top:0">mark as read</span>
+        </div>
+      </div></div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>`;
   } else {
     contentHtml = `
-      <div id="${key}-summary" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Analyzing discussion...</div>
+      <div class="msg-row"><div class="msg-content">
+        <div id="${key}-summary" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Analyzing discussion...</div>
+      </div></div>
       <div class="deep-messages" style="display:block">${messagesHtml}</div>`;
   }
 
@@ -1313,20 +1097,10 @@ function applyPreFilters(data) {
       continue;
     }
 
-    // All-bot messages with 4+ messages → digest routing; fewer → small noise
+    // All-bot messages → digest (deep analysis only for 4+)
     if (cp.messages.every(isBot)) {
-      if (cp.messages.length >= 4) {
-        cp._deepAnalysis = true;
-        routeToDigest(cp);
-      } else {
-        const texts = cp.messages
-          .map((m) => cleanSlackText(m.text || '', users))
-          .filter(Boolean);
-        if (texts.length > 0) {
-          cp._summary = texts[0];
-          noise.push(cp);
-        }
-      }
+      if (cp.messages.length >= 4) cp._deepAnalysis = true;
+      routeToDigest(cp);
       continue;
     }
 
@@ -1416,6 +1190,16 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isQualified = isDm || isPrivate || isMentioned;
     const userReplied = item._userReplied || false;
 
+    // DM overrides: VIP DMs → act_now, all other DMs → at least priority
+    if (isDm) {
+      const senders = (item.messages || item.unread_replies || []).map((m) =>
+        uname(m.user, data.users).toLowerCase()
+      );
+      const isVipDm = senders.some((s) => VIPS.includes(s));
+      if (isVipDm) cat = 'act_now';
+      else if (cat !== 'act_now') cat = 'priority';
+    }
+
     // Hard gate: only DMs, private channels, or @mentions can reach act_now/priority
     if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
 
@@ -1497,7 +1281,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
           <div class="engagement-stats">${p.reaction_count} reactions · ${p.reply_count} replies</div>
         </div>
         <div class="item-right">
-          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 200, data.users)}${renderFiles(p.files)}${msgTime(p.ts)}</div>${msgActions(p.channel_id, p.ts)}</div>
+          <div class="msg-row"><div class="msg-content item-text">${p.user ? userLink(uname(p.user, data.users), p.channel_id, p.ts) + ' ' : ''}${truncate(p.text, 400, data.users)}${renderFiles(p.files)}${msgTime(p.ts)}</div>${msgActions(p.channel_id, p.ts)}</div>
         </div>
       </div>`;
     }
@@ -1574,6 +1358,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   bodyEl.innerHTML = html;
+  focusedItemIndex = -1;
   lastRenderData = data;
 
   // Wire up noise toggles
@@ -1661,8 +1446,9 @@ bodyEl.addEventListener('click', (e) => {
   // Thread badge: expand replies inline (shift/meta-click opens in new tab)
   const threadBadgeEl = e.target.closest('.msg-thread-badge');
   if (threadBadgeEl) {
-    const { channel, ts } = threadBadgeEl.dataset;
+    const { channel, ts, truncId } = threadBadgeEl.dataset;
 
+    // Expand truncated text if this badge merged "See more"
     // Modifier click → open in Slack as before
     if (e.shiftKey || e.metaKey || e.ctrlKey || e.button === 1) {
       localStorage.setItem('fslack_hide_once', Date.now());
@@ -1673,22 +1459,36 @@ bodyEl.addEventListener('click', (e) => {
     const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
     if (!container) return;
 
-    // Already loaded → toggle visibility
+    // Already loaded → toggle visibility (including truncated text)
     if (threadBadgeEl.classList.contains('expanded')) {
       const isVisible = container.style.display !== 'none';
       container.style.display = isVisible ? 'none' : '';
+      if (truncId) {
+        const shortEl = shadow.getElementById(`${truncId}-short`);
+        const fullEl = shadow.getElementById(`${truncId}-full`);
+        if (shortEl && fullEl) {
+          shortEl.style.display = isVisible ? '' : 'none';
+          fullEl.style.display = isVisible ? 'none' : '';
+        }
+      }
       const n = parseInt(container.dataset.count, 10) || 0;
       const svg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+      const timeHtml = threadBadgeEl.dataset.time ? `<span class="msg-time">${escapeHtml(threadBadgeEl.dataset.time)}</span>` : '';
       threadBadgeEl.innerHTML = isVisible
-        ? `${svg}${n} ${n === 1 ? 'reply' : 'replies'}`
-        : `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}`;
+        ? `${svg}${n} ${n === 1 ? 'reply' : 'replies'}${timeHtml}`
+        : `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}${timeHtml}`;
       return;
     }
 
     // Loading in progress → ignore
     if (threadBadgeEl.classList.contains('loading')) return;
 
-    // First click → fetch replies
+    // First click → expand truncated text + fetch replies
+    if (truncId) {
+      const shortEl = shadow.getElementById(`${truncId}-short`);
+      const fullEl = shadow.getElementById(`${truncId}-full`);
+      if (shortEl && fullEl) { shortEl.style.display = 'none'; fullEl.style.display = ''; }
+    }
     threadBadgeEl.classList.add('loading');
     threadBadgeEl.textContent = 'Loading...';
     const reqId = `thread_${++replyRequestId}`;
@@ -1742,13 +1542,20 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Reaction action
+  // Reaction action (toggle)
   const reactBtn = e.target.closest('.action-react');
-  if (reactBtn && !reactBtn.classList.contains('active')) {
+  if (reactBtn && !reactBtn.dataset.pending) {
     const { channel, ts, emoji } = reactBtn.dataset;
-    reactBtn.style.opacity = '0.4';
-    window.postMessage({ type: `${FSLACK}:addReaction`, channel, ts, emoji, requestId: `react_${Date.now()}` }, '*');
-    reactBtn.dataset.pending = 'true';
+    if (reactBtn.classList.contains('reacted')) {
+      reactBtn.style.opacity = '0.4';
+      reactBtn.classList.remove('reacted');
+      window.postMessage({ type: `${FSLACK}:removeReaction`, channel, ts, emoji, requestId: `unreact_${Date.now()}` }, '*');
+      reactBtn.dataset.pending = 'unreact';
+    } else {
+      reactBtn.style.opacity = '0.4';
+      window.postMessage({ type: `${FSLACK}:addReaction`, channel, ts, emoji, requestId: `react_${Date.now()}` }, '*');
+      reactBtn.dataset.pending = 'react';
+    }
     return;
   }
 
@@ -1761,6 +1568,7 @@ bodyEl.addEventListener('click', (e) => {
     if (saveBtn.classList.contains('saved')) {
       // Unsave
       saveBtn.classList.remove('saved');
+      saveBtn.title = 'Save';
       if (svgPath) svgPath.setAttribute('fill', 'none');
       savedMsgKeys.delete(key);
       chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
@@ -1768,6 +1576,7 @@ bodyEl.addEventListener('click', (e) => {
     } else {
       // Save
       saveBtn.classList.add('saved');
+      saveBtn.title = 'Saved';
       if (svgPath) svgPath.setAttribute('fill', 'currentColor');
       savedMsgKeys.add(key);
       chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
@@ -2061,11 +1870,34 @@ bodyEl.addEventListener('click', (e) => {
   window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
 });
 
+// Click-to-focus: move keyboard nav to clicked item
+bodyEl.addEventListener('click', (e) => {
+  const nav = e.target.closest('.msg-row, .item, .section-toggle');
+  if (!nav) return;
+  // Prefer the most specific navigable element (msg-row inside item)
+  const target = nav.classList.contains('item')
+    ? (nav.querySelector('.msg-row') ? e.target.closest('.msg-row') || nav : nav)
+    : nav;
+  const els = getNavigableElements();
+  const idx = els.indexOf(target);
+  if (idx >= 0) focusItem(idx);
+});
+
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   if (event.data?.type !== `${FSLACK}:repliesResult`) return;
 
   const { requestId, replies } = event.data;
+
+  // Populate reaction map for dynamically fetched replies
+  for (const r of replies || []) {
+    if (r.my_reactions?.length) {
+      // Infer channel from the toggle or badge that requested this
+      const el = bodyEl.querySelector(`[data-request-id="${requestId}"]`);
+      const ch = el?.dataset.channel;
+      if (ch) myReactionsMap[`${ch}:${r.ts}`] = r.my_reactions;
+    }
+  }
 
   // ── Seen-replies toggle (thread items) ──
   const toggle = bodyEl.querySelector(`.seen-replies-toggle[data-request-id="${requestId}"]`);
@@ -2131,9 +1963,10 @@ window.addEventListener('message', (event) => {
     badge.classList.add('expanded');
     const n = threadReplies.length;
     const svg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+    const timeHtml = badge.dataset.time ? `<span class="msg-time">${escapeHtml(badge.dataset.time)}</span>` : '';
     badge.innerHTML = n > 0
-      ? `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}`
-      : `${svg}No replies`;
+      ? `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}${timeHtml}`
+      : `${svg}No replies${timeHtml}`;
     return;
   }
 });
@@ -2156,11 +1989,20 @@ window.addEventListener('message', (event) => {
   const msg = event.data || {};
 
   if (msg.type === `${FSLACK}:reactResult`) {
-    const btn = bodyEl.querySelector('.action-react[data-pending="true"]');
+    const btn = bodyEl.querySelector('.action-react[data-pending="react"]');
     if (btn) {
       delete btn.dataset.pending;
       btn.style.opacity = '';
       if (msg.ok) btn.classList.add('reacted');
+    }
+  }
+
+  if (msg.type === `${FSLACK}:unreactResult`) {
+    const btn = bodyEl.querySelector('.action-react[data-pending="unreact"]');
+    if (btn) {
+      delete btn.dataset.pending;
+      btn.style.opacity = '';
+      if (!msg.ok) btn.classList.add('reacted'); // revert on failure
     }
   }
 
@@ -2407,11 +2249,13 @@ async function kickoffVipSection(data) {
         <span class="item-time">${formatTime(latestTs)}</span>
       </div>
       <div class="item-right">
-        <ul class="deep-summary">${(result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>
-        <div style="display:flex;gap:12px;margin-top:6px;">
-          <span class="show-messages-link" data-target="${msgId}" style="margin-top:0">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
-          <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
-        </div>
+        <div class="msg-row"><div class="msg-content">
+          <ul class="deep-summary">${(result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>
+          <div style="display:flex;gap:12px;margin-top:6px;">
+            <span class="show-messages-link" data-target="${msgId}" style="margin-top:0">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
+            <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
+          </div>
+        </div></div>
         <div class="deep-messages" id="${msgId}">${messagesHtml}</div>
       </div>
     </div>`;
@@ -2437,7 +2281,7 @@ function runBotThreadSummarization(whenFreeItems, data) {
       const ch = data.channels[cp.channel_id] || cp.channel_id;
       const messages = cp.messages.map((m) => ({
         user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
-        text: plainTruncate(m.text, 200, data.users),
+        text: plainTruncate(m.text, 400, data.users),
       }));
       let response;
       try {
@@ -2456,17 +2300,19 @@ function runBotThreadSummarization(whenFreeItems, data) {
       const deepMsgId = `${key}-msgs`;
       let messagesHtml = '';
       for (const m of cp.messages) {
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 200, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${truncate(m.text, 400, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
       }
       const rightEl = itemEl.querySelector('.item-right');
       const actionsEl = itemEl.querySelector('.item-actions');
       const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
       rightEl.innerHTML = `
-        <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
-        <div style="display:flex;gap:12px;margin-top:6px;">
-          <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
-          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[cp.messages.length - 1]?.ts}" style="margin-top:0">mark as read</span>
-        </div>
+        <div class="msg-row"><div class="msg-content">
+          <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
+          <div style="display:flex;gap:12px;margin-top:6px;">
+            <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
+            <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[cp.messages.length - 1]?.ts}" style="margin-top:0">mark as read</span>
+          </div>
+        </div></div>
         <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
         ${actionsHtml}`;
     }
@@ -2479,7 +2325,30 @@ let pendingVips = null;
 let pendingSaved = null;
 let gotSaved = false;
 
+function buildMyReactionsMap(data) {
+  const map = {};
+  function add(ch, msgs) {
+    for (const m of msgs || []) {
+      if (m.my_reactions?.length) map[`${ch}:${m.ts}`] = m.my_reactions;
+    }
+  }
+  for (const t of data.threads || []) {
+    add(t.channel_id, [{ ts: t.ts, my_reactions: t.root_my_reactions }]);
+    add(t.channel_id, t.unread_replies);
+  }
+  for (const dm of data.dms || []) add(dm.channel_id, dm.messages);
+  for (const cp of data.channelPosts || []) {
+    add(cp.channel_id, cp.messages);
+    if (cp.fullMessages) {
+      add(cp.channel_id, cp.fullMessages.history);
+      for (const thread of cp.fullMessages.threads || []) add(cp.channel_id, thread.messages);
+    }
+  }
+  return map;
+}
+
 function prioritizeAndRender(data) {
+  myReactionsMap = buildMyReactionsMap(data);
   const preFiltered = applyPreFilters(data);
   const { forLlm } = preFiltered;
   const meta = data.channelMeta || {};
@@ -2585,7 +2454,7 @@ function prioritizeAndRender(data) {
         for (const m of allMsgs) {
           const entry = {
             user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
-            text: plainTruncate(m.text, 200, data.users),
+            text: plainTruncate(m.text, 400, data.users),
           };
           const s = JSON.stringify(entry);
           if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
@@ -2710,7 +2579,7 @@ function render(data) {
           <span class="item-time">${formatTime(lastUnread?.ts || t.ts)}</span>
         </div>
         <div class="item-right">
-          <div class="item-text">${userLink(uname(t.root_user, users), t.channel_id, t.ts)} ${truncate(t.root_text, 200, users)}${renderFiles(t.root_files)}</div>`;
+          <div class="item-text">${userLink(uname(t.root_user, users), t.channel_id, t.ts)} ${truncate(t.root_text, 400, users)}${renderFiles(t.root_files)}</div>`;
       const seenCount = Math.max(0, (t.reply_count || 0) - unread.length);
       if (seenCount > 0) {
         html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unread.map(r => r.ts).join(',')}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
@@ -2759,7 +2628,7 @@ function render(data) {
       html += `</div>
         <div class="item-right">`;
       for (const m of cp.messages.slice(0, 3)) {
-        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 200, users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}</div>`;
+        html += `<div class="item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, users), cp.channel_id, m.ts)} ${truncate(m.text, 400, users)}${renderFiles(m.files)}${threadBadge(m, cp.channel_id)}</div>`;
       }
       if (cp.messages.length > 3) {
         html += `<div class="item-reply-count">+${cp.messages.length - 3} more</div>`;
@@ -2774,6 +2643,7 @@ function render(data) {
   }
 
   bodyEl.innerHTML = html;
+  focusedItemIndex = -1;
 }
 
 // ── Fetch button: fire both unreads + popular in parallel ──

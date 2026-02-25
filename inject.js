@@ -157,8 +157,18 @@
         if (f.mode === 'tombstone') continue;
         const thumb = f.thumb_480 || f.thumb_360 || f.thumb_720 || f.thumb_video || null;
         const url = f.url_private || null;
-        if (thumb || url) {
-          files.push({ name: f.name || 'file', mimetype: f.mimetype || '', thumb, url });
+        const isVoice = f.media_display_type === 'audio' || f.subtype === 'slack_audio';
+        if (isVoice || thumb || url) {
+          files.push({
+            name: f.name || 'file', mimetype: f.mimetype || '', thumb, url,
+            ...(isVoice && {
+              voice: true,
+              fileId: f.id,
+              transcript: f.transcription?.status === 'complete' ? f.transcription.preview?.content : null,
+              transcriptionStatus: f.transcription?.status || 'none',
+              duration_ms: f.duration_ms || null,
+            }),
+          });
         }
       }
     }
@@ -196,6 +206,35 @@
     }
 
     return files.length > 0 ? files : null;
+  }
+
+  // Trigger transcript generation for voice files that don't have one yet, then poll until ready
+  async function ensureTranscripts(files) {
+    if (!files) return files;
+    const pending = files.filter(f => f.voice && !f.transcript && f.fileId);
+    if (pending.length === 0) return files;
+
+    // Trigger retranscription for each
+    await Promise.all(pending.map(f =>
+      slackApi('files.retranscribe', { file_id: f.fileId }).catch(() => {})
+    ));
+
+    // Poll files.info until transcripts are ready (max ~15s)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise(r => setTimeout(r, 3000));
+      const results = await Promise.all(pending.map(f =>
+        slackApi('files.info', { file: f.fileId }).catch(() => null)
+      ));
+      for (let i = 0; i < pending.length; i++) {
+        const info = results[i]?.file;
+        if (info?.transcription?.status === 'complete' && info.transcription.preview?.content) {
+          pending[i].transcript = info.transcription.preview.content;
+          pending[i].transcriptionStatus = 'complete';
+        }
+      }
+      if (pending.every(f => f.transcript)) break;
+    }
+    return files;
   }
 
   function progress(step, detail) {
@@ -268,6 +307,10 @@
             bot_id: m.bot_id,
             files: extractFiles(m),
           }));
+        // Trigger transcript generation for voice messages without one
+        for (const msg of msgs) {
+          if (msg.files) await ensureTranscripts(msg.files);
+        }
         if (msgs.length > 0) {
           dms.push({
             channel_id: im.id,

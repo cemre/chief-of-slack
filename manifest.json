@@ -17,7 +17,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["inject.js", "standard-emoji.json"],
+      "resources": ["inject.js", "standard-emoji.json", "content.css"],
       "matches": ["https://app.slack.com/*"]
     }
   ],
