@@ -2145,6 +2145,18 @@ window.addEventListener('message', (event) => {
 });
 
 // ── Send reply helper ──
+function autoMarkItemRead(item, { requireThread = false } = {}) {
+  if (!item) return;
+  const markAll = item.querySelector('.mark-all-read');
+  if (!markAll) return;
+  if (requireThread && !markAll.dataset.threadTs) return;
+  if (markAll.classList.contains('done') || markAll.dataset.pending) return;
+  const { channel, ts, threadTs } = markAll.dataset;
+  markAll.textContent = '...';
+  markAll.dataset.pending = 'true';
+  window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+}
+
 function sendReply(form, channel, threadTs, text) {
   const input = form.querySelector('.reply-input');
   const btn = form.querySelector('.reply-send');
@@ -2166,7 +2178,12 @@ window.addEventListener('message', (event) => {
     if (btn) {
       delete btn.dataset.pending;
       btn.style.opacity = '';
-      if (msg.ok) btn.classList.add('reacted');
+      if (msg.ok) {
+        btn.classList.add('reacted');
+        if (btn.dataset.emoji === '+1' || btn.dataset.emoji === 'yellow_heart') {
+          autoMarkItemRead(btn.closest('.item'), { requireThread: true });
+        }
+      }
     }
   }
 
@@ -2271,13 +2288,7 @@ window.addEventListener('message', (event) => {
       form.insertAdjacentHTML('beforebegin', replyHtml);
       form.remove();
       // Auto mark as read, same flow as clicking "mark read" (undo works for free)
-      const markAll = item?.querySelector('.mark-all-read');
-      if (markAll && !markAll.classList.contains('done') && !markAll.dataset.pending) {
-        const { channel, ts, threadTs } = markAll.dataset;
-        markAll.textContent = '...';
-        markAll.dataset.pending = 'true';
-        window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
-      }
+      autoMarkItemRead(item);
     } else {
       const btn = form.querySelector('.reply-send');
       btn.textContent = 'Failed';
