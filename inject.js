@@ -37,29 +37,56 @@
     return data;
   }
 
-  async function resolveUsers(userIds, cachedUsers = {}, onProgress) {
+  async function resolveUsers(userIds, cachedUsers = {}, cachedMentionHints = {}, onProgress) {
     const users = { ...cachedUsers };
+    const mentionHints = { ...cachedMentionHints };
     const unique = [...new Set(userIds)].filter(Boolean);
-    const uncached = unique.filter((uid) => !users[uid]);
-    // Batch in parallel, max 50
-    const batch = uncached.slice(0, 50);
-    if (batch.length > 0) {
-      let done = 0;
+    const idsToFetch = unique.filter((uid) => !users[uid] || !mentionHints[uid]);
+    if (idsToFetch.length === 0) return { users, mentionHints };
+
+    let done = 0;
+    const total = idsToFetch.length;
+    for (let i = 0; i < idsToFetch.length; i += 50) {
+      const batch = idsToFetch.slice(i, i + 50);
       const results = await Promise.all(
         batch.map(async (uid) => {
           try {
             const data = await slackApi('users.info', { user: uid });
-            if (onProgress) onProgress(++done, batch.length);
-            return [uid, data.user.real_name || data.user.name];
+            return [uid, data.user];
           } catch {
-            if (onProgress) onProgress(++done, batch.length);
-            return [uid, uid];
+            return [uid, null];
+          } finally {
+            if (onProgress) onProgress(++done, total);
           }
         })
       );
-      for (const [id, name] of results) users[id] = name;
+      for (const [id, user] of results) {
+        if (user) {
+          users[id] = user.real_name || user.profile?.real_name_normalized || user.name || id;
+          mentionHints[id] = buildMentionHintsForUser(user);
+        } else {
+          if (!users[id]) users[id] = id;
+          if (!mentionHints[id]) mentionHints[id] = [];
+        }
+      }
     }
-    return users;
+    return { users, mentionHints };
+  }
+
+  function buildMentionHintsForUser(user = {}) {
+    const hints = [];
+    const profile = user.profile || {};
+    const add = (value) => {
+      if (typeof value === 'string' && value.trim()) hints.push(value.trim());
+    };
+    add(profile.display_name_normalized);
+    add(profile.display_name);
+    add(user.name);
+    add(profile.real_name_normalized);
+    add(user.real_name);
+    add(profile.first_name);
+    add(profile.last_name);
+    return [...new Set(hints)];
   }
 
   async function getSelfIdAndMuted() {
@@ -241,7 +268,7 @@
     window.postMessage({ type: `${FSLACK}:progress`, step, detail }, '*');
   }
 
-  async function fetchUnreads({ cachedUsers = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
+  async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
     const [counts, { selfId, muted }] = await Promise.all([
@@ -492,11 +519,16 @@
       }
     });
     const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
-    const uncachedUserCount = uniqueUserIds.filter((uid) => !cachedUsers[uid]).length;
-    progress(5, `Resolving ${uncachedUserCount} user names (${uniqueUserIds.length - uncachedUserCount} cached)...`);
-    const users = await resolveUsers(allUserIds, cachedUsers, (done, total) => {
-      progress(5, `Resolving users... ${done}/${total}`);
-    });
+    const missingProfiles = uniqueUserIds.filter((uid) => !cachedUsers[uid] || !cachedUserMentionHints[uid]).length;
+    progress(5, `Resolving ${missingProfiles} user profiles (${uniqueUserIds.length - missingProfiles} cached)...`);
+    const { users, mentionHints } = await resolveUsers(
+      allUserIds,
+      cachedUsers,
+      cachedUserMentionHints,
+      (done, total) => {
+        if (total > 0) progress(5, `Resolving users... ${done}/${total}`);
+      }
+    );
     progress(5, `Done. ${Object.keys(users).length} users resolved.`);
 
     // 6. Get channel names for threads + channel posts
@@ -559,6 +591,7 @@
       lastRead,
       emoji,
       emojiFromCache: cachedEmoji !== null,
+      userMentionHints: mentionHints,
     };
   }
 
@@ -640,6 +673,7 @@
       try {
         const cached = {
           cachedUsers: event.data.cachedUsers || {},
+          cachedUserMentionHints: event.data.cachedUserMentionHints || {},
           cachedChannels: event.data.cachedChannels || {},
           cachedChannelMeta: event.data.cachedChannelMeta || {},
           cachedEmoji: event.data.cachedEmoji || null,

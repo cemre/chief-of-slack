@@ -157,19 +157,21 @@ let customEmojiMap = null;
 let standardEmojiMap = null;
 let channelNameMap = {};
 let cachedUserMap = {};
+let cachedUserMentionHints = {};
 let reactionRequestCounter = 0;
 const pendingReactButtons = {};
 const pendingUnreactButtons = {};
 let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
-chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers'], (cached) => {
+chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers', 'fslackUserMentionHints'], (cached) => {
   const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
   if (cached.fslackEmoji && cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS) {
     customEmojiMap = cached.fslackEmoji;
   }
   if (cached.fslackChannels) channelNameMap = cached.fslackChannels;
   if (cached.fslackUsers) mergeCachedUsers(cached.fslackUsers);
+  if (cached.fslackUserMentionHints) mergeCachedMentionHints(cached.fslackUserMentionHints, { replace: true });
 });
 
 // Load standard emoji map (bundled JSON) async
@@ -211,19 +213,21 @@ function startFetch() {
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
   resetFetchState();
   // Load cached names and pass to inject.js
-  chrome.storage.local.get(['fslackUsers', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
     digestChannels = cached.fslackDigestChannels || {};
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     vipSeenTimestamps = cached.fslackVipSeen || {};
     mergeCachedUsers(cached.fslackUsers || {});
+    mergeCachedMentionHints(cached.fslackUserMentionHints || {}, { replace: true });
     const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
     const cachedEmoji = (cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS)
       ? (cached.fslackEmoji || {}) : null;
     window.postMessage({
       type: `${FSLACK}:fetch`,
       cachedUsers: cached.fslackUsers || {},
+      cachedUserMentionHints: cached.fslackUserMentionHints || {},
       cachedChannels: cached.fslackChannels || {},
       cachedChannelMeta: cached.fslackChannelMeta || {},
       cachedEmoji,
@@ -1577,12 +1581,29 @@ function mergeCachedUsers(users) {
   if (changed) mentionLookupDirty = true;
 }
 
-function buildMentionLookup(users = {}) {
+function mergeCachedMentionHints(hints, { replace = false } = {}) {
+  if (!hints) return;
+  if (replace) cachedUserMentionHints = {};
+  let changed = replace;
+  for (const [uid, values] of Object.entries(hints || {})) {
+    if (!uid) continue;
+    const list = Array.isArray(values) ? values.filter((v) => typeof v === 'string' && v.trim()) : [];
+    if (list.length === 0) continue;
+    const deduped = Array.from(new Set(list));
+    const existing = cachedUserMentionHints[uid] || [];
+    if (existing.length === deduped.length && existing.every((v, i) => v === deduped[i])) continue;
+    cachedUserMentionHints[uid] = deduped;
+    changed = true;
+  }
+  if (changed) mentionLookupDirty = true;
+}
+
+function buildMentionLookup(users = {}, mentionHints = {}) {
   const map = new Map();
-  for (const [uid, name] of Object.entries(users || {})) {
-    if (!uid || !name) continue;
-    const rawParts = name.match(/[A-Za-z0-9]+/g) || [];
-    const candidates = new Set([name, name.replace(/\s+/g, '')]);
+  const addCandidates = (uid, value) => {
+    if (!uid || !value) return;
+    const rawParts = value.match(/[A-Za-z0-9]+/g) || [];
+    const candidates = new Set([value, value.replace(/\s+/g, '')]);
     rawParts.forEach((p) => candidates.add(p));
     if (rawParts.length >= 2) {
       const first = rawParts[0];
@@ -1594,8 +1615,15 @@ function buildMentionLookup(users = {}) {
       if (!norm) continue;
       const existing = map.get(norm);
       if (!existing) map.set(norm, uid);
-      else if (existing !== uid) map.set(norm, null); // ambiguous token
+      else if (existing !== uid) map.set(norm, null);
     }
+  };
+  for (const [uid, name] of Object.entries(users || {})) {
+    addCandidates(uid, name);
+  }
+  for (const [uid, hints] of Object.entries(mentionHints || {})) {
+    if (!Array.isArray(hints)) continue;
+    for (const hint of hints) addCandidates(uid, hint);
   }
   return map;
 }
@@ -1603,12 +1631,13 @@ function buildMentionLookup(users = {}) {
 function ensureMentionLookup() {
   if (!mentionLookupDirty && mentionLookupCache) return mentionLookupCache;
   const users = { ...cachedUserMap, ...(lastRenderData?.users || {}) };
-  if (Object.keys(users).length === 0) {
+  const mentionHints = { ...cachedUserMentionHints, ...(lastRenderData?.userMentionHints || {}) };
+  if (Object.keys(users).length === 0 && Object.keys(mentionHints).length === 0) {
     mentionLookupCache = null;
     mentionLookupDirty = false;
     return null;
   }
-  mentionLookupCache = buildMentionLookup(users);
+  mentionLookupCache = buildMentionLookup(users, mentionHints);
   mentionLookupDirty = false;
   return mentionLookupCache;
 }
@@ -3189,6 +3218,10 @@ window.addEventListener('message', (event) => {
       if (msg.data.users) {
         mergeCachedUsers(msg.data.users);
         toStore.fslackUsers = cachedUserMap;
+      }
+      if (msg.data.userMentionHints) {
+        mergeCachedMentionHints(msg.data.userMentionHints);
+        toStore.fslackUserMentionHints = cachedUserMentionHints;
       }
       if (msg.data.channels) toStore.fslackChannels = msg.data.channels;
       if (msg.data.channelMeta) toStore.fslackChannelMeta = msg.data.channelMeta;
