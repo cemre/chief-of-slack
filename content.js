@@ -865,7 +865,8 @@ function renderDmItem(dm, data, cssClass) {
     </div>
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
-    html += `<div class="msg-row"><div class="msg-content item-text">${truncate(m.text, 1000, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
+    const sender = dm.isGroup ? `${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), dm.channel_id, m.ts)} ` : '';
+    html += `<div class="msg-row"><div class="msg-content item-text">${sender}${truncate(m.text, 1000, data.users)}${renderFiles(m.files)}${msgTime(m.ts)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div></div>';

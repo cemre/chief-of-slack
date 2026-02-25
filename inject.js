@@ -296,8 +296,8 @@
     progress(3, dmsTotal > 0 ? `Fetching DMs (incl. group DMs)... 0/${dmsTotal}` : 'Fetching DMs...');
     function normalizeTimestamp(ts) {
       if (!ts) return null;
-      if (typeof ts === 'number') return ts.toString();
-      if (typeof ts === 'string' && /^\d+(?:\.\d+)?$/.test(ts)) return ts;
+      if (typeof ts === 'number') return ts > 0 ? ts.toString() : null;
+      if (typeof ts === 'string' && /^\d+(?:\.\d+)?$/.test(ts)) return parseFloat(ts) > 0 ? ts : null;
       return null;
     }
 
@@ -332,7 +332,13 @@
           };
           if (conv.kind === 'mpim') {
             dmPayload.isGroup = true;
-            const memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
+            let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
+            if (memberIds.length === 0) {
+              try {
+                const info = await slackApi('conversations.info', { channel: conv.id });
+                memberIds = (info.channel?.members || []).filter((uid) => uid && uid !== selfId);
+              } catch {}
+            }
             if (memberIds.length > 0) dmPayload.members = memberIds;
           }
           dms.push(dmPayload);
