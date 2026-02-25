@@ -310,6 +310,36 @@ function isTextExpanded(scopeEl) {
   return shortSpan ? shortSpan.style.display === 'none' : false;
 }
 
+function findThreadContainer(channel, ts, containerId) {
+  if (containerId) {
+    const el = bodyEl.querySelector(`.thread-replies-container[data-container-id="${containerId}"]`);
+    if (el) return el;
+  }
+  return bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+}
+
+function updateThreadBadgeLabel(badge, count, expanded) {
+  const timeHtml = badge.dataset.time ? `<span class="msg-time">${escapeHtml(badge.dataset.time)}</span>` : '';
+  const isNewer = badge.dataset.mode === 'newer';
+  if (isNewer) {
+    if (count === 0) {
+      badge.innerHTML = `${THREAD_BADGE_ICON}No newer replies${timeHtml}`;
+      return;
+    }
+    badge.innerHTML = expanded
+      ? `${THREAD_BADGE_ICON}Hide ${count} newer ${count === 1 ? 'reply' : 'replies'}${timeHtml}`
+      : `${THREAD_BADGE_ICON}View ${count} newer ${count === 1 ? 'reply' : 'replies'}${timeHtml}`;
+    return;
+  }
+  if (count === 0) {
+    badge.innerHTML = `${THREAD_BADGE_ICON}No replies${timeHtml}`;
+    return;
+  }
+  badge.innerHTML = expanded
+    ? `${THREAD_BADGE_ICON}Hide ${count} ${count === 1 ? 'reply' : 'replies'}${timeHtml}`
+    : `${THREAD_BADGE_ICON}${count} ${count === 1 ? 'reply' : 'replies'}${timeHtml}`;
+}
+
 function isThreadExpanded(scopeEl) {
   if (!scopeEl) return false;
   const badge = scopeEl.querySelector('.msg-thread-badge.expanded');
@@ -317,7 +347,7 @@ function isThreadExpanded(scopeEl) {
   // Badge keeps .expanded after first load, but container display is toggled
   const { channel, ts } = badge.dataset;
   if (!channel || !ts) return false;
-  const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+  const container = findThreadContainer(channel, ts, badge.dataset.containerId);
   return container ? container.style.display !== 'none' : false;
 }
 
@@ -701,19 +731,32 @@ function channelLink(label, channelId) {
   return `<span class="item-channel" data-channel="${channelId}">${label}</span>`;
 }
 
-function threadBadge(m, channel, truncId) {
+const THREAD_BADGE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+
+function threadBadge(m, channel, truncId, opts = {}) {
   if (!m.reply_count) return '';
   const n = m.reply_count;
   const seeMore = truncId ? ' · See more' : '';
   const truncAttr = truncId ? ` data-trunc-id="${truncId}"` : '';
+  const containerAttr = opts.containerId ? ` data-container-id="${opts.containerId}"` : '';
+  const badgeTs = opts.threadTs || m.ts;
   const time = formatTimeTooltip(m.ts);
   const timeHtml = time ? `<span class="msg-time">${time}</span>` : '';
   const timeAttr = time ? ` data-time="${escapeHtml(time)}"` : '';
-  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${m.ts}"${truncAttr}${timeAttr}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>${n} ${n === 1 ? 'reply' : 'replies'}${seeMore}${timeHtml}</span>`;
+  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${badgeTs}"${truncAttr}${timeAttr}${containerAttr}>${THREAD_BADGE_ICON}${n} ${n === 1 ? 'reply' : 'replies'}${seeMore}${timeHtml}</span>`;
+}
+
+function newerRepliesBadge(channel, threadTs, afterTs, count, containerId) {
+  const time = formatTimeTooltip(afterTs || threadTs);
+  const timeHtml = time ? `<span class="msg-time">${time}</span>` : '';
+  const timeAttr = time ? ` data-time="${escapeHtml(time)}"` : '';
+  const afterAttr = afterTs ? ` data-after-ts="${afterTs}"` : '';
+  const containerAttr = containerId ? ` data-container-id="${containerId}"` : '';
+  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${threadTs}" data-mode="newer" data-newer-count="${count}"${afterAttr}${timeAttr}${containerAttr}>${THREAD_BADGE_ICON}View ${count} newer ${count === 1 ? 'reply' : 'replies'}${timeHtml}</span>`;
 }
 
 // Render message text + files + thread badge with merged "See more" / "N replies"
-function renderMsgBody(m, channel, users, maxLen = 400) {
+function renderMsgBody(m, channel, users, maxLen = 400, threadUi = null) {
   const prevId = truncateId;
   let textHtml = truncate(m.text, maxLen, users);
   const wasTruncated = truncateId > prevId;
@@ -726,13 +769,25 @@ function renderMsgBody(m, channel, users, maxLen = 400) {
       `<span class="see-more" data-trunc-id="${truncIdForBadge}" style="display:none">See more</span>`
     );
   }
-  const badge = threadBadge(m, channel, truncIdForBadge);
+  let badge = '';
+  if (threadUi?.mode === 'newer' && threadUi.newerReplyCount > 0) {
+    badge = newerRepliesBadge(channel, threadUi.threadTs || m.thread_ts || m.ts, threadUi.afterTs || m.ts, threadUi.newerReplyCount, threadUi.containerId);
+  } else {
+    const badgeOpts = threadUi ? { containerId: threadUi.containerId, threadTs: threadUi.threadTs } : {};
+    badge = threadBadge(m, channel, truncIdForBadge, badgeOpts);
+  }
   return textHtml + renderFiles(m.files) + badge + (badge ? '' : msgTime(m.ts));
 }
 
-function threadRepliesContainer(m, channel) {
-  if (!m.reply_count) return '';
-  return `<div class="thread-replies-container" data-channel="${channel}" data-ts="${m.ts}"></div>`;
+function threadRepliesContainer(m, channel, threadUi = null) {
+  const hasReplies = (m.reply_count || 0) > 0 || (threadUi?.mode === 'newer' && threadUi.newerReplyCount > 0);
+  if (!hasReplies) return '';
+  const threadTs = threadUi?.threadTs || m.ts;
+  const msgTs = m.ts || threadUi?.threadTs || threadTs;
+  const containerId = threadUi?.containerId || `thread-${channel}-${(threadTs || '').replace(/\./g, '_')}-${(msgTs || '').replace(/\./g, '_')}`;
+  const modeAttr = threadUi?.mode ? ` data-mode="${threadUi.mode}"` : '';
+  const afterAttr = threadUi?.afterTs ? ` data-after-ts="${threadUi.afterTs}"` : '';
+  return `<div class="thread-replies-container" data-channel="${channel}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}></div>`;
 }
 
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
@@ -876,6 +931,32 @@ function renderDmItem(dm, data, cssClass) {
   return html;
 }
 
+function buildThreadUiMeta(data, channelId, message) {
+  if (!data || !channelId || !message) return null;
+  let hasThread = false;
+  const meta = {};
+  if ((message.reply_count || 0) > 0) {
+    hasThread = true;
+    meta.threadTs = message.ts;
+  }
+  if (message.thread_ts && message.thread_ts !== message.ts) {
+    const newerCount = countNewerThreadReplies(data, channelId, message.thread_ts, message.ts);
+    if (newerCount > 0) {
+      hasThread = true;
+      meta.threadTs = message.thread_ts;
+      meta.mode = 'newer';
+      meta.afterTs = message.ts;
+      meta.newerReplyCount = newerCount;
+    }
+  }
+  if (!hasThread) return null;
+  const rootTs = meta.threadTs || message.ts;
+  const msgTs = message.ts || rootTs;
+  meta.threadTs = rootTs;
+  meta.containerId = `thread-${channelId}-${(rootTs || '').replace(/\./g, '_')}-${(msgTs || '').replace(/\./g, '_')}`;
+  return meta;
+}
+
 function renderChannelItem(cp, data, cssClass) {
   const ch = data.channels[cp.channel_id] || cp.channel_id;
   const latest = cp.messages[0];
@@ -901,7 +982,8 @@ function renderChannelItem(cp, data, cssClass) {
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
+      const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -932,7 +1014,8 @@ function renderDeepSummarizedItem(cp, data) {
     : formatTime(newestTs);
   let messagesHtml = '';
   for (const m of msgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id)}</div>`;
+    const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -990,7 +1073,8 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   let messagesHtml = '';
   for (const m of allMsgs) {
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id)}</div>`;
+    const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
   }
 
   let contentHtml;
@@ -1444,6 +1528,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 
   bodyEl.innerHTML = html;
   focusedItemIndex = -1;
+  resetThreadUnreadIndex();
   lastRenderData = data;
 
   // Wire up noise toggles
@@ -1466,6 +1551,44 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 
 // ── Seen replies lazy loading ──
 let lastRenderData = null;
+let threadUnreadIndex = null;
+let threadUnreadIndexSource = null;
+
+function resetThreadUnreadIndex() {
+  threadUnreadIndex = null;
+  threadUnreadIndexSource = null;
+}
+
+function ensureThreadUnreadIndex(data) {
+  if (!data) return new Map();
+  if (threadUnreadIndex && threadUnreadIndexSource === data) return threadUnreadIndex;
+  const map = new Map();
+  for (const t of data.threads || []) {
+    if (!t.channel_id || !t.ts) continue;
+    map.set(`${t.channel_id}:${t.ts}`, t.unread_replies || []);
+  }
+  threadUnreadIndex = map;
+  threadUnreadIndexSource = data;
+  return map;
+}
+
+function parseThreadTsValue(ts) {
+  const num = parseFloat(ts);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function countNewerThreadReplies(data, channelId, threadTs, afterTs) {
+  if (!data || !channelId || !threadTs || !afterTs) return 0;
+  const index = ensureThreadUnreadIndex(data);
+  const replies = index.get(`${channelId}:${threadTs}`);
+  if (!replies || replies.length === 0) return 0;
+  const afterVal = parseThreadTsValue(afterTs);
+  let count = 0;
+  for (const r of replies) {
+    if (parseThreadTsValue(r.ts) > afterVal) count++;
+  }
+  return count;
+}
 let replyRequestId = 0;
 
 bodyEl.addEventListener('click', (e) => {
@@ -1550,7 +1673,7 @@ bodyEl.addEventListener('click', (e) => {
   // Thread badge: expand replies inline (shift/meta-click opens in new tab)
   const threadBadgeEl = e.target.closest('.msg-thread-badge');
   if (threadBadgeEl) {
-    const { channel, ts, truncId } = threadBadgeEl.dataset;
+    const { channel, ts, truncId, containerId } = threadBadgeEl.dataset;
 
     // Expand truncated text if this badge merged "See more"
     // Modifier click → open in Slack as before
@@ -1560,7 +1683,7 @@ bodyEl.addEventListener('click', (e) => {
       return;
     }
 
-    const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+    const container = findThreadContainer(channel, ts, containerId);
     if (!container) return;
 
     // Already loaded → toggle visibility (including truncated text)
@@ -1576,11 +1699,7 @@ bodyEl.addEventListener('click', (e) => {
         }
       }
       const n = parseInt(container.dataset.count, 10) || 0;
-      const svg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
-      const timeHtml = threadBadgeEl.dataset.time ? `<span class="msg-time">${escapeHtml(threadBadgeEl.dataset.time)}</span>` : '';
-      threadBadgeEl.innerHTML = isVisible
-        ? `${svg}${n} ${n === 1 ? 'reply' : 'replies'}${timeHtml}`
-        : `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}${timeHtml}`;
+      updateThreadBadgeLabel(threadBadgeEl, n, !isVisible);
       return;
     }
 
@@ -2126,12 +2245,17 @@ window.addEventListener('message', (event) => {
   if (badge) {
     const channel = badge.dataset.channel;
     const ts = badge.dataset.ts;
-    const container = bodyEl.querySelector(`.thread-replies-container[data-channel="${channel}"][data-ts="${ts}"]`);
+    const container = findThreadContainer(channel, ts, badge.dataset.containerId);
     if (!container) return;
 
     const data = lastRenderData;
     // conversations.replies returns root message at index 0 — skip it
-    const threadReplies = replies.filter((r) => r.ts !== ts);
+    let threadReplies = replies.filter((r) => r.ts !== ts);
+    if (badge.dataset.mode === 'newer') {
+      const afterTs = badge.dataset.afterTs;
+      const afterVal = parseThreadTsValue(afterTs);
+      threadReplies = threadReplies.filter((r) => parseThreadTsValue(r.ts) > afterVal);
+    }
 
     let html = '';
     for (const r of threadReplies) {
@@ -2143,13 +2267,14 @@ window.addEventListener('message', (event) => {
     container.dataset.count = threadReplies.length;
 
     badge.classList.remove('loading');
-    badge.classList.add('expanded');
     const n = threadReplies.length;
-    const svg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
-    const timeHtml = badge.dataset.time ? `<span class="msg-time">${escapeHtml(badge.dataset.time)}</span>` : '';
-    badge.innerHTML = n > 0
-      ? `${svg}Hide ${n} ${n === 1 ? 'reply' : 'replies'}${timeHtml}`
-      : `${svg}No replies${timeHtml}`;
+    if (n === 0) {
+      badge.classList.remove('expanded');
+      updateThreadBadgeLabel(badge, 0, false);
+      return;
+    }
+    badge.classList.add('expanded');
+    updateThreadBadgeLabel(badge, n, true);
     return;
   }
 });
