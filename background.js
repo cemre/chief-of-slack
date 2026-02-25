@@ -35,8 +35,8 @@ CONTEXT:
 
 CATEGORIES:
 - "drop": I already replied in this thread (userReplied=true) AND the new messages are just acknowledgments, +1s, emoji reactions, or the conversation continuing without needing me. Do NOT drop if someone asks a question or needs me to unblock something.
-- "act_now": Someone is BLOCKED on me or explicitly waiting — direct question, review/approval request, can't proceed without my input.
-- "priority": Needs my attention soon — warrants a response but nobody is stuck right now.
+- "act_now": Someone is BLOCKED on me or explicitly waiting — direct question, review/approval request, can't proceed without my input. Also use act_now when someone @mentions me asking me to confirm, verify, check, or weigh in on something — they're waiting for my response.
+- "priority": Needs my attention soon — warrants a response but nobody is stuck right now. Use for @mentions that are purely informational (e.g. FYI, CC, looping me in) where nobody is waiting on me.
 - "when_free": Something I could usefully respond to or should be aware of, but not urgent.
 - "noise": Chatter not directed at me, announcements, automated posts, things that don't need a response.
 

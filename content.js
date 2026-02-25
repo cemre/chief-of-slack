@@ -786,8 +786,11 @@ function renderThreadItem(t, data, cssClass) {
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
       ${channelLink(channelLabel, t.channel_id)}
-      <span class="item-time">${formatTime(markAllTs)}</span>
-    </div>
+      <span class="item-time">${formatTime(markAllTs)}</span>`;
+  if (t.mention_count > 0 || t._isMentioned) {
+    html += `<div class="item-mention">@mentioned</div>`;
+  }
+  html += `</div>
     <div class="item-right">
       <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 400, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
   html += '<div class="thread-replies-container">';
@@ -838,8 +841,8 @@ function renderChannelItem(cp, data, cssClass) {
     <div class="item-left">
       ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
       <span class="item-time">${formatTime(latest?.ts)}</span>`;
-  if (cp.mention_count > 0) {
-    html += `<div class="item-mention">@${cp.mention_count}x</div>`;
+  if (cp.mention_count > 0 || cp._isMentioned) {
+    html += `<div class="item-mention">@mentioned</div>`;
   }
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
@@ -1055,6 +1058,17 @@ function applyPreFilters(data) {
     }
   }
 
+  // Build set of thread roots so we can dedup channel posts that are already shown as threads
+  const threadRootKeys = new Set();
+  const threadByKey = {};
+  for (const t of threads) {
+    if (t.channel_id && t.ts) {
+      const key = `${t.channel_id}:${t.ts}`;
+      threadRootKeys.add(key);
+      threadByKey[key] = t;
+    }
+  }
+
   // Channel posts
   for (const cp of channelPosts) {
     cp._type = 'channel';
@@ -1063,6 +1077,20 @@ function applyPreFilters(data) {
     const allCpLower = allCpTexts.toLowerCase();
     cp._isMentioned = allCpTexts.includes(`<@${selfId}>`)
       || allCpLower.includes(' gem ') || allCpLower.includes(' cemre ');
+
+    // Dedup: if every message in this channel post is already a thread root, skip it
+    // but carry over mention_count and _isMentioned to the thread
+    const cpMsgsInThreads = cp.messages.filter((m) => threadRootKeys.has(`${cp.channel_id}:${m.ts}`));
+    if (cpMsgsInThreads.length === cp.messages.length && cp.messages.length > 0) {
+      for (const m of cpMsgsInThreads) {
+        const t = threadByKey[`${cp.channel_id}:${m.ts}`];
+        if (t) {
+          if (cp.mention_count > 0) t.mention_count = (t.mention_count || 0) + cp.mention_count;
+          if (cp._isMentioned) t._isMentioned = true;
+        }
+      }
+      continue;
+    }
 
     // dia-dogfooding / help-dia: split — individual posts with 10+ replies → whenFree, rest → noise
     const chName = channels[cp.channel_id] || '';
@@ -1136,11 +1164,11 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       isPrivate: meta[t.channel_id]?.isPrivate || false,
       isMentioned: t._isMentioned || false,
       rootUser: uname(t.root_user, data.users),
-      rootText: plainTruncate(t.root_text, 150, data.users),
+      rootText: plainTruncate(t.root_text, 1000, data.users),
       userReplied: t._userReplied,
       newReplies: t.unread_replies.map((r) => ({
         user: uname(r.user, data.users),
-        text: plainTruncate(r.text, 150, data.users),
+        text: plainTruncate(r.text, 1000, data.users),
       })),
     });
   }
@@ -1152,7 +1180,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       type: 'dm',
       messages: dm.messages.map((m) => ({
         user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
-        text: plainTruncate(m.text, 150, data.users),
+        text: plainTruncate(m.text, 1000, data.users),
       })),
     });
   }
@@ -1165,10 +1193,11 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       type: 'channel',
       channel: ch,
       isPrivate: meta[cp.channel_id]?.isPrivate || false,
+      isMentioned: cp._isMentioned || false,
       mentionCount: cp.mention_count || 0,
       messages: cp.messages.map((m) => ({
         user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
-        text: plainTruncate(m.text, 150, data.users),
+        text: plainTruncate(m.text, 1000, data.users),
       })),
     });
   }
@@ -1200,6 +1229,9 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
       if (isVipDm) cat = 'act_now';
       else if (cat !== 'act_now') cat = 'priority';
     }
+
+    // Floor: direct @mentions are at least priority (LLM can upgrade to act_now but not below priority)
+    if (isMentioned && cat !== 'act_now') cat = 'priority';
 
     // Hard gate: only DMs, private channels, or @mentions can reach act_now/priority
     if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
@@ -2642,8 +2674,8 @@ function render(data) {
         <div class="item-left">
           <span class="item-channel" data-channel="${cp.channel_id}">#${ch}</span>
           <span class="item-time">${formatTime(latest?.ts)}</span>`;
-      if (cp.mention_count > 0) {
-        html += `<div class="item-mention">@${cp.mention_count}x</div>`;
+      if (cp.mention_count > 0 || cp._isMentioned) {
+        html += `<div class="item-mention">@mentioned</div>`;
       }
       html += `</div>
         <div class="item-right">`;

@@ -104,7 +104,7 @@ function render(data) {
           <span class="item-time">${formatTime(latest?.ts)}</span>
         </div>`;
       if (cp.mention_count > 0) {
-        html += `<div class="item-mention">@mentioned ${cp.mention_count}x</div>`;
+        html += `<div class="item-mention">@mentioned</div>`;
       }
       for (const m of cp.messages.slice(0, 3)) {
         html += `<div class="item-text">
