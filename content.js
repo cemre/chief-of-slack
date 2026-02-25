@@ -1158,7 +1158,8 @@ function applyPreFilters(data) {
 
     // dia-dogfooding / help-dia threads: only surface if 10+ replies, rest → noise
     const tChName = channels[t.channel_id] || '';
-    if (diaChannelNames.has(tChName)) {
+    const isOwnThread = t.root_user === selfId;
+    if (diaChannelNames.has(tChName) && !isOwnThread) {
       if ((t.reply_count || 0) >= 10) {
         whenFree.push(t);
       } else {
