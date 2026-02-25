@@ -375,9 +375,13 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .file-link { display: inline-block; color: #1d9bd1; font-size: 12px; text-decoration: none; padding: 2px 0; }
 .file-link:hover { text-decoration: underline; }
 
-.voice-msg { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; margin: 4px 0; border-left: 2px solid #1d9bd1; background: rgba(29,155,209,0.06); border-radius: 0 4px 4px 0; }
+.voice-msg { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 4px 8px; margin: 4px 0; border-left: 2px solid #1d9bd1; background: rgba(29,155,209,0.06); border-radius: 0 4px 4px 0; }
+.voice-msg-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .voice-msg-label { font-size: 11px; color: #1d9bd1; font-weight: 600; }
 .voice-msg-transcript { font-size: 12px; color: #ccc; font-style: italic; line-height: 1.4; }
+.voice-play-btn { flex-shrink: 0; width: 28px; height: 28px; border-radius: 50%; border: none; background: #1d9bd1; color: #fff; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.voice-play-btn:hover { background: #1689b8; }
+.voice-audio { display: none; }
 
 /* Lightbox */
 #lightbox { display: none; position: fixed; inset: 0; z-index: 9999999; }

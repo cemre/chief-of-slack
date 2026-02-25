@@ -655,7 +655,8 @@ function renderFiles(files) {
     if (f.voice) {
       const dur = f.duration_ms ? ` (${Math.round(f.duration_ms / 1000)}s)` : '';
       const txt = f.transcript ? escapeHtml(f.transcript) : 'No transcript available';
-      html += `<div class="voice-msg"><span class="voice-msg-label">&#127908; Voice message${dur}</span><span class="voice-msg-transcript">${txt}</span></div>`;
+      const playBtn = f.url ? `<button class="voice-play-btn" data-voice-url="${escapeHtml(f.url)}" title="Play">&#9654;</button>` : '';
+      html += `<div class="voice-msg">${playBtn}<div class="voice-msg-body"><span class="voice-msg-label">&#127908; Voice message${dur}</span><span class="voice-msg-transcript">${txt}</span></div></div>`;
       continue;
     }
     const isImage = f.mimetype?.startsWith('image/');
@@ -1393,6 +1394,25 @@ bodyEl.addEventListener('click', (e) => {
     const items = allThumbs.map(el => ({ url: el.dataset.lbUrl, type: el.dataset.lbType || 'image' }));
     const idx = allThumbs.indexOf(thumb);
     lbShow(items, idx >= 0 ? idx : 0);
+    return;
+  }
+
+  // Voice message play button
+  const voiceBtn = e.target.closest('.voice-play-btn');
+  if (voiceBtn) {
+    e.preventDefault();
+    const url = voiceBtn.dataset.voiceUrl;
+    if (!url) return;
+    const existing = voiceBtn.closest('.voice-msg')?.querySelector('audio');
+    if (existing) { existing.paused ? existing.play() : existing.pause(); return; }
+    const audio = new Audio(url);
+    audio.className = 'voice-audio';
+    voiceBtn.closest('.voice-msg').appendChild(audio);
+    audio.play();
+    voiceBtn.textContent = '\u23F8';
+    audio.addEventListener('pause', () => { voiceBtn.textContent = '\u25B6'; });
+    audio.addEventListener('play', () => { voiceBtn.textContent = '\u23F8'; });
+    audio.addEventListener('ended', () => { voiceBtn.textContent = '\u25B6'; });
     return;
   }
 
