@@ -286,17 +286,31 @@
     progress(2, `Done. ${threads.length} threads with unread replies from others.`);
 
     // 3. Get unread DMs — fetch history for each
-    const unreadIms = (counts.ims || []).filter((c) => c.has_unreads);
+    const unreadIms = (counts.ims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'im' }));
+    const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'mpim' }));
+    const unreadDirects = [...unreadIms, ...unreadMpims];
     const dms = [];
     let dmsDone = 0;
-    const dmsTotal = unreadIms.length;
-    progress(3, dmsTotal > 0 ? `Fetching DMs... 0/${dmsTotal}` : 'Fetching DMs...');
-    for (const im of unreadIms) {
+    const dmsTotal = unreadDirects.length;
+    const dmFailures = [];
+    progress(3, dmsTotal > 0 ? `Fetching DMs (incl. group DMs)... 0/${dmsTotal}` : 'Fetching DMs...');
+    function normalizeTimestamp(ts) {
+      if (!ts) return null;
+      if (typeof ts === 'number') return ts.toString();
+      if (typeof ts === 'string' && /^\d+(?:\.\d+)?$/.test(ts)) return ts;
+      return null;
+    }
+
+    for (const conv of unreadDirects) {
+      const kindLabel = conv.kind === 'mpim' ? 'group DM' : 'DM';
+      let historyParams = null;
       try {
-        const hist = await slackApi('conversations.history', {
-          channel: im.id,
-          oldest: im.last_read || '0',
-        });
+        const oldestTs = normalizeTimestamp(conv.last_read)
+          || normalizeTimestamp(conv.last_read_ts)
+          || (conv.kind === 'im' ? '0' : null);
+        historyParams = { channel: conv.id };
+        if (oldestTs) historyParams.oldest = oldestTs;
+        const hist = await slackApi('conversations.history', historyParams);
         const msgs = (hist.messages || [])
           .filter((m) => m.user !== selfId)
           .map((m) => ({
@@ -312,18 +326,34 @@
           if (msg.files) await ensureTranscripts(msg.files);
         }
         if (msgs.length > 0) {
-          dms.push({
-            channel_id: im.id,
+          const dmPayload = {
+            channel_id: conv.id,
             messages: msgs,
-          });
+          };
+          if (conv.kind === 'mpim') {
+            dmPayload.isGroup = true;
+            const memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
+            if (memberIds.length > 0) dmPayload.members = memberIds;
+          }
+          dms.push(dmPayload);
         }
-      } catch {
-        // skip failed DMs
+      } catch (err) {
+        console.error(`[${FSLACK}] Failed to fetch ${kindLabel} ${conv.id}`, err, {
+          channel: conv.id,
+          kind: conv.kind,
+          historyParams,
+          rawConversation: conv,
+        });
+        dmFailures.push({ id: conv.id, kind: conv.kind, error: err?.message || String(err) });
+        progress(3, `Failed to fetch ${kindLabel} ${conv.id}: ${err?.message || 'unknown error'}`);
       }
-      progress(3, `Fetching DMs... ${++dmsDone}/${dmsTotal}`);
+      progress(3, `Fetching DMs (incl. group DMs)... ${++dmsDone}/${dmsTotal}`);
     }
 
-    progress(3, `Done. ${dms.length} DMs.`);
+    const dmDoneDetail = `Done. ${dms.length} direct conversations${unreadMpims.length > 0 ? ' (incl. group DMs)' : ''}.`;
+    progress(3, dmFailures.length > 0
+      ? `${dmDoneDetail} ${dmFailures.length} failed — see console.`
+      : dmDoneDetail);
 
     // 4. Get unread channel messages — most recent channels first
     progress(4, 'Fetching channel messages...');

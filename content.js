@@ -2,6 +2,7 @@
 
 const FSLACK = 'fslack';
 const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
+const SEEN_REPLIES_CHUNK = 10;
 
 
 // Suppress "Could not establish connection" errors from orphaned content scripts
@@ -832,8 +833,22 @@ function renderThreadItem(t, data, cssClass) {
 }
 
 function dmPartnerName(dm, data) {
+  const messages = dm.messages || [];
+  if (dm.isGroup) {
+    const explicitIds = (dm.members || [])
+      .filter((uid) => uid && uid !== data.selfId);
+    const inferredIds = messages
+      .map((m) => (m.user && m.subtype !== 'bot_message' ? m.user : null))
+      .filter((uid) => uid && uid !== data.selfId);
+    const combinedIds = [...explicitIds, ...inferredIds];
+    const uniqueIds = [...new Set(combinedIds)];
+    const names = uniqueIds.map((uid) => uname(uid, data.users)).filter(Boolean);
+    if (names.length === 0) return 'Group DM';
+    if (names.length <= 3) return names.join(', ');
+    return `${names.slice(0, 3).join(', ')} +${names.length - 3}`;
+  }
   // Find the most common non-bot user in the DM — that's who it's with
-  for (const m of dm.messages) {
+  for (const m of messages) {
     if (m.user && m.subtype !== 'bot_message') return uname(m.user, data.users);
   }
   return 'DM';
@@ -1016,6 +1031,16 @@ function renderAnyItem(item, data, cssClass) {
   return '';
 }
 
+const HANDLE_MENTION_REGEX = /(?:^|[\s"'([{<])@(?:gem|cemre)(?=$|[\s.,!?;:)\]\}>"'])/i;
+const BARE_NAME_REGEX = /(?:^|[\s"'([{<])(?:gem|cemre)(?=$|[\s.,!?;:)\]\}>"'])/i;
+
+function containsSelfMention(text, selfId) {
+  if (!text || !selfId) return false;
+  if (text.includes(`<@${selfId}>`)) return true;
+  if (text.includes(`@${selfId}`)) return true;
+  return HANDLE_MENTION_REGEX.test(text) || BARE_NAME_REGEX.test(text);
+}
+
 // ── Deterministic pre-filters ──
 // Hard-drops, bot→whenFree. Everything else goes to LLM for classification + ranking.
 function applyPreFilters(data) {
@@ -1037,9 +1062,7 @@ function applyPreFilters(data) {
     t._isDmThread = t.channel_id?.startsWith('D') || false;
 
     const allTexts = [t.root_text, ...(t.unread_replies || []).map((r) => r.text)].join(' ');
-    const textsLower = allTexts.toLowerCase();
-    t._isMentioned = allTexts.includes(`<@${selfId}>`) || allTexts.includes(`@${selfId}`)
-      || textsLower.includes(' gem ') || textsLower.includes(' cemre ');
+    t._isMentioned = containsSelfMention(allTexts, selfId);
 
     // dia-dogfooding / help-dia threads: only surface if 10+ replies, rest → noise
     const tChName = channels[t.channel_id] || '';
@@ -1097,9 +1120,7 @@ function applyPreFilters(data) {
     cp._type = 'channel';
 
     const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
-    const allCpLower = allCpTexts.toLowerCase();
-    cp._isMentioned = allCpTexts.includes(`<@${selfId}>`)
-      || allCpLower.includes(' gem ') || allCpLower.includes(' cemre ');
+    cp._isMentioned = containsSelfMention(allCpTexts, selfId);
 
     // Dedup: if every message in this channel post is already a thread root, skip it
     // but carry over mention_count and _isMentioned to the thread
@@ -1198,9 +1219,13 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
 
   for (let i = 0; i < forLlm.dms.length; i++) {
     const dm = forLlm.dms[i];
+    const participantIds = (dm.members || []).filter((uid) => uid && uid !== data.selfId);
+    const participantNames = [...new Set(participantIds.map((uid) => uname(uid, data.users)))].filter(Boolean);
     items.push({
       id: `dm_${i}`,
       type: 'dm',
+      isGroup: !!dm.isGroup,
+      participants: participantNames,
       messages: dm.messages.map((m) => ({
         user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
         text: plainTruncate(m.text, 1000, data.users),
@@ -1930,20 +1955,12 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Seen replies lazy load
+  // Seen replies lazy load / chunked expansion
   const toggle = e.target.closest('.seen-replies-toggle');
-  if (!toggle || toggle.classList.contains('loading') || toggle.classList.contains('expanded')) return;
-
-  const channel = toggle.dataset.channel;
-  const ts = toggle.dataset.ts;
-  if (!channel || !ts) return;
-
-  toggle.classList.add('loading');
-  toggle.textContent = 'Loading...';
-
-  const reqId = `reply_${++replyRequestId}`;
-  toggle.dataset.requestId = reqId;
-  window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
+  if (toggle) {
+    handleSeenRepliesToggleClick(toggle);
+    return;
+  }
 });
 
 // Click-to-focus: move keyboard nav to clicked item
@@ -1958,6 +1975,93 @@ bodyEl.addEventListener('click', (e) => {
   const idx = els.indexOf(target);
   if (idx >= 0) focusItem(idx);
 });
+
+function seenRepliesLabel(count) {
+  return count === 1 ? 'reply' : 'replies';
+}
+
+function renderNextSeenRepliesChunk(toggle, container) {
+  const chunkData = toggle._seenRepliesData;
+  if (!chunkData) return;
+
+  const start = chunkData.rendered || 0;
+  const end = Math.min(chunkData.replies.length, start + SEEN_REPLIES_CHUNK);
+  if (start === end) return;
+
+  const data = lastRenderData;
+  let html = '';
+  const segment = chunkData.replies.slice(start, end);
+  if (start === 0) container.innerHTML = '';
+  for (const r of segment) {
+    const userName = data ? uname(r.user, data.users) : r.user;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, toggle.dataset.channel, r.ts)} ${truncate(r.text, 400, data?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(toggle.dataset.channel, r.ts)}</div>`;
+  }
+  container.insertAdjacentHTML('beforeend', html);
+  container.style.display = '';
+  chunkData.rendered = end;
+
+  const total = chunkData.replies.length;
+  const remaining = total - chunkData.rendered;
+  toggle.dataset.totalReplies = `${total}`;
+
+  if (remaining > 0) {
+    const toShow = Math.min(SEEN_REPLIES_CHUNK, remaining);
+    toggle.dataset.state = 'partial';
+    toggle.classList.remove('expanded');
+    toggle.textContent = `Show ${toShow} more earlier ${seenRepliesLabel(toShow)}`;
+  } else {
+    toggle.dataset.state = 'full';
+    toggle.classList.add('expanded');
+    toggle.textContent = `Hide ${total} earlier ${seenRepliesLabel(total)}`;
+  }
+}
+
+function handleSeenRepliesToggleClick(toggle) {
+  if (toggle.dataset.state === 'empty' || toggle.classList.contains('loading')) return;
+
+  const channel = toggle.dataset.channel;
+  const ts = toggle.dataset.ts;
+  if (!channel || !ts) return;
+  const container = bodyEl.querySelector(`.seen-replies-container[data-for="${channel}-${ts}"]`);
+  if (!container) return;
+
+  const chunkData = toggle._seenRepliesData;
+  if (chunkData) {
+    const total = chunkData.replies.length;
+    if (toggle.dataset.state === 'collapsed') {
+      container.style.display = '';
+      toggle.dataset.state = 'full';
+      toggle.classList.add('expanded');
+      toggle.textContent = `Hide ${total} earlier ${seenRepliesLabel(total)}`;
+      return;
+    }
+    if (chunkData.rendered < total) {
+      renderNextSeenRepliesChunk(toggle, container);
+      return;
+    }
+    const isVisible = container.style.display !== 'none';
+    if (isVisible) {
+      container.style.display = 'none';
+      toggle.dataset.state = 'collapsed';
+      toggle.classList.remove('expanded');
+      toggle.textContent = `${total} earlier ${seenRepliesLabel(total)}`;
+    } else {
+      container.style.display = '';
+      toggle.dataset.state = 'full';
+      toggle.classList.add('expanded');
+      toggle.textContent = `Hide ${total} earlier ${seenRepliesLabel(total)}`;
+    }
+    return;
+  }
+
+  toggle.classList.add('loading');
+  toggle.dataset.state = 'loading';
+  toggle.textContent = 'Loading...';
+
+  const reqId = `reply_${++replyRequestId}`;
+  toggle.dataset.requestId = reqId;
+  window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
+}
 
 window.addEventListener('message', (event) => {
   if (event.source !== window) return;
@@ -1989,28 +2093,21 @@ window.addEventListener('message', (event) => {
     // Show only seen replies (exclude unread ones already displayed below)
     const seenReplies = replies.filter((r) => !unreadTs.has(r.ts));
 
-    let html = '';
-    for (const r of seenReplies) {
-      const userName = data ? uname(r.user, data.users) : r.user;
-      html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 400, data?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(channel, r.ts)}</div>`;
-    }
-    container.innerHTML = html;
-
     toggle.classList.remove('loading');
-    toggle.classList.add('expanded');
-    const count = seenReplies.length;
-    toggle.textContent = count > 0
-      ? `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`
-      : 'No earlier replies';
+    delete toggle.dataset.requestId;
 
-    // Toggle collapse on re-click
-    toggle.addEventListener('click', function collapseHandler() {
-      const isVisible = container.style.display !== 'none';
-      container.style.display = isVisible ? 'none' : '';
-      toggle.textContent = isVisible
-        ? `${count} earlier ${count === 1 ? 'reply' : 'replies'}`
-        : `Hide ${count} earlier ${count === 1 ? 'reply' : 'replies'}`;
-    });
+    if (seenReplies.length === 0) {
+      container.innerHTML = '';
+      toggle.dataset.state = 'empty';
+      toggle.classList.remove('expanded');
+      toggle.textContent = 'No earlier replies';
+      return;
+    }
+
+    toggle._seenRepliesData = { replies: seenReplies, rendered: 0 };
+    container.innerHTML = '';
+    container.style.display = '';
+    renderNextSeenRepliesChunk(toggle, container);
     return;
   }
 
