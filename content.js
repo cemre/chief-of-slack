@@ -164,6 +164,7 @@ const pendingUnreactButtons = {};
 let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
 let dmWatchTimer = null;         // interval ID for new-DM polling
 let knownDmChannelIds = new Set(); // DM channels already in the current render
+let mutedThreadKeys = new Set();   // Set of "channel:threadTs" strings for muted threads
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
 chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers', 'fslackUserMentionHints'], (cached) => {
@@ -209,6 +210,24 @@ function removeCachedItem(channel, threadTs) {
   chrome.storage.local.set({ fslackViewCache: cachedView });
 }
 
+function threadKey(channel, threadTs) {
+  return channel && threadTs ? `${channel}:${threadTs}` : null;
+}
+
+function persistMutedThreads() {
+  chrome.storage.local.set({ fslackMutedThreads: Array.from(mutedThreadKeys) });
+}
+
+function muteThreadLocally(channel, threadTs) {
+  const key = threadKey(channel, threadTs);
+  if (!key) return;
+  if (!mutedThreadKeys.has(key)) {
+    mutedThreadKeys.add(key);
+    persistMutedThreads();
+  }
+  removeCachedItem(channel, threadTs);
+}
+
 function startFetch() {
   if (fetchBtn.disabled) return;
   fetchBtn.disabled = true;
@@ -216,12 +235,13 @@ function startFetch() {
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
   resetFetchState();
   // Load cached names and pass to inject.js
-  chrome.storage.local.get(['fslackUsers', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
     digestChannels = cached.fslackDigestChannels || {};
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     vipSeenTimestamps = cached.fslackVipSeen || {};
+    mutedThreadKeys = new Set(cached.fslackMutedThreads || []);
     mergeCachedUsers(cached.fslackUsers || {});
     mergeCachedMentionHints(cached.fslackUserMentionHints || {}, { replace: true });
     const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
@@ -1179,6 +1199,8 @@ function applyPreFilters(data) {
   const filteredThreads = [];
   for (const t of threadList) {
     if (!t) continue;
+    const muteKey = threadKey(t.channel_id, t.ts);
+    if (muteKey && mutedThreadKeys.has(muteKey)) continue;
     const unread = t.unread_replies || [];
     if (unread.length > 0 && broadcastedThreadReplyKeys.size > 0) {
       const deduped = unread.filter((reply) => !broadcastedThreadReplyKeys.has(`${t.channel_id}:${reply.ts}`));
@@ -2138,6 +2160,12 @@ bodyEl.addEventListener('click', (e) => {
       markAllBtn.dataset.pending = 'true';
       window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, requestId: `readall_${Date.now()}` }, '*');
     }
+    muteThreadLocally(channel, threadTs);
+    const itemEl = muteBtn.closest('.item');
+    if (itemEl) {
+      itemEl.style.opacity = '0.3';
+      setTimeout(() => itemEl.remove(), 150);
+    }
     window.postMessage({ type: `${FSLACK}:muteThread`, channel, thread_ts: threadTs, requestId: `mute_${Date.now()}` }, '*');
     return;
   }
@@ -2641,14 +2669,8 @@ window.addEventListener('message', (event) => {
 
   if (msg.type === `${FSLACK}:muteThreadResult`) {
     const muteBtn = bodyEl.querySelector('.action-mute[data-pending="true"]');
-    if (muteBtn) {
-      if (msg.ok) {
-        muteBtn.closest('.item')?.remove();
-      } else {
-        delete muteBtn.dataset.pending;
-        muteBtn.textContent = 'mute thread';
-      }
-    }
+    if (muteBtn) delete muteBtn.dataset.pending;
+    if (!msg.ok) console.warn('[fslack] Slack muteThread failed; keeping local mute only');
   }
 
   if (msg.type === `${FSLACK}:muteChannelResult`) {
@@ -3444,13 +3466,14 @@ if (!_autoShow) {
     sessionStorage.removeItem('fslack_hide');
   } else {
     // Load persisted view cache, timestamp, and saved messages before showing
-    chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen'], (result) => {
+    chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads'], (result) => {
       if (result.fslackViewCache && !cachedView) {
         cachedView = result.fslackViewCache;
       }
       persistedFetchTs = result.fslackLastFetchTs || 0;
       savedMsgKeys = new Set(result.fslackSavedMsgs || []);
       vipSeenTimestamps = result.fslackVipSeen || {};
+      mutedThreadKeys = new Set(result.fslackMutedThreads || []);
       show();
     });
   }
