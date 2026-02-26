@@ -162,6 +162,8 @@ let reactionRequestCounter = 0;
 const pendingReactButtons = {};
 const pendingUnreactButtons = {};
 let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
+let dmWatchTimer = null;         // interval ID for new-DM polling
+let knownDmChannelIds = new Set(); // DM channels already in the current render
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
 chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers', 'fslackUserMentionHints'], (cached) => {
@@ -188,6 +190,7 @@ function saveViewCache(data, popular, prioritized, savedItems = []) {
       chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts });
     }
   });
+  startDmWatcher(data);
 }
 
 function removeCachedItem(channel, threadTs) {
@@ -247,6 +250,7 @@ function showFromCache() {
     renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
     runThreadReplySummarization([...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])], cachedView.data);
+    startDmWatcher(cachedView.data);
     return true;
   }
   // No full cache, but we fetched recently — skip auto-fetch
@@ -268,7 +272,7 @@ function show() {
   if (showFromCache()) return;
   if (injectReady) startFetch();
 }
-function hide() { visible = false; overlay.classList.remove('visible'); }
+function hide() { visible = false; overlay.classList.remove('visible'); stopDmWatcher(); }
 function toggle() { visible ? hide() : show(); }
 
 // Expose toggle on the host element so background.js executeScript can call it
@@ -1280,6 +1284,15 @@ function applyPreFilters(data) {
   // DMs
   for (const dm of dms) {
     dm._type = 'dm';
+    const originalMessages = dm.messages || [];
+    const filteredMessages = originalMessages.filter((m) => !threadRootKeys.has(`${dm.channel_id}:${m.ts}`));
+    if (filteredMessages.length === 0) {
+      // Entire DM already surfaced via thread cards; skip duplicate render
+      continue;
+    }
+    if (filteredMessages.length !== originalMessages.length) {
+      dm.messages = filteredMessages;
+    }
     if (dm.messages.every(isBot)) {
       whenFree.push(dm);
       continue;
@@ -1557,6 +1570,92 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'older noise item');
   wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'saved item');
   wireNoiseToggle('digests-toggle', 'digest-items', 'digest');
+}
+
+// ── New DM watcher — polls for DMs that arrive after initial fetch ──
+const DM_POLL_INTERVAL_MS = 30000;
+
+function stopDmWatcher() {
+  if (dmWatchTimer) { clearInterval(dmWatchTimer); dmWatchTimer = null; }
+}
+
+function startDmWatcher(data) {
+  stopDmWatcher();
+  // Collect channel IDs of DMs already rendered (from all priority buckets)
+  knownDmChannelIds = new Set();
+  const allItems = [...(cachedView?.prioritized?.actNow || []), ...(cachedView?.prioritized?.priority || []),
+    ...(cachedView?.prioritized?.whenFree || []), ...(cachedView?.prioritized?.noise || [])];
+  for (const item of allItems) {
+    if (item._type === 'dm') knownDmChannelIds.add(item.channel_id);
+  }
+  // Also include DMs from the raw data in case they were filtered/dropped
+  for (const dm of (data.dms || [])) knownDmChannelIds.add(dm.channel_id);
+
+  dmWatchTimer = setInterval(() => {
+    if (!visible) return; // skip if overlay is hidden
+    window.postMessage({
+      type: `${FSLACK}:pollNewDms`,
+      knownChannelIds: [...knownDmChannelIds],
+      cachedUsers: { ...cachedUserMap, ...(lastRenderData?.users || {}) },
+      requestId: `dmpoll_${Date.now()}`,
+    }, '*');
+  }, DM_POLL_INTERVAL_MS);
+}
+
+function insertNewDm(dm, data) {
+  dm._type = 'dm';
+  knownDmChannelIds.add(dm.channel_id);
+
+  // Skip all-bot DMs — they'd go to whenFree in a full fetch
+  if (dm.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) return;
+
+  // Determine priority: VIP → act_now, else → priority
+  const senders = (dm.messages || []).map((m) => uname(m.user, data.users).toLowerCase());
+  const isVip = senders.some((s) => VIPS.includes(s));
+  const section = isVip ? 'act-now' : 'priority-item';
+  const sectionHeader = isVip ? 'Act Now' : 'Priority';
+
+  const itemHtml = renderDmItem(dm, data, section);
+  if (!itemHtml) return;
+
+  // Wrap in a container for the fade-in animation
+  const wrapper = document.createElement('div');
+  wrapper.classList.add('dm-watch-new');
+  wrapper.innerHTML = itemHtml;
+
+  // Find or create the target section
+  const headerClass = isVip ? 'act-now' : 'priority-header';
+  let sectionEl = shadow.querySelector(`h2.${headerClass}`)?.closest('.priority-section');
+  if (!sectionEl) {
+    // Create the section and insert at the top of bodyEl
+    sectionEl = document.createElement('section');
+    sectionEl.className = 'priority-section';
+    const h2 = document.createElement('h2');
+    h2.className = headerClass;
+    h2.textContent = sectionHeader;
+    sectionEl.appendChild(h2);
+    // act-now goes first; priority goes after act-now if it exists
+    if (isVip) {
+      bodyEl.insertBefore(sectionEl, bodyEl.firstChild);
+    } else {
+      const actNowSection = shadow.querySelector('h2.act-now')?.closest('.priority-section');
+      if (actNowSection) actNowSection.after(sectionEl);
+      else bodyEl.insertBefore(sectionEl, bodyEl.firstChild);
+    }
+  }
+
+  // Insert after the h2 header (prepend within the section)
+  const h2 = sectionEl.querySelector('h2');
+  if (h2 && h2.nextSibling) h2.after(wrapper);
+  else sectionEl.appendChild(wrapper);
+
+  // Update the cached view so mark-read etc. works
+  if (cachedView?.prioritized) {
+    const bucket = isVip ? cachedView.prioritized.actNow : cachedView.prioritized.priority;
+    bucket.unshift(dm);
+  }
+
+  console.log(`[fslack] New DM detected: ${dmPartnerName(dm, data)} → ${sectionHeader}`);
 }
 
 // ── Seen replies lazy loading ──
@@ -3147,6 +3246,7 @@ function resetFetchState() {
   gotUnreads = false;
   gotPopular = false;
   gotSaved = false;
+  stopDmWatcher();
 }
 
 function tryPrioritize() {
@@ -3251,6 +3351,22 @@ window.addEventListener('message', (event) => {
 
   if (msg.type === `${FSLACK}:vipResult`) {
     pendingVips = msg.data || [];
+  }
+
+  if (msg.type === `${FSLACK}:newDmsResult`) {
+    const { newDms, resolvedUsers } = msg;
+    if (newDms && newDms.length > 0 && lastRenderData) {
+      // Merge any newly-resolved users into our maps
+      if (resolvedUsers) {
+        mergeCachedUsers(resolvedUsers);
+        lastRenderData.users = { ...lastRenderData.users, ...resolvedUsers };
+      }
+      for (const dm of newDms) {
+        if (!knownDmChannelIds.has(dm.channel_id)) {
+          insertNewDm(dm, lastRenderData);
+        }
+      }
+    }
   }
 
   if (msg.type === `${FSLACK}:error`) {

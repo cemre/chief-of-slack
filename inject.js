@@ -7,6 +7,7 @@
   window.__fslack_injected = true;
 
   const FSLACK = 'fslack';
+  let _selfId = null; // cached after first fetch for lightweight polls
 
   function getToken() {
     try {
@@ -275,6 +276,7 @@
       slackApi('client.counts'),
       getSelfIdAndMuted(),
     ]);
+    _selfId = selfId;
     progress(1, `Done. ${(counts.channels||[]).filter(c=>c.has_unreads).length} unread channels, self=${selfId}`);
 
     // 2. Get unread threads — use unread_replies, filter out self-only
@@ -886,6 +888,67 @@
         window.postMessage({ type: `${FSLACK}:popularResult`, data: popular }, '*');
       } catch (err) {
         window.postMessage({ type: `${FSLACK}:popularResult`, data: [] }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:pollNewDms`) {
+      const { knownChannelIds, requestId } = event.data;
+      const known = new Set(knownChannelIds || []);
+      try {
+        const selfId = _selfId || (await getSelfIdAndMuted()).selfId;
+        const counts = await slackApi('client.counts');
+        const unreadIms = (counts.ims || []).filter((c) => c.has_unreads && !known.has(c.id)).map((c) => ({ ...c, kind: 'im' }));
+        const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads && !known.has(c.id)).map((c) => ({ ...c, kind: 'mpim' }));
+        const newDirects = [...unreadIms, ...unreadMpims];
+        const newDms = [];
+        for (const conv of newDirects) {
+          try {
+            const histParams = { channel: conv.id };
+            const oldest = conv.last_read || conv.last_read_ts;
+            if (oldest && parseFloat(oldest) > 0) histParams.oldest = String(oldest);
+            const hist = await slackApi('conversations.history', histParams);
+            const msgs = (hist.messages || [])
+              .filter((m) => m.user !== selfId)
+              .map((m) => ({
+                user: m.user,
+                text: extractText(m),
+                ts: m.ts,
+                subtype: m.subtype,
+                bot_id: m.bot_id,
+                files: extractFiles(m),
+              }));
+            if (msgs.length > 0) {
+              const dmPayload = { channel_id: conv.id, messages: msgs };
+              if (conv.kind === 'mpim') {
+                dmPayload.isGroup = true;
+                let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
+                if (memberIds.length === 0) {
+                  try {
+                    const info = await slackApi('conversations.info', { channel: conv.id });
+                    memberIds = (info.channel?.members || []).filter((uid) => uid && uid !== selfId);
+                  } catch {}
+                }
+                if (memberIds.length > 0) dmPayload.members = memberIds;
+              }
+              newDms.push(dmPayload);
+            }
+          } catch {}
+        }
+        // Resolve any unknown user IDs in new DMs
+        const userIds = new Set();
+        for (const dm of newDms) {
+          for (const m of dm.messages) { if (m.user) userIds.add(m.user); }
+          if (dm.members) dm.members.forEach((uid) => userIds.add(uid));
+        }
+        const unknownIds = [...userIds].filter((uid) => !event.data.cachedUsers?.[uid]);
+        let resolvedUsers = {};
+        if (unknownIds.length > 0) {
+          const resolved = await resolveUsers(unknownIds, {}, {});
+          resolvedUsers = resolved.users;
+        }
+        window.postMessage({ type: `${FSLACK}:newDmsResult`, requestId, newDms, resolvedUsers }, '*');
+      } catch (err) {
+        window.postMessage({ type: `${FSLACK}:newDmsResult`, requestId, newDms: [], resolvedUsers: {} }, '*');
       }
     }
 
