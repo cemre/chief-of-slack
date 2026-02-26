@@ -1154,9 +1154,44 @@ function applyPreFilters(data) {
 
   function isBot(m) { return m.bot_id || m.subtype === 'bot_message'; }
 
+  const threadList = Array.isArray(threads) ? threads : [];
+  const channelPostList = Array.isArray(channelPosts) ? channelPosts : [];
+  const dmList = Array.isArray(dms) ? dms : [];
+
+  // Track replies that were also posted to the channel so we can drop the duplicate thread entry
+  const broadcastedThreadReplyKeys = new Set();
+  for (const cp of channelPostList) {
+    const channelId = cp?.channel_id;
+    if (!channelId) continue;
+    for (const msg of cp.messages || []) {
+      if (msg.thread_ts && msg.thread_ts !== msg.ts) {
+        broadcastedThreadReplyKeys.add(`${channelId}:${msg.ts}`);
+      }
+    }
+  }
+
+  const filteredThreads = [];
+  for (const t of threadList) {
+    if (!t) continue;
+    const unread = t.unread_replies || [];
+    if (unread.length > 0 && broadcastedThreadReplyKeys.size > 0) {
+      const deduped = unread.filter((reply) => !broadcastedThreadReplyKeys.has(`${t.channel_id}:${reply.ts}`));
+      if (deduped.length !== unread.length) {
+        t.unread_replies = deduped;
+        if (deduped.length > 0) {
+          const latest = deduped[deduped.length - 1];
+          if (latest?.ts) t.sort_ts = latest.ts;
+        }
+      }
+    }
+    if ((t.unread_replies || []).length === 0) continue;
+    filteredThreads.push(t);
+  }
+  data.threads = filteredThreads;
+
   // Threads: annotate metadata for LLM
   const diaChannelNames = new Set(['dia-dogfooding', 'help-dia']);
-  for (const t of threads) {
+  for (const t of filteredThreads) {
     t._userReplied = (t.reply_users || []).includes(selfId);
     t._type = 'thread';
     t._isDmThread = t.channel_id?.startsWith('D') || false;
@@ -1191,24 +1226,22 @@ function applyPreFilters(data) {
       forLlm.channelPosts.push(cp);
       return;
     }
-    const hasEngagement = cp.messages.some((m) => (m.reply_count || 0) >= 3);
-    if (hasEngagement) {
-      const replierIds = [...new Set(
-        cp.messages.filter((m) => (m.reply_count || 0) >= 3).flatMap((m) => m.reply_users || [])
-      )];
-      cp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-      cp._replierOverflow = Math.max(0, replierIds.length - 3);
-      whenFree.push(cp);
-    } else {
-      cp._isDigestChannel = true;
-      digests.push(cp);
+    const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 3);
+    const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 3);
+    if (hotMsgs.length > 0) {
+      const hotCp = { ...cp, messages: hotMsgs };
+      const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
+      hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
+      hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
+      whenFree.push(hotCp);
     }
+    if (coldMsgs.length > 0) digests.push({ ...cp, messages: coldMsgs, _isDigestChannel: true });
   }
 
   // Build set of thread roots so we can dedup channel posts that are already shown as threads
   const threadRootKeys = new Set();
   const threadByKey = {};
-  for (const t of threads) {
+  for (const t of filteredThreads) {
     if (t.channel_id && t.ts) {
       const key = `${t.channel_id}:${t.ts}`;
       threadRootKeys.add(key);
@@ -1217,7 +1250,7 @@ function applyPreFilters(data) {
   }
 
   // Channel posts
-  for (const cp of channelPosts) {
+  for (const cp of channelPostList) {
     cp._type = 'channel';
 
     const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
@@ -1282,7 +1315,7 @@ function applyPreFilters(data) {
   }
 
   // DMs
-  for (const dm of dms) {
+  for (const dm of dmList) {
     dm._type = 'dm';
     const originalMessages = dm.messages || [];
     const filteredMessages = originalMessages.filter((m) => !threadRootKeys.has(`${dm.channel_id}:${m.ts}`));
