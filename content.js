@@ -802,6 +802,12 @@ function threadRepliesContainer(m, channel, threadUi = null) {
   return `<div class="thread-replies-container" data-channel="${channel}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}></div>`;
 }
 
+function threadNeedsSummary(t) {
+  if (!t || t._isDmThread) return false;
+  if (t._forceThreadSummary) return true;
+  return (t.unread_replies || []).length >= 5;
+}
+
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
 function msgActions(channel, ts, { showReply = true } = {}) {
   const saved = savedMsgKeys.has(`${channel}:${ts}`);
@@ -865,8 +871,8 @@ function renderThreadItem(t, data, cssClass) {
   html += `</div>
     <div class="item-right">
       <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 400, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
-  // Thread reply summarization for non-DM threads with 5+ unread replies
-  const shouldSummarize = !t._isDmThread && unread.length >= 5;
+  // Thread reply summarization for non-DM threads that meet summary criteria
+  const shouldSummarize = threadNeedsSummary(t);
   const threadKey = shouldSummarize ? `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}` : '';
   const repliesMsgId = shouldSummarize ? `${threadKey}-replies` : '';
 
@@ -1204,6 +1210,7 @@ function applyPreFilters(data) {
     const isOwnThread = t.root_user === selfId;
     if (diaChannelNames.has(tChName) && !isOwnThread) {
       if ((t.reply_count || 0) >= 10) {
+        t._forceThreadSummary = true;
         whenFree.push(t);
       } else {
         noise.push(t);
@@ -2884,9 +2891,9 @@ function runBotThreadSummarization(whenFreeItems, data) {
   })();
 }
 
-// ── Async thread reply summarization (non-DM threads with 5+ unread) ──
+// ── Async thread reply summarization (non-DM threads meeting summary criteria) ──
 function runThreadReplySummarization(allItems, data) {
-  const threads = allItems.filter((item) => item._type === 'thread' && !item._isDmThread && !item._threadSummary && (item.unread_replies || []).length >= 5);
+  const threads = allItems.filter((item) => item._type === 'thread' && !item._threadSummary && threadNeedsSummary(item));
   if (threads.length === 0) return;
 
   const MAX_PAYLOAD_BYTES = 3000;
