@@ -373,6 +373,8 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
   object-fit: contain;
   margin: 0 0.05em;
 }
+.files-time-row { display: flex; align-items: flex-end; gap: 6px; margin-top: 4px; }
+.files-time-row .msg-files { margin-top: 0; }
 .msg-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
 .file-thumb { position: relative; display: inline-block; border-radius: 6px; overflow: hidden; border: 1px solid #363940; max-width: 240px; }
 .file-thumb img { display: block; max-width: 240px; max-height: 160px; object-fit: contain; background: #222529; }

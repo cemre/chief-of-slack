@@ -810,7 +810,12 @@ function renderMsgBody(m, channel, users, maxLen = 400, threadUi = null, opts = 
       badge = threadBadge(m, channel, truncIdForBadge, badgeOpts);
     }
   }
-  return textHtml + renderFiles(m.files) + badge + (badge ? '' : msgTime(m.ts));
+  const filesHtml = renderFiles(m.files);
+  const timeHtml = badge ? '' : msgTime(m.ts);
+  if (filesHtml && timeHtml) {
+    return textHtml + `<div class="files-time-row">${filesHtml}${timeHtml}</div>` + badge;
+  }
+  return textHtml + filesHtml + badge + timeHtml;
 }
 
 function threadRepliesContainer(m, channel, threadUi = null) {
