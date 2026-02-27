@@ -788,7 +788,7 @@ function newerRepliesBadge(channel, threadTs, afterTs, count, containerId) {
 }
 
 // Render message text + files + thread badge with merged "See more" / "N replies"
-function renderMsgBody(m, channel, users, maxLen = 400, threadUi = null) {
+function renderMsgBody(m, channel, users, maxLen = 400, threadUi = null, opts = {}) {
   const prevId = truncateId;
   let textHtml = truncate(m.text, maxLen, users);
   const wasTruncated = truncateId > prevId;
@@ -802,11 +802,13 @@ function renderMsgBody(m, channel, users, maxLen = 400, threadUi = null) {
     );
   }
   let badge = '';
-  if (threadUi?.mode === 'newer' && threadUi.newerReplyCount > 0) {
-    badge = newerRepliesBadge(channel, threadUi.threadTs || m.thread_ts || m.ts, threadUi.afterTs || m.ts, threadUi.newerReplyCount, threadUi.containerId);
-  } else {
-    const badgeOpts = threadUi ? { containerId: threadUi.containerId, threadTs: threadUi.threadTs } : {};
-    badge = threadBadge(m, channel, truncIdForBadge, badgeOpts);
+  if (!opts.skipBadge) {
+    if (threadUi?.mode === 'newer' && threadUi.newerReplyCount > 0) {
+      badge = newerRepliesBadge(channel, threadUi.threadTs || m.thread_ts || m.ts, threadUi.afterTs || m.ts, threadUi.newerReplyCount, threadUi.containerId);
+    } else {
+      const badgeOpts = threadUi ? { containerId: threadUi.containerId, threadTs: threadUi.threadTs } : {};
+      badge = threadBadge(m, channel, truncIdForBadge, badgeOpts);
+    }
   }
   return textHtml + renderFiles(m.files) + badge + (badge ? '' : msgTime(m.ts));
 }
@@ -1021,12 +1023,25 @@ function renderChannelItem(cp, data, cssClass) {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
       if (cp._summarizeThreads && (m.reply_count || 0) >= 10) {
+        // Render message without thread badge; badge moves below summary
+        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}</div>${msgActions(cp.channel_id, m.ts)}`;
+        const threadTs = threadUi?.threadTs || m.ts;
+        const containerId = threadUi?.containerId || `thread-${cp.channel_id}-${(threadTs || '').replace(/\./g, '_')}-${(m.ts || '').replace(/\./g, '_')}`;
+        const modeAttr = threadUi?.mode ? ` data-mode="${threadUi.mode}"` : '';
+        const afterAttr = threadUi?.afterTs ? ` data-after-ts="${threadUi.afterTs}"` : '';
         const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
-        html += `<div id="${key}-loading" style="margin:4px 0 2px;font-size:0.85em;color:#888">Summarizing ${m.reply_count} replies…</div>`;
+        const repliesId = `${key}-replies`;
+        html += `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
+          + `<div id="${key}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`
+          + `<span class="show-messages-link" data-target="${repliesId}" data-fetch-replies="1" data-channel="${cp.channel_id}" data-ts="${threadTs}" style="margin-top:2px">show ${m.reply_count} ${m.reply_count === 1 ? 'reply' : 'replies'} ↓</span>`
+          + `<div class="deep-messages" id="${repliesId}"></div>`
+          + `</div>`;
+      } else {
+        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
+        html += threadRepliesContainer(m, cp.channel_id, threadUi);
       }
-      html += `${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
+      html += `</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -2265,6 +2280,36 @@ bodyEl.addEventListener('click', (e) => {
     const targetId = showMsgsLink.dataset.target;
     const msgsDiv = shadow.getElementById(targetId);
     if (msgsDiv) {
+      // Fetch-on-demand: if replies need loading, fetch first
+      if (showMsgsLink.dataset.fetchReplies && !msgsDiv.hasChildNodes()) {
+        if (showMsgsLink.classList.contains('loading')) return;
+        if (!showMsgsLink.dataset.showText) showMsgsLink.dataset.showText = showMsgsLink.textContent;
+        showMsgsLink.classList.add('loading');
+        showMsgsLink.textContent = 'Loading…';
+        const channel = showMsgsLink.dataset.channel;
+        const ts = showMsgsLink.dataset.ts;
+        const reqId = `showrep_${++replyRequestId}`;
+        const handler = (event) => {
+          if (event.source !== window) return;
+          if (event.data?.type !== `${FSLACK}:repliesResult`) return;
+          if (event.data.requestId !== reqId) return;
+          window.removeEventListener('message', handler);
+          const replies = (event.data.replies || []).filter((r) => r.ts !== ts);
+          let html = '';
+          const rd = lastRenderData;
+          for (const r of replies) {
+            const userName = rd ? uname(r.user, rd.users) : r.user;
+            html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${truncate(r.text, 400, rd?.users)}${renderFiles(r.files)}${msgTime(r.ts)}</div>${msgActions(channel, r.ts)}</div>`;
+          }
+          msgsDiv.innerHTML = html;
+          msgsDiv.style.display = 'block';
+          showMsgsLink.classList.remove('loading');
+          showMsgsLink.textContent = 'hide ↑';
+        };
+        window.addEventListener('message', handler);
+        window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
+        return;
+      }
       if (!showMsgsLink.dataset.showText) showMsgsLink.dataset.showText = showMsgsLink.textContent;
       if (msgsDiv.style.display === 'block') {
         msgsDiv.style.display = 'none';
@@ -2972,14 +3017,20 @@ function runChannelThreadSummarization(allItems, data) {
   if (items.length === 0) return;
 
   const MAX_PAYLOAD_BYTES = 3000;
+  const FETCH_TIMEOUT = 15000;
 
   function fetchRepliesAsync(channel, ts) {
     return new Promise((resolve) => {
       const reqId = `chtsumm_${++replyRequestId}`;
+      const timer = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve([]);
+      }, FETCH_TIMEOUT);
       const handler = (event) => {
         if (event.source !== window) return;
         if (event.data?.type !== `${FSLACK}:repliesResult`) return;
         if (event.data.requestId !== reqId) return;
+        clearTimeout(timer);
         window.removeEventListener('message', handler);
         resolve(event.data.replies || []);
       };
@@ -2988,50 +3039,54 @@ function runChannelThreadSummarization(allItems, data) {
     });
   }
 
-  (async () => {
-    for (const cp of items) {
-      const ch = data.channels[cp.channel_id] || cp.channel_id;
-      for (const m of cp.messages) {
-        if ((m.reply_count || 0) < 10) continue;
-
-        const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
-        const loadingEl = shadow.getElementById(`${key}-loading`);
-        if (!loadingEl) continue;
-
-        // Fetch thread replies via inject.js
-        const rawReplies = await fetchRepliesAsync(cp.channel_id, m.ts);
-        if (rawReplies.length === 0) { loadingEl.remove(); continue; }
-
-        // Build payload with byte cap
-        const replies = [];
-        let bytes = 0;
-        for (const r of rawReplies) {
-          const entry = { user: uname(r.user, data.users), text: plainTruncate(r.text, 400, data.users) };
-          const s = JSON.stringify(entry);
-          if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
-          bytes += s.length;
-          replies.push(entry);
-        }
-
-        let response;
-        try {
-          response = await new Promise((resolve) =>
-            chrome.runtime.sendMessage({
-              type: `${FSLACK}:summarizeThreadReplies`,
-              data: { channel: ch, rootUser: uname(m.user, data.users), rootText: plainTruncate(m.text, 400, data.users), replies }
-            }, resolve)
-          );
-        } catch { continue; }
-        if (!response?.summary?.summary) { loadingEl.remove(); continue; }
-
-        const summaryEl = document.createElement('div');
-        summaryEl.className = 'deep-summary';
-        summaryEl.style.cssText = 'margin:4px 0 2px';
-        summaryEl.textContent = response.summary.summary;
-        loadingEl.replaceWith(summaryEl);
-      }
+  // Collect all qualifying messages, then process in parallel
+  const tasks = [];
+  for (const cp of items) {
+    const ch = data.channels[cp.channel_id] || cp.channel_id;
+    for (const m of cp.messages) {
+      if ((m.reply_count || 0) < 10) continue;
+      const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
+      tasks.push({ cp, ch, m, key });
     }
-  })();
+  }
+  if (tasks.length === 0) return;
+
+  for (const { cp, ch, m, key } of tasks) {
+    (async () => {
+      const loadingEl = shadow.getElementById(`${key}-loading`);
+      if (!loadingEl) return;
+
+      const rawReplies = await fetchRepliesAsync(cp.channel_id, m.ts);
+      if (rawReplies.length === 0) { loadingEl.remove(); return; }
+
+      const replies = [];
+      let bytes = 0;
+      for (const r of rawReplies) {
+        const entry = { user: uname(r.user, data.users), text: plainTruncate(r.text, 400, data.users) };
+        const s = JSON.stringify(entry);
+        if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
+        bytes += s.length;
+        replies.push(entry);
+      }
+
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({
+            type: `${FSLACK}:summarizeThreadReplies`,
+            data: { channel: ch, rootUser: uname(m.user, data.users), rootText: plainTruncate(m.text, 400, data.users), replies }
+          }, resolve)
+        );
+      } catch { return; }
+      if (!response?.summary?.summary) { loadingEl.remove(); return; }
+
+      const summaryEl = document.createElement('div');
+      summaryEl.className = 'deep-summary';
+      summaryEl.style.cssText = 'margin:6px 0 2px';
+      summaryEl.textContent = response.summary.summary;
+      loadingEl.replaceWith(summaryEl);
+    })();
+  }
 }
 
 // ── Main orchestration: pre-filter → LLM → render ──

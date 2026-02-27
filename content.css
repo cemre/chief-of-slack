@@ -149,6 +149,7 @@ section h2 {
   width: 100%;
 }
 .thread-replies-container .msg-row + .msg-row { margin-top: 5px; }
+.thread-replies-container .file-thumb img { max-width: 160px; max-height: 80px; }
 .thread-replies-container .item-reply { margin-top: 0; }
 .item .thread-replies-container { margin-bottom: 0; }
 .item-reply {
