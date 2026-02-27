@@ -183,6 +183,8 @@ section h2 {
 .item.noise-item { border-left: 3px solid #616061; opacity: 0.7; }
 .noise-items { display: none; }
 .noise-items.expanded { display: block; }
+.when-free-items { display: none; }
+.when-free-items.expanded { display: block; }
 .saved-items-list { display: none; }
 .saved-items-list.expanded { display: block; }
 .item.saved-item { border-left: 3px solid #27ae60; }
