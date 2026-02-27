@@ -310,6 +310,18 @@ document.addEventListener('keydown', (e) => {
     e.stopPropagation();
     visible ? hide() : show();
   }
+  // Toggle with Escape: dismiss fslack, or reopen from normal Slack
+  if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    if (!visible) {
+      e.preventDefault();
+      e.stopPropagation();
+      show();
+    } else if (document.activeElement !== host && !lightbox.classList.contains('open') && focusedItemIndex < 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      hide();
+    }
+  }
 }, true);
 
 // ── Keyboard navigation ──
