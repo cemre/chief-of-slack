@@ -1553,6 +1553,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   if (priority && priority.length > 0) {
     html += '<section class="priority-section"><h2 class="priority-header">Priority</h2>';
     for (const item of priority) html += renderAnyItem(item, data, 'priority-item');
+    html += `<div class="noise-section-footer"><button id="priority-mark-read-btn">Mark all priority as read</button></div>`;
     html += '</section>';
   }
 
@@ -1562,6 +1563,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += `<div class="section-toggle" id="when-free-toggle">${whenFree.length} when-you-have-a-moment item${whenFree.length === 1 ? '' : 's'} ↓</div>`;
     html += '<div class="when-free-items" id="when-free-items">';
     for (const item of whenFree) html += renderAnyItem(item, data, 'when-free');
+    html += `<div class="noise-section-footer"><button id="whenfree-mark-read-btn">Mark all as read</button></div>`;
     html += '</div></section>';
   }
 
@@ -2344,6 +2346,45 @@ bodyEl.addEventListener('click', (e) => {
         showMsgsLink.textContent = 'hide ↑';
       }
     }
+    return;
+  }
+
+  // Mark all priority as read
+  const priorityMarkRead = e.target.closest('#priority-mark-read-btn');
+  if (priorityMarkRead && !priorityMarkRead.disabled) {
+    const priorityItemEls = bodyEl.querySelectorAll('.item.priority-item:not(.read-done)');
+    let count = 0;
+    for (const item of priorityItemEls) {
+      const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
+      if (!markAll) continue;
+      const { channel, ts, threadTs } = markAll.dataset;
+      markAll.textContent = '...';
+      markAll.dataset.pending = 'true';
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      count++;
+    }
+    priorityMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
+    priorityMarkRead.disabled = true;
+    return;
+  }
+
+  // Mark all when-free as read
+  const whenfreeMarkRead = e.target.closest('#whenfree-mark-read-btn');
+  if (whenfreeMarkRead && !whenfreeMarkRead.disabled) {
+    const section = shadow.getElementById('when-free-items');
+    const whenfreeItemEls = section ? section.querySelectorAll('.item.when-free:not(.read-done)') : [];
+    let count = 0;
+    for (const item of whenfreeItemEls) {
+      const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
+      if (!markAll) continue;
+      const { channel, ts, threadTs } = markAll.dataset;
+      markAll.textContent = '...';
+      markAll.dataset.pending = 'true';
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      count++;
+    }
+    whenfreeMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
+    whenfreeMarkRead.disabled = true;
     return;
   }
 
