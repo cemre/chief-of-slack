@@ -2096,6 +2096,9 @@ bodyEl.addEventListener('click', (e) => {
       savedMsgKeys.add(key);
       chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
       window.postMessage({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` }, '*');
+      // Also mark as read
+      const markBtn = saveBtn.closest('.item')?.querySelector('.mark-all-read:not(.done):not([data-pending])');
+      if (markBtn) markBtn.click();
     }
     return;
   }
