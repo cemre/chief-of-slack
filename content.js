@@ -1021,7 +1021,12 @@ function renderChannelItem(cp, data, cssClass) {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
+      if (cp._summarizeThreads && (m.reply_count || 0) >= 10) {
+        const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
+        html += `<div id="${key}-loading" style="margin:4px 0 2px;font-size:0.85em;color:#888">Summarizing ${m.reply_count} replies…</div>`;
+      }
+      html += `${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
     }
     if (cp.messages.length > 10) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
@@ -1309,6 +1314,7 @@ function applyPreFilters(data) {
         const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
         hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
         hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
+        hotCp._summarizeThreads = true;
         whenFree.push(hotCp);
       }
       if (coldMsgs.length > 0) {
@@ -2960,6 +2966,74 @@ function runThreadReplySummarization(allItems, data) {
   })();
 }
 
+// ── Async channel-post thread summarization (fetch replies then summarize) ──
+function runChannelThreadSummarization(allItems, data) {
+  const items = allItems.filter((item) => item._type === 'channel' && item._summarizeThreads);
+  if (items.length === 0) return;
+
+  const MAX_PAYLOAD_BYTES = 3000;
+
+  function fetchRepliesAsync(channel, ts) {
+    return new Promise((resolve) => {
+      const reqId = `chtsumm_${++replyRequestId}`;
+      const handler = (event) => {
+        if (event.source !== window) return;
+        if (event.data?.type !== `${FSLACK}:repliesResult`) return;
+        if (event.data.requestId !== reqId) return;
+        window.removeEventListener('message', handler);
+        resolve(event.data.replies || []);
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
+    });
+  }
+
+  (async () => {
+    for (const cp of items) {
+      const ch = data.channels[cp.channel_id] || cp.channel_id;
+      for (const m of cp.messages) {
+        if ((m.reply_count || 0) < 10) continue;
+
+        const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
+        const loadingEl = shadow.getElementById(`${key}-loading`);
+        if (!loadingEl) continue;
+
+        // Fetch thread replies via inject.js
+        const rawReplies = await fetchRepliesAsync(cp.channel_id, m.ts);
+        if (rawReplies.length === 0) { loadingEl.remove(); continue; }
+
+        // Build payload with byte cap
+        const replies = [];
+        let bytes = 0;
+        for (const r of rawReplies) {
+          const entry = { user: uname(r.user, data.users), text: plainTruncate(r.text, 400, data.users) };
+          const s = JSON.stringify(entry);
+          if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
+          bytes += s.length;
+          replies.push(entry);
+        }
+
+        let response;
+        try {
+          response = await new Promise((resolve) =>
+            chrome.runtime.sendMessage({
+              type: `${FSLACK}:summarizeThreadReplies`,
+              data: { channel: ch, rootUser: uname(m.user, data.users), rootText: plainTruncate(m.text, 400, data.users), replies }
+            }, resolve)
+          );
+        } catch { continue; }
+        if (!response?.summary?.summary) { loadingEl.remove(); continue; }
+
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'deep-summary';
+        summaryEl.style.cssText = 'margin:4px 0 2px';
+        summaryEl.textContent = response.summary.summary;
+        loadingEl.replaceWith(summaryEl);
+      }
+    }
+  })();
+}
+
 // ── Main orchestration: pre-filter → LLM → render ──
 let pendingPopular = null;
 let pendingVips = null;
@@ -3008,7 +3082,9 @@ function prioritizeAndRender(data) {
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise, digests: preFiltered.digests };
     renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
     runBotThreadSummarization(prioritized.whenFree, data);
-    runThreadReplySummarization([...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree], data);
+    const allElevatedEarly = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
+    runThreadReplySummarization(allElevatedEarly, data);
+    runChannelThreadSummarization(allElevatedEarly, data);
     saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
     return;
   }
@@ -3081,6 +3157,7 @@ function prioritizeAndRender(data) {
         renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
         runBotThreadSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);
+        runChannelThreadSummarization(allElevated, data);
         saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
         return;
       }
@@ -3089,6 +3166,7 @@ function prioritizeAndRender(data) {
       renderPrioritized({ ...prioritized, noise: regularNoise, digests: digestItems }, data, pendingPopular, false, deepNoise.length > 0, pendingSaved || [], digestItems.length > 0);
       runBotThreadSummarization(prioritized.whenFree, data);
       runThreadReplySummarization(allElevated, data);
+      runChannelThreadSummarization(allElevated, data);
 
       // Summarize each deep-noise and digest channel individually with a byte cap on messages sent
       const MAX_PAYLOAD_BYTES = 3000;
