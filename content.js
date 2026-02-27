@@ -1,4 +1,5 @@
 // content.js — overlay UI on top of Slack + bridge to inject.js + LLM prioritization
+console.log('[fslack] content.js loaded', new Date().toISOString());
 
 const FSLACK = 'fslack';
 const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
@@ -269,7 +270,9 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
-    runThreadReplySummarization([...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])], cachedView.data);
+    const allElevatedCache = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])];
+    runThreadReplySummarization(allElevatedCache, cachedView.data);
+    runChannelThreadSummarization(allElevatedCache, cachedView.data);
     startDmWatcher(cachedView.data);
     return true;
   }
@@ -1030,21 +1033,20 @@ function renderChannelItem(cp, data, cssClass) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
       if (cp._summarizeThreads && (m.reply_count || 0) >= 10) {
         // Render message without thread badge; badge moves below summary
-        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}</div>${msgActions(cp.channel_id, m.ts)}`;
         const threadTs = threadUi?.threadTs || m.ts;
         const containerId = threadUi?.containerId || `thread-${cp.channel_id}-${(threadTs || '').replace(/\./g, '_')}-${(m.ts || '').replace(/\./g, '_')}`;
         const modeAttr = threadUi?.mode ? ` data-mode="${threadUi.mode}"` : '';
         const afterAttr = threadUi?.afterTs ? ` data-after-ts="${threadUi.afterTs}"` : '';
         const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
         const repliesId = `${key}-replies`;
-        html += `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
+        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}`
+          + `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
           + `<div id="${key}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`
           + `<span class="show-messages-link" data-target="${repliesId}" data-fetch-replies="1" data-channel="${cp.channel_id}" data-ts="${threadTs}" style="margin-top:2px">show ${m.reply_count} ${m.reply_count === 1 ? 'reply' : 'replies'} ↓</span>`
           + `<div class="deep-messages" id="${repliesId}"></div>`
-          + `</div>`;
+          + `</div></div>${msgActions(cp.channel_id, m.ts)}`;
       } else {
-        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
-        html += threadRepliesContainer(m, cp.channel_id, threadUi);
+        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
       }
       html += `</div>`;
     }
@@ -1078,7 +1080,7 @@ function renderDeepSummarizedItem(cp, data) {
   let messagesHtml = '';
   for (const m of msgs) {
     const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
@@ -1137,7 +1139,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   let messagesHtml = '';
   for (const m of allMsgs) {
     const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
   }
 
   let contentHtml;
@@ -1542,11 +1544,13 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '</section>';
   }
 
-  // When You Have a Moment
+  // When You Have a Moment (collapsed by default)
   if (whenFree.length > 0) {
-    html += '<section class="priority-section"><h2 class="when-free">When You Have a Moment</h2>';
+    html += '<section class="priority-section">';
+    html += `<div class="section-toggle" id="when-free-toggle">${whenFree.length} when-you-have-a-moment item${whenFree.length === 1 ? '' : 's'} ↓</div>`;
+    html += '<div class="when-free-items" id="when-free-items">';
     for (const item of whenFree) html += renderAnyItem(item, data, 'when-free');
-    html += '</section>';
+    html += '</div></section>';
   }
 
   // Interesting Elsewhere
@@ -1654,6 +1658,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       });
     }
   }
+  wireNoiseToggle('when-free-toggle', 'when-free-items', 'when-you-have-a-moment item');
   wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'recent noise item');
   wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'older noise item');
   wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'saved item');
@@ -3029,16 +3034,19 @@ function runThreadReplySummarization(allItems, data) {
 
 // ── Async channel-post thread summarization (fetch replies then summarize) ──
 function runChannelThreadSummarization(allItems, data) {
+  console.log(`[chThreadSumm] called with ${allItems.length} items, types:`, allItems.map(i => `${i._type}/${i._summarizeThreads ? 'summ' : 'no'}`));
   const items = allItems.filter((item) => item._type === 'channel' && item._summarizeThreads);
-  if (items.length === 0) return;
+  if (items.length === 0) { console.log('[chThreadSumm] no qualifying items, returning'); return; }
 
   const MAX_PAYLOAD_BYTES = 3000;
-  const FETCH_TIMEOUT = 15000;
+  const FETCH_TIMEOUT = 5000;
 
   function fetchRepliesAsync(channel, ts) {
     return new Promise((resolve) => {
       const reqId = `chtsumm_${++replyRequestId}`;
+      console.log(`[chThreadSumm] fetchReplies reqId=${reqId} channel=${channel} ts=${ts}`);
       const timer = setTimeout(() => {
+        console.warn(`[chThreadSumm] fetchReplies TIMEOUT reqId=${reqId} channel=${channel} ts=${ts}`);
         window.removeEventListener('message', handler);
         resolve([]);
       }, FETCH_TIMEOUT);
@@ -3048,6 +3056,7 @@ function runChannelThreadSummarization(allItems, data) {
         if (event.data.requestId !== reqId) return;
         clearTimeout(timer);
         window.removeEventListener('message', handler);
+        console.log(`[chThreadSumm] fetchReplies OK reqId=${reqId} replies=${(event.data.replies || []).length}`);
         resolve(event.data.replies || []);
       };
       window.addEventListener('message', handler);
@@ -3067,13 +3076,16 @@ function runChannelThreadSummarization(allItems, data) {
   }
   if (tasks.length === 0) return;
 
+  console.log(`[chThreadSumm] starting ${tasks.length} thread summarizations`);
   for (const { cp, ch, m, key } of tasks) {
     (async () => {
       const loadingEl = shadow.getElementById(`${key}-loading`);
-      if (!loadingEl) return;
+      if (!loadingEl) { console.warn(`[chThreadSumm] no loadingEl for key=${key}`); return; }
 
+      console.log(`[chThreadSumm] fetching replies for key=${key} channel=${cp.channel_id} ts=${m.ts}`);
       const rawReplies = await fetchRepliesAsync(cp.channel_id, m.ts);
-      if (rawReplies.length === 0) { loadingEl.remove(); return; }
+      if (rawReplies.length === 0) { console.warn(`[chThreadSumm] no replies for key=${key}`); loadingEl.remove(); return; }
+      console.log(`[chThreadSumm] got ${rawReplies.length} raw replies for key=${key}, sending to LLM`);
 
       const replies = [];
       let bytes = 0;
@@ -3093,9 +3105,10 @@ function runChannelThreadSummarization(allItems, data) {
             data: { channel: ch, rootUser: uname(m.user, data.users), rootText: plainTruncate(m.text, 400, data.users), replies }
           }, resolve)
         );
-      } catch { return; }
-      if (!response?.summary?.summary) { loadingEl.remove(); return; }
+      } catch (err) { console.error(`[chThreadSumm] sendMessage error for key=${key}`, err); return; }
+      if (!response?.summary?.summary) { console.warn(`[chThreadSumm] no summary in response for key=${key}`, response); loadingEl.remove(); return; }
 
+      console.log(`[chThreadSumm] got summary for key=${key}: "${response.summary.summary.slice(0, 80)}…"`);
       const summaryEl = document.createElement('div');
       summaryEl.className = 'deep-summary';
       summaryEl.style.cssText = 'margin:6px 0 2px';
