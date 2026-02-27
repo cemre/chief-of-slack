@@ -2750,7 +2750,15 @@ window.addEventListener('message', (event) => {
         ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div></div>`
         : `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
       form.insertAdjacentHTML('beforebegin', replyHtml);
-      form.remove();
+      // Keep form open for continued replies — clear, re-enable, re-focus
+      const inp = form.querySelector('.reply-input');
+      const btn = form.querySelector('.reply-send');
+      inp.value = '';
+      inp.disabled = false;
+      inp.style.height = 'auto';
+      btn.disabled = false;
+      btn.textContent = 'Send';
+      inp.focus();
       // Auto mark as read, same flow as clicking "mark read" (undo works for free)
       autoMarkItemRead(item, { overrideTs: msg.ts });
     } else {
