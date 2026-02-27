@@ -310,8 +310,8 @@ document.addEventListener('keydown', (e) => {
     e.stopPropagation();
     visible ? hide() : show();
   }
-  // Toggle with Escape: dismiss fslack, or reopen from normal Slack
-  if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+  // Toggle with Cmd+Escape: dismiss fslack, or reopen from normal Slack
+  if (e.key === 'Escape' && e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
     if (!visible) {
       e.preventDefault();
       e.stopPropagation();
