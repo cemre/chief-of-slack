@@ -1560,7 +1560,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // When You Have a Moment (collapsed by default)
   if (whenFree.length > 0) {
     html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="when-free-toggle">${whenFree.length} when-you-have-a-moment item${whenFree.length === 1 ? '' : 's'} ↓</div>`;
+    html += `<div class="section-toggle" id="when-free-toggle">When Free · ${whenFree.length} ↓</div>`;
     html += '<div class="when-free-items" id="when-free-items">';
     for (const item of whenFree) html += renderAnyItem(item, data, 'when-free');
     html += `<div class="noise-section-footer"><button id="whenfree-mark-read-btn">Mark all as read</button></div>`;
@@ -1593,7 +1593,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Saved items (last 72h, collapsed by default)
   if (savedItems && savedItems.length > 0) {
     html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="saved-items-toggle">${savedItems.length} saved item${savedItems.length === 1 ? '' : 's'} ↓</div>`;
+    html += `<div class="section-toggle" id="saved-items-toggle">Saved · ${savedItems.length} ↓</div>`;
     html += '<div class="saved-items-list" id="saved-items-list">';
     for (const item of savedItems) html += renderSavedItem(item, data);
     html += '</div>';
@@ -1607,7 +1607,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
     html += '<section class="priority-section">';
     if (noiseRecent.length > 0 || deepNoiseLoading) {
-      html += `<div class="section-toggle" id="noise-recent-toggle">${noiseRecent.length} recent noise item${noiseRecent.length === 1 ? '' : 's'} ↓</div>`;
+      html += `<div class="section-toggle" id="noise-recent-toggle">Recent Noise · ${noiseRecent.length} ↓</div>`;
       html += '<div class="noise-items" id="noise-recent-items">';
       for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
       if (deepNoiseLoading) {
@@ -1619,7 +1619,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     // Always render older section when deepNoiseLoading so it's ready to receive items; hide if empty
     if (noiseOlder.length > 0 || deepNoiseLoading) {
       const olderHidden = noiseOlder.length === 0;
-      html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>${noiseOlder.length} older noise item${noiseOlder.length === 1 ? '' : 's'} ↓</div>`;
+      html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Older Noise · ${noiseOlder.length} ↓</div>`;
       html += '<div class="noise-items" id="noise-older-items">';
       for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
       html += `<div class="noise-section-footer" id="noise-older-footer"${olderHidden ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
@@ -1631,7 +1631,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Digests (collapsed by default)
   if (!loading && (digests.length > 0 || deepDigestsLoading)) {
     html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="digests-toggle">Show ${digests.length} digest${digests.length === 1 ? '' : 's'}</div>`;
+    html += `<div class="section-toggle" id="digests-toggle">Digests · ${digests.length} ↓</div>`;
     html += '<div class="noise-items" id="digest-items">';
     for (const item of digests) html += renderAnyItem(item, data, 'noise-item');
     if (deepDigestsLoading) {
@@ -1668,15 +1668,15 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       toggle.addEventListener('click', () => {
         const expanded = items.classList.toggle('expanded');
         const count = items.querySelectorAll('.item').length;
-        toggle.textContent = `${count} ${label}${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
+        toggle.textContent = `${label} · ${count} ${expanded ? '↑' : '↓'}`;
       });
     }
   }
-  wireNoiseToggle('when-free-toggle', 'when-free-items', 'when-you-have-a-moment item');
-  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'recent noise item');
-  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'older noise item');
-  wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'saved item');
-  wireNoiseToggle('digests-toggle', 'digest-items', 'digest');
+  wireNoiseToggle('when-free-toggle', 'when-free-items', 'When Free');
+  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'Recent Noise');
+  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older Noise');
+  wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'Saved');
+  wireNoiseToggle('digests-toggle', 'digest-items', 'Digests');
 }
 
 // ── New DM watcher — polls for DMs that arrive after initial fetch ──
