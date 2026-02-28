@@ -492,6 +492,8 @@ document.addEventListener('keydown', (e) => {
   if (!visible) return;
   if (lightbox.classList.contains('open')) return;
   if (document.activeElement === host) return;  // typing in input inside shadow
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
   const key = e.key;
