@@ -53,7 +53,7 @@ button.secondary {
 }
 button.secondary:hover { background: #363940; }
 #body { flex: 1; padding: 0; }
-section { padding: 8px 0; }
+section { padding: 0; }
 section h2 {
   padding: 8px 16px;
   font-size: 12px;
