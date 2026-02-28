@@ -42,7 +42,6 @@ shadow.innerHTML = `
   <header>
     <h1>Flack <span class="last-updated-wrap"><span id="last-updated" class="last-updated"></span><span id="refresh-link" class="refresh-link">refresh</span></span></h1>
     <div class="header-actions">
-      <button id="fetch-btn">Fetch Unreads</button>
       <button id="close-btn" class="secondary">Close</button>
     </div>
   </header>
@@ -68,7 +67,7 @@ fetch(chrome.runtime.getURL('content.css'))
 
 const overlay = shadow.getElementById('overlay');
 const bodyEl = shadow.getElementById('body');
-const fetchBtn = shadow.getElementById('fetch-btn');
+const fetchBtn = { disabled: false, textContent: '', addEventListener() {} };
 const lastUpdatedEl = shadow.getElementById('last-updated');
 let lastFetchTime = null;
 let lastUpdatedTimer = null;
@@ -147,7 +146,7 @@ shadow.getElementById('refresh-link').addEventListener('click', startFetch);
 // ── Resize handle ──
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 800;
-const DEFAULT_SIDEBAR_WIDTH = 380;
+const DEFAULT_SIDEBAR_WIDTH = 480;
 const resizeHandle = shadow.getElementById('resize-handle');
 
 chrome.storage.local.get('fslackSidebarWidth', (result) => {

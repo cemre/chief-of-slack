@@ -5,7 +5,7 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: 380px;
+  width: 480px;
   z-index: 999999;
   background: #1a1d21;
   color: #d1d2d3;
@@ -75,10 +75,14 @@ section h2 {
 .item-left {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 8px;
+  gap: 2px 8px;
   min-width: 0;
 }
+.item-left .item-channel { width: 100%; }
+.item-left .item-time { order: 1; }
+.item-left .item-replied { order: 0; }
 .item-channel {
   font-size: 13px;
   color: #ababad;
@@ -140,6 +144,7 @@ section h2 {
   font-size: 12px;
   font-weight: 600;
   color: #1d9bd1;
+  margin-left: 6px;
   margin-right: 10px;
   vertical-align: -2px;
   cursor: pointer;
