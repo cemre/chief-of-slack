@@ -964,8 +964,7 @@
     if (msgType === `${FSLACK}:navigate`) {
       const { url } = event.data;
       if (url) {
-        window.history.pushState(null, '', url);
-        window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+        window.location.assign(url);
       }
     }
   });
