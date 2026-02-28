@@ -960,6 +960,14 @@
         window.postMessage({ type: `${FSLACK}:vipResult`, data: [] }, '*');
       }
     }
+
+    if (msgType === `${FSLACK}:navigate`) {
+      const { url } = event.data;
+      if (url) {
+        window.history.pushState(null, '', url);
+        window.dispatchEvent(new PopStateEvent('popstate', { state: null }));
+      }
+    }
   });
 
   // Signal ready

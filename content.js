@@ -38,11 +38,12 @@ const shadow = host.attachShadow({ mode: 'closed' });
 shadow.innerHTML = `
 <style id="fslack-style"></style>
 <div id="overlay">
+  <div id="resize-handle"></div>
   <header>
     <h1>Flack <span class="last-updated-wrap"><span id="last-updated" class="last-updated"></span><span id="refresh-link" class="refresh-link">refresh</span></span></h1>
     <div class="header-actions">
       <button id="fetch-btn">Fetch Unreads</button>
-      <button id="close-btn" class="secondary">Back to Slack</button>
+      <button id="close-btn" class="secondary">Close</button>
     </div>
   </header>
   <div id="body">
@@ -142,6 +143,70 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 
 const closeBtn = shadow.getElementById('close-btn');
 shadow.getElementById('refresh-link').addEventListener('click', startFetch);
+
+// ── Resize handle ──
+const MIN_SIDEBAR_WIDTH = 280;
+const MAX_SIDEBAR_WIDTH = 800;
+const DEFAULT_SIDEBAR_WIDTH = 380;
+const resizeHandle = shadow.getElementById('resize-handle');
+
+chrome.storage.local.get('fslackSidebarWidth', (result) => {
+  const w = result.fslackSidebarWidth || DEFAULT_SIDEBAR_WIDTH;
+  overlay.style.width = w + 'px';
+});
+
+resizeHandle.addEventListener('mousedown', (e) => {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startW = overlay.getBoundingClientRect().width;
+  resizeHandle.classList.add('dragging');
+
+  function onMove(ev) {
+    const delta = ev.clientX - startX;
+    const newW = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, startW + delta));
+    overlay.style.width = newW + 'px';
+    syncSlackSidebar();
+  }
+  function onUp() {
+    resizeHandle.classList.remove('dragging');
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    const finalW = Math.round(overlay.getBoundingClientRect().width);
+    chrome.storage.local.set({ fslackSidebarWidth: finalW });
+  }
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+// ── Sync Slack's sidebar width to match Flack ──
+let _origTabpanelGrid = null;
+
+function syncSlackSidebar() {
+  const tabpanel = document.querySelector('.p-client_workspace__tabpanel');
+  if (!tabpanel) return;
+  // Save original grid so we can restore on hide
+  if (!_origTabpanelGrid) _origTabpanelGrid = tabpanel.style.gridTemplateColumns || '';
+  const tabRail = document.querySelector('.p-tab_rail');
+  const railW = tabRail ? tabRail.getBoundingClientRect().width : 70;
+  const flackW = overlay.getBoundingClientRect().width;
+  const sidebarW = Math.max(0, flackW - railW);
+  tabpanel.style.gridTemplateColumns = `${sidebarW}px minmax(0, 1fr)`;
+}
+
+function restoreSlackSidebar() {
+  const tabpanel = document.querySelector('.p-client_workspace__tabpanel');
+  if (!tabpanel) return;
+  tabpanel.style.gridTemplateColumns = _origTabpanelGrid || '';
+  _origTabpanelGrid = null;
+}
+
+// ── In-place Slack navigation ──
+function navigateSlack(channel, ts) {
+  const url = ts
+    ? `/archives/${channel}/p${ts.replace('.', '')}`
+    : `/archives/${channel}`;
+  window.postMessage({ type: `${FSLACK}:navigate`, url }, '*');
+}
 
 // ── Toggle overlay ──
 let visible = false;
@@ -292,10 +357,16 @@ function showFromCache() {
 function show() {
   visible = true;
   overlay.classList.add('visible');
+  syncSlackSidebar();
   if (showFromCache()) return;
   if (injectReady) startFetch();
 }
-function hide() { visible = false; overlay.classList.remove('visible'); stopDmWatcher(); }
+function hide() {
+  visible = false;
+  overlay.classList.remove('visible');
+  restoreSlackSidebar();
+  stopDmWatcher();
+}
 function toggle() { visible ? hide() : show(); }
 
 // Expose toggle on the host element so background.js executeScript can call it
@@ -1971,12 +2042,11 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Permalink: click username to open message in a new tab
+  // Permalink: click username to navigate Slack in-place
   const userEl = e.target.closest('.item-user[data-channel]');
   if (userEl) {
     const { channel, ts } = userEl.dataset;
-    localStorage.setItem('fslack_hide_once', Date.now());
-    window.open(`/archives/${channel}/p${ts.replace('.', '')}`, '_blank');
+    navigateSlack(channel, ts);
     return;
   }
 
@@ -1986,10 +2056,9 @@ bodyEl.addEventListener('click', (e) => {
     const { channel, ts, truncId, containerId } = threadBadgeEl.dataset;
 
     // Expand truncated text if this badge merged "See more"
-    // Modifier click → open in Slack as before
+    // Modifier click → navigate Slack in-place
     if (e.shiftKey || e.metaKey || e.ctrlKey || e.button === 1) {
-      localStorage.setItem('fslack_hide_once', Date.now());
-      window.open(`/archives/${channel}/p${ts.replace('.', '')}`, '_blank');
+      navigateSlack(channel, ts);
       return;
     }
 
@@ -2030,12 +2099,11 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Channel name: open channel in a new tab
+  // Channel name: navigate Slack in-place
   const channelEl = e.target.closest('.item-channel[data-channel]');
   if (channelEl) {
     const { channel } = channelEl.dataset;
-    localStorage.setItem('fslack_hide_once', Date.now());
-    window.open(`/archives/${channel}`, '_blank');
+    navigateSlack(channel, null);
     return;
   }
 
@@ -3674,10 +3742,7 @@ window.addEventListener('message', (event) => {
 if (!_autoShow) {
   // No ?fslack param — don't auto-show (toggle still works via shortcut/icon)
 } else {
-  const _hideOnce = localStorage.getItem('fslack_hide_once');
-  if (_hideOnce && Date.now() - parseInt(_hideOnce) < 5000) {
-    localStorage.removeItem('fslack_hide_once');
-  } else if (sessionStorage.getItem('fslack_hide')) {
+  if (sessionStorage.getItem('fslack_hide')) {
     sessionStorage.removeItem('fslack_hide');
   } else {
     // Load persisted view cache, timestamp, and saved messages before showing
