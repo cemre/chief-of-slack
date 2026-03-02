@@ -106,7 +106,7 @@ section h2 {
 .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .inline-channel { display: inline; }
 .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
-a.item-time, a.msg-time { text-decoration: none; color: inherit; }
+a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
 .item-time[data-channel] { cursor: pointer; }
 .item-time[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .msg-time[data-channel] { cursor: pointer; }

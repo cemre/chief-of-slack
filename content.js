@@ -1010,7 +1010,8 @@ function uname(uid, users) {
 
 function userLink(name, channel, ts) {
   if (!channel || !ts) return `<span class="item-user">${name}:</span>`;
-  return `<span class="item-user" data-channel="${channel}" data-ts="${ts}">${name}:</span>`;
+  const href = slackPermalink(channel, ts);
+  return `<a class="item-user" data-channel="${channel}" data-ts="${ts}" href="${href}" target="_blank">${name}:</a>`;
 }
 
 function channelLink(label, channelId) {
@@ -2254,6 +2255,7 @@ bodyEl.addEventListener('click', (e) => {
   // Permalink: click username to navigate Slack in-place
   const userEl = e.target.closest('.item-user[data-channel]');
   if (userEl) {
+    e.preventDefault();
     const { channel, ts } = userEl.dataset;
     navigateSlack(channel, ts);
     return;
