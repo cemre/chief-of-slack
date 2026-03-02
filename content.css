@@ -106,6 +106,10 @@ section h2 {
 .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .inline-channel { display: inline; }
 .item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
+.item-time[data-channel] { cursor: pointer; }
+.item-time[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
+.msg-time[data-channel] { cursor: pointer; }
+.msg-time[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .item-actions {
   display: flex;
   visibility: hidden;
