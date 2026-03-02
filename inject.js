@@ -119,20 +119,24 @@
   ]);
 
   // Extract text from message, falling back to attachments/blocks
+  // Extract forwarded/shared message info as a separate object
+  function extractFwd(m) {
+    if (!m.attachments?.length) return null;
+    const att = m.attachments[0];
+    if (!(att.is_msg_unfurl || att.is_share)) return null;
+    const text = att.text || att.fallback || '';
+    if (!text) return null;
+    const author = att.author_subname || att.author_name || '';
+    return { author, text };
+  }
+
   function extractText(m) {
-    // For forwarded/shared messages, text is often empty or just a link —
-    // pull the real content from attachments first
+    // For forwarded/shared messages, return only the outer text (fwd content handled separately)
     if (m.attachments?.length) {
       const att = m.attachments[0];
-      // Shared/forwarded messages: attachment has is_msg_unfurl or is_share
       if (att.is_msg_unfurl || att.is_share) {
         const shared = att.text || att.fallback || '';
-        if (shared) {
-          const author = att.author_subname || att.author_name || '';
-          const prefix = author ? `[fwd from ${author}] ` : '[fwd] ';
-          // If the outer message also has text (e.g. a comment on the forward), include both
-          return m.text ? `${m.text} ${prefix}${shared}` : `${prefix}${shared}`;
-        }
+        if (shared) return m.text || '';
       }
     }
     if (m.text) return m.text;
@@ -287,6 +291,7 @@
         const unread = (t.unread_replies || []).map((r) => ({
           user: r.user,
           text: extractText(r),
+          fwd: extractFwd(r),
           ts: r.ts,
           bot_id: r.bot_id,
           subtype: r.subtype,
@@ -301,6 +306,7 @@
           channel_id: t.root_msg?.channel,
           ts: t.root_msg?.ts,
           root_text: extractText(t.root_msg || {}),
+          root_fwd: extractFwd(t.root_msg || {}),
           root_files: extractFiles(t.root_msg || {}),
           root_user: t.root_msg?.user,
           reply_count: t.root_msg?.reply_count || 0,
@@ -345,6 +351,7 @@
           .map((m) => ({
             user: m.user,
             text: extractText(m),
+            fwd: extractFwd(m),
             ts: m.ts,
             subtype: m.subtype,
             bot_id: m.bot_id,
@@ -413,6 +420,7 @@
             .map((m) => ({
               user: m.user,
               text: extractText(m),
+              fwd: extractFwd(m),
               ts: m.ts,
               thread_ts: m.thread_ts || null,
               subtype: m.subtype,
@@ -439,6 +447,7 @@
                   .map((m) => ({
                     user: m.user,
                     text: extractText(m),
+                    fwd: extractFwd(m),
                     ts: m.ts,
                     thread_ts: m.thread_ts || null,
                     subtype: m.subtype,
@@ -457,6 +466,7 @@
                         messages: (r.messages || []).slice(1).map((reply) => ({
                           user: reply.user,
                           text: extractText(reply),
+                          fwd: extractFwd(reply),
                           ts: reply.ts,
                           files: extractFiles(reply),
                         })),
@@ -616,7 +626,8 @@
           channel_id: m.channel?.id,
           channel_name: m.channel?.name,
           user: m.user || m.username,
-          text: m.text || '',
+          text: extractText(m),
+          fwd: extractFwd(m),
           ts: m.ts,
           files: extractFiles(m),
           reaction_count: (m.reactions || []).reduce((s, r) => s + r.count, 0),
@@ -651,7 +662,8 @@
         });
         const messages = (res.messages?.matches || []).slice(0, 10).map((m) => ({
           user: m.user || m.username,
-          text: m.text || '',
+          text: extractText(m),
+          fwd: extractFwd(m),
           ts: m.ts,
           files: extractFiles(m),
           channel_id: m.channel?.id,
@@ -697,6 +709,7 @@
         const replies = (data.messages || []).slice(1).map((m) => ({
           user: m.user,
           text: extractText(m),
+          fwd: extractFwd(m),
           ts: m.ts,
           files: extractFiles(m),
         }));
@@ -783,7 +796,7 @@
                 } catch {}
               }
 
-              if (message) message = { ...message, text: extractText(message), files: extractFiles(message) };
+              if (message) message = { ...message, text: extractText(message), fwd: extractFwd(message), files: extractFiles(message) };
               return { ...item, message };
             } catch {
               return item;
@@ -912,6 +925,7 @@
               .map((m) => ({
                 user: m.user,
                 text: extractText(m),
+                fwd: extractFwd(m),
                 ts: m.ts,
                 subtype: m.subtype,
                 bot_id: m.bot_id,

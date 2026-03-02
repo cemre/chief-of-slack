@@ -156,6 +156,20 @@ a.item-time, a.msg-time { text-decoration: none; color: inherit; }
 .item-text a, .item-reply a { color: #1d9bd1; text-decoration: none; }
 .item-text a:hover, .item-reply a:hover { text-decoration: underline; }
 .item-text:first-child { margin-top: 0; }
+.fwd-quote {
+  margin: 6px 0 2px;
+  padding: 4px 0 4px 12px;
+  border-left: 3px solid #565856;
+  font-size: 0.85em;
+  color: #9a9b9d;
+}
+.fwd-label {
+  font-size: 0.9em;
+  color: #717274;
+  font-style: italic;
+  display: block;
+  margin-bottom: 2px;
+}
 .item-reply-count {
   margin-top: 6px;
   font-size: 12px;
