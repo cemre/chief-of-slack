@@ -40,10 +40,11 @@ shadow.innerHTML = `
 <div id="overlay">
   <div id="resize-handle"></div>
   <header>
-    <h1>Flack <span class="last-updated-wrap"><span id="last-updated" class="last-updated"></span><span id="refresh-link" class="refresh-link">refresh</span></span></h1>
-    <div class="header-actions">
-      <button id="close-btn" class="secondary">Close</button>
-    </div>
+    <button id="close-btn">Close Flack</button>
+    <span class="last-updated-wrap">
+      <span id="last-updated" class="last-updated"></span>
+      <span id="refresh-link" class="refresh-link">refresh</span>
+    </span>
   </header>
   <div id="body">
     <div id="status">Starting fetch...</div>
@@ -187,8 +188,37 @@ _fslackPageStyle.textContent = `
   html.fslack-open .c-search_modal {
     padding-left: var(--fslack-w, 0px);
   }
+  #fslack-open-btn {
+    position: fixed;
+    top: 6px;
+    left: 80px;
+    z-index: 999998;
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 6px;
+    background: #1a1d21;
+    color: #d1d2d3;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+  }
+  #fslack-open-btn:hover { background: #363940; color: #fff; }
+  #fslack-open-btn.visible { display: inline-flex; }
 `;
 document.head.appendChild(_fslackPageStyle);
+
+// ── "Open Flack" button in real DOM ──
+document.getElementById('fslack-open-btn')?.remove();
+const openBtn = document.createElement('button');
+openBtn.id = 'fslack-open-btn';
+openBtn.textContent = 'Open Flack';
+document.body.appendChild(openBtn);
+openBtn.addEventListener('click', () => show());
 
 // ── Sync Slack's sidebar width to match Flack ──
 let _origTabpanelGrid = null;
@@ -387,6 +417,7 @@ function showFromCache() {
 function show() {
   visible = true;
   overlay.classList.add('visible');
+  openBtn.classList.remove('visible');
   syncSlackSidebar();
   if (showFromCache()) return;
   if (injectReady) startFetch();
@@ -394,6 +425,7 @@ function show() {
 function hide() {
   visible = false;
   overlay.classList.remove('visible');
+  openBtn.classList.add('visible');
   restoreSlackSidebar();
   stopDmWatcher();
 }

@@ -17,23 +17,35 @@
 }
 #overlay.visible { display: flex; flex-direction: column; }
 header {
-  padding: 12px 16px;
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 12px;
   background: #1a1d21;
   border-bottom: 1px solid #363940;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
   position: sticky;
   top: 0;
   z-index: 1;
+  flex-shrink: 0;
 }
-header h1 { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
-.last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: 12px; }
+#close-btn {
+  background: transparent;
+  border: none;
+  color: #d1d2d3;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+#close-btn:hover { background: #363940; color: #fff; }
+.last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
 .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
 .refresh-link:hover { text-decoration: underline; }
 .last-updated.stale { color: #e01e5a; }
-.header-actions { display: flex; gap: 8px; }
 button {
   background: #007a5a;
   color: #fff;
