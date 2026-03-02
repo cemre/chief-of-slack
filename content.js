@@ -190,24 +190,23 @@ _fslackPageStyle.textContent = `
   }
   #fslack-open-btn {
     position: fixed;
-    top: 6px;
-    left: 80px;
+    top: 8px;
+    left: 8px;
     z-index: 999998;
-    height: 32px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 6px;
-    background: #1a1d21;
-    color: #d1d2d3;
-    font-size: 13px;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 5px;
+    background: rgba(0,0,0,0.06);
+    color: #1d1c1d;
+    font-size: 12px;
     font-weight: 600;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     cursor: pointer;
     display: none;
     align-items: center;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.3);
   }
-  #fslack-open-btn:hover { background: #363940; color: #fff; }
+  #fslack-open-btn:hover { background: rgba(0,0,0,0.12); }
   #fslack-open-btn.visible { display: inline-flex; }
 `;
 document.head.appendChild(_fslackPageStyle);
