@@ -192,6 +192,7 @@ document.head.appendChild(_fslackPageStyle);
 
 // ── Sync Slack's sidebar width to match Flack ──
 let _origTabpanelGrid = null;
+let _tabpanelObserver = null;
 
 function syncSlackSidebar() {
   // Always set the CSS class/variable for page-level overrides (search typeahead etc.)
@@ -201,7 +202,20 @@ function syncSlackSidebar() {
   document.documentElement.style.setProperty('--fslack-w', flackW + 'px');
 
   const tabpanel = document.querySelector('.p-client_workspace__tabpanel');
-  if (!tabpanel) return;
+  if (!tabpanel) {
+    // Slack DOM not ready yet — watch for it to appear, then re-sync
+    if (!_tabpanelObserver) {
+      _tabpanelObserver = new MutationObserver(() => {
+        if (document.querySelector('.p-client_workspace__tabpanel')) {
+          _tabpanelObserver.disconnect();
+          _tabpanelObserver = null;
+          if (visible) syncSlackSidebar();
+        }
+      });
+      _tabpanelObserver.observe(document.body, { childList: true, subtree: true });
+    }
+    return;
+  }
   // Save original grid so we can restore on hide
   if (!_origTabpanelGrid) _origTabpanelGrid = tabpanel.style.gridTemplateColumns || '';
   const tabRail = document.querySelector('.p-tab_rail');
@@ -211,6 +225,7 @@ function syncSlackSidebar() {
 }
 
 function restoreSlackSidebar() {
+  if (_tabpanelObserver) { _tabpanelObserver.disconnect(); _tabpanelObserver = null; }
   document.documentElement.classList.remove('fslack-open');
   const tabpanel = document.querySelector('.p-client_workspace__tabpanel');
   if (!tabpanel) return;
@@ -2418,7 +2433,7 @@ bodyEl.addEventListener('click', (e) => {
           msgsDiv.innerHTML = html;
           msgsDiv.style.display = 'block';
           showMsgsLink.classList.remove('loading');
-          showMsgsLink.textContent = 'hide ↑';
+          showMsgsLink.textContent = showMsgsLink.dataset.showText.replace('show', 'hide').replace('↓', '↑');
         };
         window.addEventListener('message', handler);
         window.postMessage({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId }, '*');
@@ -2430,7 +2445,7 @@ bodyEl.addEventListener('click', (e) => {
         showMsgsLink.textContent = showMsgsLink.dataset.showText;
       } else {
         msgsDiv.style.display = 'block';
-        showMsgsLink.textContent = 'hide ↑';
+        showMsgsLink.textContent = showMsgsLink.dataset.showText.replace('show', 'hide').replace('↓', '↑');
       }
     }
     return;
