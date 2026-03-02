@@ -56,7 +56,13 @@ IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, cl
 ITEMS:
 ${serialized}
 
-Respond with ONLY a JSON object mapping each item's "id" to its category, plus a "_noiseOrder" key: an array of all noise/drop item IDs sorted from most work-relevant (informational announcements, decisions, discussions in work channels) to least relevant (social banter, #random chatter, celebrations, memes, off-topic). No explanation, no markdown fences, just the JSON object.`;
+For every act_now or priority item, also provide a terse reason (under 10 words,
+lowercase, no period) as "[person] [verb] [thing]" — e.g. "josh asked you to confirm
+the deploy", "brahm is blocked on your review", "ori asked you to read the RFC".
+Always describe the specific action/ask, even for DMs and @mentions.
+Collect these in a "_reasons" key mapping item IDs to reason strings.
+
+Respond with ONLY a JSON object mapping each item's "id" to its category, plus a "_noiseOrder" key (array of noise/drop IDs sorted by work-relevance) and a "_reasons" key (map of act_now/priority IDs to reason strings). No explanation, no markdown fences, just the JSON object.`;
 }
 
 // ── Retry wrapper for transient API errors (429/529) ──
@@ -92,7 +98,7 @@ async function handlePrioritize(payload, selfName) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+        max_tokens: 1280,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -112,7 +118,9 @@ async function handlePrioritize(payload, selfName) {
       const parsed = JSON.parse(jsonMatch[0]);
       const noiseOrder = Array.isArray(parsed._noiseOrder) ? parsed._noiseOrder : [];
       delete parsed._noiseOrder;
-      return { priorities: parsed, noiseOrder };
+      const reasons = (parsed._reasons && typeof parsed._reasons === 'object') ? parsed._reasons : {};
+      delete parsed._reasons;
+      return { priorities: parsed, noiseOrder, reasons };
     }
     return { error: 'parse_error', raw: text };
   } catch (err) {

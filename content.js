@@ -1036,6 +1036,12 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise 
   </div>`;
 }
 
+function reasonBadge(item, cssClass) {
+  if (!item._reason) return '';
+  const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
+  return `<div class="item-reason ${cls}">${escapeHtml(item._reason)}</div>`;
+}
+
 // ── Render a single item (thread, DM, or channel) as HTML ──
 function renderThreadItem(t, data, cssClass) {
   const unread = t.unread_replies || [];
@@ -1060,6 +1066,7 @@ function renderThreadItem(t, data, cssClass) {
   if (t.mention_count > 0 || t._isMentioned) {
     html += `<div class="item-mention">@mentioned</div>`;
   }
+  html += reasonBadge(t, cssClass);
   html += `</div>
     <div class="item-right">
       <div class="msg-row"><div class="msg-content item-text">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${truncate(t.root_text, 400, data.users)}${renderFiles(t.root_files)}${msgTime(t.ts, t.channel_id)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
@@ -1130,6 +1137,7 @@ function renderDmItem(dm, data, cssClass) {
     <div class="item-left">
       ${channelLink(escapeHtml(partner), dm.channel_id)}
       ${itemTime(latest.ts, dm.channel_id)}
+      ${reasonBadge(dm, cssClass)}
     </div>
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
@@ -1177,6 +1185,7 @@ function renderChannelItem(cp, data, cssClass) {
   if (cp.mention_count > 0 || cp._isMentioned) {
     html += `<div class="item-mention">@mentioned</div>`;
   }
+  html += reasonBadge(cp, cssClass);
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
     const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
@@ -1618,7 +1627,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
 }
 
 // ── Map LLM priorities back to original data objects ──
-function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data) {
+function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data, reasons = {}) {
   const actNow = [];
   const priority = [];
   const whenFree = [...deterministicWhenFree];
@@ -1647,6 +1656,10 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 
     // Hard gate: only DMs, private channels, or @mentions can reach act_now/priority
     if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
+
+    if (cat === 'act_now' || cat === 'priority') {
+      item._reason = reasons[item._llmId] || undefined;
+    }
 
     if (cat === 'act_now') { actNow.push(item); return; }
     if (cat === 'priority') { priority.push(item); return; }
@@ -3459,8 +3472,9 @@ function prioritizeAndRender(data) {
 
       const mergedPriorities = { ...importantResp.priorities, ...publicResp.priorities };
       const mergedNoiseOrder = [...(importantResp.noiseOrder || []), ...(publicResp.noiseOrder || [])];
+      const mergedReasons = { ...(importantResp.reasons || {}), ...(publicResp.reasons || {}) };
 
-      const prioritized = mapPriorities(mergedPriorities, forLlm, preFiltered.noise, preFiltered.whenFree, data);
+      const prioritized = mapPriorities(mergedPriorities, forLlm, preFiltered.noise, preFiltered.whenFree, data, mergedReasons);
       prioritized.digests = preFiltered.digests;
       prioritized.noise = sortNoiseItems(prioritized.noise, mergedNoiseOrder);
       const deepNoise = prioritized.noise.filter((item) =>
