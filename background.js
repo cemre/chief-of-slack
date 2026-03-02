@@ -59,6 +59,22 @@ ${serialized}
 Respond with ONLY a JSON object mapping each item's "id" to its category, plus a "_noiseOrder" key: an array of all noise/drop item IDs sorted from most work-relevant (informational announcements, decisions, discussions in work channels) to least relevant (social banter, #random chatter, celebrations, memes, off-topic). No explanation, no markdown fences, just the JSON object.`;
 }
 
+// ── Retry wrapper for transient API errors (429/529) ──
+const MAX_RETRIES = 2;
+const RETRY_DELAYS = [1500, 3000]; // ms
+
+async function fetchWithRetry(url, options) {
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const resp = await fetch(url, options);
+    if (resp.ok) return resp;
+    if ((resp.status === 529 || resp.status === 429) && attempt < MAX_RETRIES) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+      continue;
+    }
+    return resp; // non-retryable or exhausted retries
+  }
+}
+
 // ── Call Claude API ──
 async function handlePrioritize(payload, selfName) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
@@ -67,7 +83,7 @@ async function handlePrioritize(payload, selfName) {
   const prompt = buildPrompt(payload, selfName);
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -146,7 +162,7 @@ async function handleSummarize(item) {
   const prompt = buildSummarizePrompt(item);
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -205,7 +221,7 @@ async function handleVipSummarize(item) {
   const prompt = buildVipSummarizePrompt(item);
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -262,7 +278,7 @@ async function handleThreadReplySummarize(item) {
   if (!claudeApiKey) return { error: 'no_api_key' };
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -313,7 +329,7 @@ async function handleBotThreadSummarize(item) {
   if (!claudeApiKey) return { error: 'no_api_key' };
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
