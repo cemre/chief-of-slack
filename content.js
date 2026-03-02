@@ -177,22 +177,41 @@ resizeHandle.addEventListener('mousedown', (e) => {
   document.addEventListener('mouseup', onUp);
 });
 
+// ── Inject page-level style for shifting Slack overlays (search typeahead etc.) ──
+const _fslackPageStyle = document.createElement('style');
+_fslackPageStyle.id = 'fslack-page-overrides';
+_fslackPageStyle.textContent = `
+  html.fslack-open .p-ia4_top_nav {
+    padding-left: var(--fslack-w, 0px);
+  }
+  html.fslack-open .c-search_modal {
+    padding-left: var(--fslack-w, 0px);
+  }
+`;
+document.head.appendChild(_fslackPageStyle);
+
 // ── Sync Slack's sidebar width to match Flack ──
 let _origTabpanelGrid = null;
 
 function syncSlackSidebar() {
+  // Always set the CSS class/variable for page-level overrides (search typeahead etc.)
+  // even if Slack's DOM isn't ready yet (e.g. initial page load with ?fslack)
+  const flackW = overlay.getBoundingClientRect().width;
+  document.documentElement.classList.add('fslack-open');
+  document.documentElement.style.setProperty('--fslack-w', flackW + 'px');
+
   const tabpanel = document.querySelector('.p-client_workspace__tabpanel');
   if (!tabpanel) return;
   // Save original grid so we can restore on hide
   if (!_origTabpanelGrid) _origTabpanelGrid = tabpanel.style.gridTemplateColumns || '';
   const tabRail = document.querySelector('.p-tab_rail');
   const railW = tabRail ? tabRail.getBoundingClientRect().width : 70;
-  const flackW = overlay.getBoundingClientRect().width;
   const sidebarW = Math.max(0, flackW - railW);
   tabpanel.style.gridTemplateColumns = `${sidebarW}px minmax(0, 1fr)`;
 }
 
 function restoreSlackSidebar() {
+  document.documentElement.classList.remove('fslack-open');
   const tabpanel = document.querySelector('.p-client_workspace__tabpanel');
   if (!tabpanel) return;
   tabpanel.style.gridTemplateColumns = _origTabpanelGrid || '';
@@ -201,10 +220,7 @@ function restoreSlackSidebar() {
 
 // ── In-place Slack navigation ──
 function navigateSlack(channel, ts) {
-  const url = ts
-    ? `/archives/${channel}/p${ts.replace('.', '')}`
-    : `/archives/${channel}`;
-  window.postMessage({ type: `${FSLACK}:navigate`, url }, '*');
+  window.postMessage({ type: `${FSLACK}:navigate`, channel, ts }, '*');
 }
 
 // ── Toggle overlay ──
@@ -1335,8 +1351,10 @@ function applyPreFilters(data) {
     t._type = 'thread';
     t._isDmThread = t.channel_id?.startsWith('D') || false;
 
-    const allTexts = [t.root_text, ...(t.unread_replies || []).map((r) => r.text)].join(' ');
-    t._isMentioned = containsSelfMention(allTexts, selfId);
+    // Only check unread replies for mentions — the root_text was already seen,
+    // so a mention there shouldn't make every new reply "priority"
+    const unreadTexts = (t.unread_replies || []).map((r) => r.text).join(' ');
+    t._isMentioned = containsSelfMention(unreadTexts, selfId);
 
     // dia-dogfooding / help-dia threads: only surface if 10+ replies, rest → noise
     const tChName = channels[t.channel_id] || '';
@@ -1366,8 +1384,8 @@ function applyPreFilters(data) {
       forLlm.channelPosts.push(cp);
       return;
     }
-    const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 3);
-    const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 3);
+    const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 4);
+    const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 4);
     if (hotMsgs.length > 0) {
       const hotCp = { ...cp, messages: hotMsgs };
       const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
@@ -2454,6 +2472,10 @@ bodyEl.addEventListener('click', (e) => {
     }
     whenfreeMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     whenfreeMarkRead.disabled = true;
+    if (section?.classList.contains('expanded')) {
+      const toggle = section.previousElementSibling;
+      if (toggle?.classList.contains('section-toggle')) toggle.click();
+    }
     return;
   }
 
@@ -2474,6 +2496,10 @@ bodyEl.addEventListener('click', (e) => {
     }
     digestsMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     digestsMarkRead.disabled = true;
+    if (section?.classList.contains('expanded')) {
+      const toggle = section.previousElementSibling;
+      if (toggle?.classList.contains('section-toggle')) toggle.click();
+    }
     return;
   }
 
@@ -2494,6 +2520,10 @@ bodyEl.addEventListener('click', (e) => {
     }
     noiseMarkRecent.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     noiseMarkRecent.disabled = true;
+    if (section?.classList.contains('expanded')) {
+      const toggle = section.previousElementSibling;
+      if (toggle?.classList.contains('section-toggle')) toggle.click();
+    }
     return;
   }
 
@@ -2514,6 +2544,10 @@ bodyEl.addEventListener('click', (e) => {
     }
     noiseMarkOlder.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     noiseMarkOlder.disabled = true;
+    if (section?.classList.contains('expanded')) {
+      const toggle = section.previousElementSibling;
+      if (toggle?.classList.contains('section-toggle')) toggle.click();
+    }
     return;
   }
 
@@ -3450,6 +3484,7 @@ function prioritizeAndRender(data) {
         if (noiseRecentEl) {
           let recentHtml = '';
           for (const item of allNoiseRecent) recentHtml += renderAnyItem(item, data, 'noise-item');
+          recentHtml += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent noise as read</button></div>`;
           noiseRecentEl.innerHTML = recentHtml;
           if (noiseRecentToggleEl) {
             const count = allNoiseRecent.length;
@@ -3460,11 +3495,10 @@ function prioritizeAndRender(data) {
         if (noiseOlderEl) {
           let olderHtml = '';
           for (const item of allNoiseOlder) olderHtml += renderAnyItem(item, data, 'noise-item');
+          olderHtml += `<div class="noise-section-footer" id="noise-older-footer"${allNoiseOlder.length === 0 ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
           noiseOlderEl.innerHTML = olderHtml;
           if (allNoiseOlder.length > 0) {
             if (noiseOlderToggleEl) noiseOlderToggleEl.style.display = '';
-            const olderFooter = shadow.getElementById('noise-older-footer');
-            if (olderFooter) olderFooter.style.display = '';
           }
           if (noiseOlderToggleEl) {
             const count = allNoiseOlder.length;
@@ -3477,6 +3511,7 @@ function prioritizeAndRender(data) {
         if (digestItemsEl) {
           let digestHtml = '';
           for (const item of summarizedDigestItems) digestHtml += renderAnyItem(item, data, 'noise-item');
+          digestHtml += `<div class="noise-section-footer"><button id="digests-mark-read-btn">Mark all digests as read</button></div>`;
           digestItemsEl.innerHTML = digestHtml;
           if (deepDigestArea) deepDigestArea.remove();
           if (digestsToggleEl) {

@@ -283,7 +283,7 @@ section h2 {
   position: relative;
 }
 .msg-row + .msg-row { margin-top: 1em; }
-.msg-content { flex: 1; min-width: 0; margin-right: 50px; }
+.msg-content { flex: 1; min-width: 0; margin-right: 80px; }
 .msg-actions {
   position: absolute;
   right: 0;

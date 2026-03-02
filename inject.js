@@ -962,8 +962,21 @@
     }
 
     if (msgType === `${FSLACK}:navigate`) {
-      const { url } = event.data;
-      if (url) {
+      const { channel, ts } = event.data;
+      if (channel) {
+        // Try clicking the sidebar element for SPA navigation (no reload)
+        if (!ts) {
+          const sidebarEl = document.getElementById(channel);
+          if (sidebarEl) {
+            const clickTarget = sidebarEl.querySelector('[data-qa-channel-sidebar-channel="true"]') || sidebarEl;
+            clickTarget.click();
+            return;
+          }
+        }
+        // Fallback: full page navigation via /archives/ permalink
+        const url = ts
+          ? `/archives/${channel}/p${ts.replace('.', '')}`
+          : `/archives/${channel}`;
         window.location.assign(url);
       }
     }
