@@ -3856,22 +3856,18 @@ window.addEventListener('message', (event) => {
     if (visible && !showFromCache()) startFetch();
   }
 });
-if (!_autoShow) {
-  // No ?fslack param — don't auto-show (toggle still works via shortcut/icon)
-} else {
-  if (sessionStorage.getItem('fslack_hide')) {
-    sessionStorage.removeItem('fslack_hide');
-  } else {
-    // Load persisted view cache, timestamp, and saved messages before showing
-    chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads'], (result) => {
-      if (result.fslackViewCache && !cachedView) {
-        cachedView = result.fslackViewCache;
-      }
-      persistedFetchTs = result.fslackLastFetchTs || 0;
-      savedMsgKeys = new Set(result.fslackSavedMsgs || []);
-      vipSeenTimestamps = result.fslackVipSeen || {};
-      mutedThreadKeys = new Set(result.fslackMutedThreads || []);
-      show();
-    });
+// Always load persisted cache so toggle path has data for showFromCache()
+chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads'], (result) => {
+  if (result.fslackViewCache && !cachedView) {
+    cachedView = result.fslackViewCache;
   }
-}
+  persistedFetchTs = result.fslackLastFetchTs || 0;
+  savedMsgKeys = new Set(result.fslackSavedMsgs || []);
+  vipSeenTimestamps = result.fslackVipSeen || {};
+  mutedThreadKeys = new Set(result.fslackMutedThreads || []);
+  if (_autoShow && !sessionStorage.getItem('fslack_hide')) {
+    show();
+  } else {
+    sessionStorage.removeItem('fslack_hide');
+  }
+});
