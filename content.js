@@ -1003,15 +1003,24 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   </div>`;
 }
 
+function slackPermalink(channel, ts) {
+  if (!channel || !ts) return '';
+  return `${location.origin}/archives/${channel}/p${ts.replace('.', '')}`;
+}
+
 function msgTime(ts, channel) {
   const t = formatTimeTooltip(ts);
   if (!t) return '';
   const attrs = channel && ts ? ` data-channel="${channel}" data-ts="${ts}"` : '';
+  const href = slackPermalink(channel, ts);
+  if (href) return `<a class="msg-time"${attrs} href="${href}" target="_blank">${t}</a>`;
   return `<span class="msg-time"${attrs}>${t}</span>`;
 }
 
 function itemTime(ts, channel) {
   const attrs = channel && ts ? ` data-channel="${channel}" data-ts="${ts}"` : '';
+  const href = slackPermalink(channel, ts);
+  if (href) return `<a class="item-time"${attrs} href="${href}" target="_blank">${formatTime(ts)}</a>`;
   return `<span class="item-time"${attrs}>${formatTime(ts)}</span>`;
 }
 
@@ -1239,7 +1248,7 @@ function renderDeepSummarizedItem(cp, data) {
   return `<div class="item noise-item">
     <div class="item-left">
       ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
-      <span class="item-time" data-channel="${cp.channel_id}" data-ts="${newestTs || ''}">${timeDisplay}</span>
+      ${newestTs ? `<a class="item-time" data-channel="${cp.channel_id}" data-ts="${newestTs}" href="${slackPermalink(cp.channel_id, newestTs)}" target="_blank">${timeDisplay}</a>` : `<span class="item-time">${timeDisplay}</span>`}
     </div>
     <div class="item-right">
       <div class="msg-row"><div class="msg-content">
@@ -2125,6 +2134,7 @@ bodyEl.addEventListener('click', (e) => {
   // Permalink: click timestamp to navigate Slack in-place
   const timeEl = e.target.closest('.msg-time[data-channel], .item-time[data-channel]');
   if (timeEl) {
+    e.preventDefault();
     const { channel, ts } = timeEl.dataset;
     navigateSlack(channel, ts);
     return;
@@ -3430,11 +3440,20 @@ function prioritizeAndRender(data) {
       const firstError = importantResp?.error || publicResp?.error;
       if (firstError) {
         console.warn('FSlack prioritization error:', firstError);
-        render(data);
-        const banner = document.createElement('div');
-        banner.className = 'warning-banner';
-        banner.textContent = `Prioritization unavailable: ${firstError}`;
-        bodyEl.insertBefore(banner, bodyEl.firstChild);
+        // Fall back to cached priorities if available
+        if (cachedView?.prioritized) {
+          renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
+          const banner = document.createElement('div');
+          banner.className = 'warning-banner';
+          banner.textContent = 'Showing cached results (API temporarily unavailable)';
+          bodyEl.insertBefore(banner, bodyEl.firstChild);
+        } else {
+          render(data);
+          const banner = document.createElement('div');
+          banner.className = 'warning-banner';
+          banner.textContent = `Prioritization unavailable: ${firstError}`;
+          bodyEl.insertBefore(banner, bodyEl.firstChild);
+        }
         return;
       }
 
