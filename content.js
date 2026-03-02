@@ -764,10 +764,15 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+function decodeSlackEntities(str) {
+  return str.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
 let truncateId = 0;
 
 function cleanSlackText(text, users) {
   if (!text) return '';
+  text = decodeSlackEntities(text);
   text = text.replace(/<@(U[A-Z0-9]+)(?:\|([^>]+))?>/g, (_, id, displayName) => `@${displayName || users?.[id] || id}`);
   text = text.replace(/<#(C[A-Z0-9]+)(?:\|([^>]+))?>/g, (_, id, label) => `#${label || channelNameMap?.[id] || id}`);
   text = text.replace(/<([^|>]+)\|([^>]+)>/g, (_, _url, label) => label);
@@ -775,14 +780,97 @@ function cleanSlackText(text, users) {
   return text;
 }
 
+function applyMrkdwn(html) {
+  // Bold: *text* (skip inside HTML tags)
+  html = html.replace(/(<[^>]*>)|\*([^*\n]+)\*/g, (match, tag, text) => {
+    if (tag) return tag;
+    return `<strong>${text}</strong>`;
+  });
+  // Italic: _text_ but not inside snake_case (lookbehind/ahead for word chars)
+  html = html.replace(/(<[^>]*>)|(?<![a-zA-Z0-9])_([^_\n]+)_(?![a-zA-Z0-9])/g, (match, tag, text) => {
+    if (tag) return tag;
+    return `<em>${text}</em>`;
+  });
+  // Strikethrough: ~text~
+  html = html.replace(/(<[^>]*>)|~([^~\n]+)~/g, (match, tag, text) => {
+    if (tag) return tag;
+    return `<s>${text}</s>`;
+  });
+  return html;
+}
+
+function applyBlockFormatting(html) {
+  const lines = html.split('\n');
+  const out = [];
+  let inUl = false, inOl = false;
+  for (const line of lines) {
+    // Skip lines inside pre blocks — they preserve whitespace natively
+    if (line.includes('<pre>')) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      out.push(line);
+      continue;
+    }
+    // Blockquote: &gt; text
+    const quoteMatch = line.match(/^&gt;\s?(.*)/);
+    if (quoteMatch) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      out.push(`<blockquote class="slack-quote">${quoteMatch[1]}</blockquote>`);
+      continue;
+    }
+    // Unordered list: • or ◦
+    const ulMatch = line.match(/^[•◦]\s+(.*)/);
+    if (ulMatch) {
+      if (inOl) { out.push('</ol>'); inOl = false; }
+      if (!inUl) { out.push('<ul class="slack-list">'); inUl = true; }
+      out.push(`<li>${ulMatch[1]}</li>`);
+      continue;
+    }
+    // Ordered list: digit.
+    const olMatch = line.match(/^\d+\.\s+(.*)/);
+    if (olMatch) {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (!inOl) { out.push('<ol class="slack-list">'); inOl = true; }
+      out.push(`<li>${olMatch[1]}</li>`);
+      continue;
+    }
+    // Close any open lists
+    if (inUl) { out.push('</ul>'); inUl = false; }
+    if (inOl) { out.push('</ol>'); inOl = false; }
+    out.push(line);
+  }
+  if (inUl) out.push('</ul>');
+  if (inOl) out.push('</ol>');
+  return out.join('<br>').replace(/<br>(<\/?(?:ul|ol|li|blockquote)[^>]*>)/g, '$1').replace(/(<\/?(?:ul|ol|li|blockquote)[^>]*>)<br>/g, '$1');
+}
+
 function formatSlackHtml(text, users) {
   if (!text) return '';
+
+  // 1. Extract code blocks (```...```) → placeholders
+  const placeholders = [];
+  function ph(content) {
+    const i = placeholders.length;
+    placeholders.push(content);
+    return `\x00PH${i}\x00`;
+  }
+  text = text.replace(/```([\s\S]*?)```/g, (_, code) =>
+    ph(`<pre><code>${escapeHtml(decodeSlackEntities(code))}</code></pre>`)
+  );
+
+  // 2. Extract inline code (`...`) → placeholders
+  text = text.replace(/`([^`\n]+)`/g, (_, code) =>
+    ph(`<code>${escapeHtml(decodeSlackEntities(code))}</code>`)
+  );
+
+  // 3. Process <...> references, using decodeSlackEntities on text segments
   let result = '';
   let lastIndex = 0;
   const regex = /<([^>]+)>/g;
   let match;
   while ((match = regex.exec(text)) !== null) {
-    result += escapeHtml(text.slice(lastIndex, match.index));
+    result += escapeHtml(decodeSlackEntities(text.slice(lastIndex, match.index)));
     const inner = match[1];
     if (inner.match(/^@U[A-Z0-9]+(\|.+)?$/)) {
       const pipeIdx = inner.indexOf('|');
@@ -813,7 +901,18 @@ function formatSlackHtml(text, users) {
     }
     lastIndex = match.index + match[0].length;
   }
-  result += escapeHtml(text.slice(lastIndex));
+  result += escapeHtml(decodeSlackEntities(text.slice(lastIndex)));
+
+  // 4. Apply inline mrkdwn (bold, italic, strike — skips HTML tags)
+  result = applyMrkdwn(result);
+
+  // 5. Restore placeholders → inject <pre><code> and <code> HTML
+  result = result.replace(/\x00PH(\d+)\x00/g, (_, i) => placeholders[+i]);
+
+  // 6. Apply block formatting (lists, blockquotes, newlines)
+  result = applyBlockFormatting(result);
+
+  // 7. Apply emoji (existing, unchanged)
   return applyEmoji(result, customEmojiMap);
 }
 
@@ -854,7 +953,7 @@ function truncate(text, max = 400, users) {
   if (cleaned.length <= max) return formatSlackHtml(text, users);
   const id = `trunc_${++truncateId}`;
   const short = applyEmoji(escapeHtml(cleaned.slice(0, max)), customEmojiMap);
-  const full = formatSlackHtml(text, users).replace(/\n/g, '<br>');
+  const full = formatSlackHtml(text, users);
   return `<span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span>`;
 }
 
