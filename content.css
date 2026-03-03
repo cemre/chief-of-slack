@@ -149,7 +149,7 @@ a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
   flex: 1;
   min-width: 0;
 }
-.item-user { font-weight: 700; color: #fff; }
+.item-user { font-weight: 700; color: #fff; display: block; }
 .item-user[data-channel] { cursor: pointer; }
 .item-user[data-channel]:hover { text-decoration: underline; }
 .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }

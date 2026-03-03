@@ -952,7 +952,7 @@ function truncate(text, max = 400, users) {
   const cleaned = cleanSlackText(text, users);
   if (cleaned.length <= max) return formatSlackHtml(text, users);
   const id = `trunc_${++truncateId}`;
-  const short = applyEmoji(escapeHtml(cleaned.slice(0, max)), customEmojiMap);
+  const short = applyEmoji(applyBlockFormatting(applyMrkdwn(escapeHtml(cleaned.slice(0, max)))), customEmojiMap);
   const full = formatSlackHtml(text, users);
   return `<span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span>`;
 }
