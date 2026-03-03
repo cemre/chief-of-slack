@@ -1195,8 +1195,10 @@ function renderThreadItem(t, data, cssClass) {
     <div class="item-left">
       ${channelLink(channelLabel, t.channel_id)}
       ${itemTime(markAllTs, t.channel_id)}`;
-  if (t.mention_count > 0 || t._isMentioned) {
+  if (t._mentionInReplies) {
     html += `<div class="item-mention">@mentioned</div>`;
+  } else if (t.mention_count > 0 || t._isMentioned) {
+    html += `<div class="item-mention">replies to @mention</div>`;
   }
   html += reasonBadge(t, cssClass);
   const _rtid = truncateId;
@@ -1500,13 +1502,14 @@ function renderAnyItem(item, data, cssClass) {
 }
 
 const HANDLE_MENTION_REGEX = /(?:^|[\s"'([{<])@(?:gem|cemre)(?=$|[\s.,!?;:)\]\}>"'])/i;
-const BARE_NAME_REGEX = /(?:^|[\s"'([{<])(?:gem|cemre)(?=$|[\s.,!?;:)\]\}>"'])/i;
 
 function containsSelfMention(text, selfId) {
   if (!text || !selfId) return false;
+  // Slack encoded @-mention or raw @-mention
   if (text.includes(`<@${selfId}>`)) return true;
   if (text.includes(`@${selfId}`)) return true;
-  return HANDLE_MENTION_REGEX.test(text) || BARE_NAME_REGEX.test(text);
+  // @gem / @cemre handle mentions (bare "gem" without @ is NOT a mention)
+  return HANDLE_MENTION_REGEX.test(text);
 }
 
 // ── Deterministic pre-filters ──
@@ -1566,10 +1569,13 @@ function applyPreFilters(data) {
     t._type = 'thread';
     t._isDmThread = t.channel_id?.startsWith('D') || false;
 
-    // Only check unread replies for mentions — the root_text was already seen,
-    // so a mention there shouldn't make every new reply "priority"
+    // Check unread replies for direct @-mentions (drives floor rule → forced priority)
     const unreadTexts = (t.unread_replies || []).map((r) => r.text).join(' ');
-    t._isMentioned = containsSelfMention(unreadTexts, selfId);
+    t._mentionInReplies = containsSelfMention(unreadTexts, selfId);
+    t._isMentioned = t._mentionInReplies;
+    // Check root for @-mention — doesn't force priority but makes thread "qualified"
+    // so the LLM CAN classify it as priority/act_now if warranted
+    t._mentionInRoot = containsSelfMention(t.root_text || '', selfId);
 
     // dia-dogfooding / help-dia threads: only surface if 10+ replies, rest → noise
     const tChName = channels[t.channel_id] || '';
@@ -1718,7 +1724,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
   for (let i = 0; i < forLlm.threads.length; i++) {
     const t = forLlm.threads[i];
     const ch = data.channels[t.channel_id] || t.channel_id;
-    items.push({
+    const item = {
       id: `thread_${i}`,
       type: t._isDmThread ? 'dm_thread' : 'thread',
       channel: ch,
@@ -1731,7 +1737,17 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
         user: uname(r.user, data.users),
         text: plainTruncate(textWithFwd(r.text, r.fwd), 1000, data.users),
       })),
-    });
+    };
+    if (t.full_replies?.length) {
+      const readReplies = t.full_replies.filter((r) => !r.is_unread);
+      if (readReplies.length > 0) {
+        item.recentContext = readReplies.map((r) => ({
+          user: uname(r.user, data.users),
+          text: plainTruncate(r.text, 500, data.users),
+        }));
+      }
+    }
+    items.push(item);
   }
 
   for (let i = 0; i < forLlm.dms.length; i++) {
@@ -1782,8 +1798,10 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm' || item._isDmThread;
     const isDm = item._type === 'dm' || item._isDmThread;
     const isMentioned = item._isMentioned || false;
-    const isQualified = isDm || isPrivate || isMentioned;
+    const mentionInRoot = item._mentionInRoot || false;
+    const isQualified = isDm || isPrivate || isMentioned || mentionInRoot;
     const userReplied = item._userReplied || false;
+    const llmCat = cat; // original LLM classification before overrides
 
     // DM overrides: VIP DMs → act_now, all other DMs → at least priority
     if (isDm) {
@@ -1803,6 +1821,12 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 
     if (cat === 'act_now' || cat === 'priority') {
       item._reason = reasons[item._llmId] || undefined;
+      if (!item._reason && llmCat !== cat) {
+        const ch = data.channels?.[item.channel_id] || item.channel_id;
+        console.log(`[fslack] no LLM reason for ${item._llmId} (#${ch}): LLM said "${llmCat}", overridden to "${cat}"` +
+          ` | isMentioned=${isMentioned} mentionInRoot=${mentionInRoot} mentionInReplies=${item._mentionInReplies || false} isDm=${isDm} isPrivate=${isPrivate}` +
+          ` | reasons keys: [${Object.keys(reasons).join(', ')}]`);
+      }
     }
 
     if (cat === 'act_now') { actNow.push(item); return; }

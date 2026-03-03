@@ -320,6 +320,28 @@
 
     progress(2, `Done. ${threads.length} threads with unread replies from others.`);
 
+    // 2b. For threads where I replied, fetch full thread context (last 10 replies)
+    const myRepliedThreads = threads.filter((t) => (t.reply_users || []).includes(selfId));
+    if (myRepliedThreads.length > 0) {
+      progress(2, `Fetching context for ${myRepliedThreads.length} threads I replied in...`);
+      await Promise.all(myRepliedThreads.map(async (t) => {
+        try {
+          const r = await slackApi('conversations.replies', { channel: t.channel_id, ts: t.ts, limit: '12' });
+          // Skip root (index 0), take last 10 replies
+          const allReplies = (r.messages || []).slice(1).slice(-10);
+          if (allReplies.length > 0) {
+            const firstUnreadTs = t.unread_replies[0]?.ts;
+            t.full_replies = allReplies.map((m) => ({
+              user: m.user,
+              text: extractText(m),
+              ts: m.ts,
+              is_unread: firstUnreadTs ? parseFloat(m.ts) >= parseFloat(firstUnreadTs) : false,
+            }));
+          }
+        } catch { /* non-critical */ }
+      }));
+    }
+
     // 3. Get unread DMs — fetch history for each
     const unreadIms = (counts.ims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'im' }));
     const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'mpim' }));
