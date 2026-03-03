@@ -131,7 +131,9 @@ async function handlePrioritize(payload, selfName) {
 // ── Build single-channel summarization prompt ──
 function buildSummarizePrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `Summarize what happened in this Slack channel in 1-3 terse clauses, and pick the best type.
+  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+
+Summarize what happened in this Slack channel in 1-3 terse clauses, and pick the best type.
 
 Channel: #${item.channel}
 
@@ -205,7 +207,9 @@ async function handleSummarize(item) {
 // ── Build VIP summarization prompt ──
 function buildVipSummarizePrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `Extract 3-5 specific bullet points about what ${item.name} has been saying or doing in Slack.
+  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+
+Extract 3-5 specific bullet points about what ${item.name} has been saying or doing in Slack.
 Each bullet should capture a concrete thing: a specific decision, question, announcement, concern, or piece of work — not a vague category.
 Do NOT start bullets with the person's name — just state the thing directly.
 Bad: "Announced the new onboarding flow is launching Thursday." (too vague) Good: "New onboarding flow launching Thursday."
@@ -264,7 +268,9 @@ async function handleVipSummarize(item) {
 // ── Build thread reply summarization prompt ──
 function buildThreadReplySummarizePrompt(item) {
   const serialized = JSON.stringify(item.replies, null, 0);
-  return `A thread in #${item.channel} has new unread replies. The original message and replies are below.
+  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+
+A thread in #${item.channel} has new unread replies. The original message and replies are below.
 
 Summarize the unread replies in 1-2 terse sentences. Focus on:
 - What was discussed or decided
@@ -317,7 +323,9 @@ async function handleThreadReplySummarize(item) {
 // ── Build bot thread summarization prompt ──
 function buildBotThreadPrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `A bot posted an automated report in #${item.channel} and people replied in a thread.
+  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+
+A bot posted an automated report in #${item.channel} and people replied in a thread.
 
 Summarize in 2-3 sentences:
 - What the issue or item is about (from the bot message)

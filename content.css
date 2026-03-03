@@ -352,6 +352,8 @@ ul.slack-list, ol.slack-list {
 .seen-replies-toggle:hover { color: #ababad; }
 .seen-replies-toggle.loading { color: #565856; cursor: wait; }
 .seen-replies-container .item-reply { color: #717274; }
+.root-seen { color: #717274; }
+.root-seen .item-user { color: #888; }
 .msg-row {
   display: flex;
   flex-wrap: wrap;
