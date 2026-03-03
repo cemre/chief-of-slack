@@ -3347,12 +3347,12 @@ async function kickoffVipSection(data) {
       <div class="item-right">
         <div class="msg-row"><div class="msg-content">
           <ul class="deep-summary">${(result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>
-          <div style="display:flex;gap:12px;margin-top:6px;">
-            <span class="show-messages-link" data-target="${msgId}" style="margin-top:0">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
-            <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
-          </div>
         </div></div>
         <div class="deep-messages" id="${msgId}">${messagesHtml}</div>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${msgId}" style="margin-top:0">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
+        </div>
       </div>
     </div>`;
   }
