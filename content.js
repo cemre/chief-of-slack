@@ -845,7 +845,7 @@ function applyBlockFormatting(html) {
   return out.join('<br>').replace(/<br>(<\/?(?:ul|ol|li|blockquote)[^>]*>)/g, '$1').replace(/(<\/?(?:ul|ol|li|blockquote)[^>]*>)<br>/g, '$1');
 }
 
-function formatSlackHtml(text, users) {
+function formatSlackHtml(text, users, { collapseNewlines = false } = {}) {
   if (!text) return '';
 
   // 1. Extract code blocks (```...```) → placeholders
@@ -863,6 +863,9 @@ function formatSlackHtml(text, users) {
   text = text.replace(/`([^`\n]+)`/g, (_, code) =>
     ph(`<code>${escapeHtml(decodeSlackEntities(code))}</code>`)
   );
+
+  // 2b. Optionally collapse all newlines to spaces (for collapsed/short view)
+  if (collapseNewlines) text = text.replace(/\n+/g, ' ');
 
   // 3. Process <...> references, using decodeSlackEntities on text segments
   let result = '';
@@ -895,7 +898,9 @@ function formatSlackHtml(text, users) {
         result += escapeHtml(label);
       }
     } else if (inner.match(/^https?:\/\//)) {
-      result += `<a href="${escapeHtml(inner)}" target="_blank" rel="noopener">${escapeHtml(inner)}</a>`;
+      let shortLabel;
+      try { shortLabel = new URL(inner).hostname.replace(/^www\./, ''); } catch { shortLabel = inner; }
+      result += `<a href="${escapeHtml(inner)}" target="_blank" rel="noopener">${escapeHtml(shortLabel)} →</a>`;
     } else {
       result += escapeHtml(inner);
     }
@@ -950,9 +955,9 @@ function truncate(text, max = 400, users) {
   const zendesk = extractZendeskSummary(text);
   if (zendesk) return escapeHtml(zendesk);
   const cleaned = cleanSlackText(text, users);
-  if (cleaned.length <= max) return formatSlackHtml(text, users);
+  if (cleaned.length <= max) return formatSlackHtml(text, users, { collapseNewlines: true });
   const id = `trunc_${++truncateId}`;
-  const short = applyEmoji(applyBlockFormatting(applyMrkdwn(escapeHtml(cleaned.slice(0, max)))), customEmojiMap);
+  const short = applyEmoji(applyMrkdwn(escapeHtml(cleaned.replace(/\n+/g, ' ').slice(0, max))), customEmojiMap);
   const full = formatSlackHtml(text, users);
   return `<span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span>`;
 }
@@ -1142,7 +1147,7 @@ function itemTime(ts, channel) {
 function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false) {
   return `<div class="item-actions">
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}><kbd>M</kbd> mark read</span>
-    ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>reply</span>` : ''}
+    ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
     ${!threadTs && !isDm && !isNoise ? `<span class="action-always-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark noise</span>` : ''}
@@ -1257,7 +1262,7 @@ function renderDmItem(dm, data, cssClass) {
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
     const sender = dm.isGroup ? `${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), dm.channel_id, m.ts)} ` : '';
-    html += `<div class="msg-row"><div class="msg-content item-text">${sender}${truncate(m.text, 1000, data.users)}${renderFwd(m.fwd, data.users)}${renderFiles(m.files)}${msgTime(m.ts, dm.channel_id)}</div>${msgActions(dm.channel_id, m.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-text">${sender}${truncate(m.text, 1000, data.users)}${renderFwd(m.fwd, data.users)}${renderFiles(m.files)}${msgTime(m.ts, dm.channel_id)}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div></div>';
@@ -1823,6 +1828,16 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   const digests = prioritized.digests || [];
   let html = '';
 
+  // Saved items (collapsed by default) — pinned to top
+  if (savedItems && savedItems.length > 0) {
+    html += '<section class="priority-section">';
+    html += `<div class="section-toggle" id="saved-items-toggle">Saved · ${savedItems.length} ↓</div>`;
+    html += '<div class="saved-items-list" id="saved-items-list">';
+    for (const item of savedItems) html += renderSavedItem(item, data);
+    html += '</div>';
+    html += '</section>';
+  }
+
   // Act Now
   if (actNow.length > 0) {
     html += '<section class="priority-section"><h2 class="act-now">Act Now</h2>';
@@ -1869,16 +1884,6 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Loading indicator while LLM is working
   if (loading) {
     html += '<div id="status"><div class="detail">Analyzing remaining messages with AI...</div></div>';
-  }
-
-  // Saved items (last 72h, collapsed by default)
-  if (savedItems && savedItems.length > 0) {
-    html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="saved-items-toggle">Saved · ${savedItems.length} ↓</div>`;
-    html += '<div class="saved-items-list" id="saved-items-list">';
-    for (const item of savedItems) html += renderSavedItem(item, data);
-    html += '</div>';
-    html += '</section>';
   }
 
   // Noise (collapsed by default) — split into recent (last 24h) and older
@@ -2457,7 +2462,8 @@ bodyEl.addEventListener('click', (e) => {
     const isDm = dm === 'true';
     const form = document.createElement('div');
     form.className = 'reply-form';
-    form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="Reply... (⌘Enter to send)"></textarea><button class="reply-send">Send</button>`;
+    const placeholder = isDm ? 'Send a DM... (⌘Enter to send)' : 'Reply... (⌘Enter to send)';
+    form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><button class="reply-send">Send</button>`;
     itemActions.insertAdjacentElement('afterend', form);
     const input = form.querySelector('.reply-input');
     for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
