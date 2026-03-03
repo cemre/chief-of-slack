@@ -1156,9 +1156,9 @@ function itemTime(ts, channel) {
   return `<span class="item-time"${attrs}>${formatTime(ts)}</span>`;
 }
 
-function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false) {
+function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false, hasMention = false) {
   return `<div class="item-actions">
-    <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}><kbd>M</kbd> mark read</span>
+    <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}${hasMention ? ' data-has-mention="1"' : ''}><kbd>M</kbd> mark read</span>
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
@@ -1241,7 +1241,7 @@ function renderThreadItem(t, data, cssClass) {
   }
 
   html += '</div>';
-  html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread);
+  html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread, '', false, t._isMentioned || t.mention_count > 0);
   html += '</div></div>';
   return html;
 }
@@ -2394,9 +2394,9 @@ bodyEl.addEventListener('click', (e) => {
       window.postMessage({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` }, '*');
       markAll.dataset.pending = 'true';
     } else if (!markAll.dataset.pending) {
-      const { channel, ts, threadTs } = markAll.dataset;
+      const { channel, ts, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` }, '*');
       markAll.dataset.pending = 'true';
     }
     return;
@@ -2531,10 +2531,10 @@ bodyEl.addEventListener('click', (e) => {
     const markAllBtn = muteBtn.closest('.item-actions')?.querySelector('.mark-all-read')
       || muteBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
-      const { ts, threadTs: tTs } = markAllBtn.dataset;
+      const { ts, threadTs: tTs, hasMention } = markAllBtn.dataset;
       markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, requestId: `readall_${Date.now()}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` }, '*');
     }
     muteThreadLocally(channel, threadTs);
     const itemEl = muteBtn.closest('.item');
@@ -2555,10 +2555,10 @@ bodyEl.addEventListener('click', (e) => {
     const markAllBtn = muteChannelBtn.closest('.item-actions')?.querySelector('.mark-all-read')
       || muteChannelBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
-      const { ts, threadTs } = markAllBtn.dataset;
+      const { ts, threadTs, hasMention } = markAllBtn.dataset;
       markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` }, '*');
     }
     window.postMessage({ type: `${FSLACK}:muteChannel`, channel, requestId: `mutech_${Date.now()}` }, '*');
     return;
@@ -2688,10 +2688,10 @@ bodyEl.addEventListener('click', (e) => {
     for (const item of priorityItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
-      const { channel, ts, threadTs } = markAll.dataset;
+      const { channel, ts, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
       markAll.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
     priorityMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -2708,10 +2708,10 @@ bodyEl.addEventListener('click', (e) => {
     for (const item of whenfreeItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
-      const { channel, ts, threadTs } = markAll.dataset;
+      const { channel, ts, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
       markAll.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
     whenfreeMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -2732,10 +2732,10 @@ bodyEl.addEventListener('click', (e) => {
     for (const item of digestItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
-      const { channel, ts, threadTs } = markAll.dataset;
+      const { channel, ts, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
       markAll.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
     digestsMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -2756,10 +2756,10 @@ bodyEl.addEventListener('click', (e) => {
     for (const item of noiseItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
-      const { channel, ts, threadTs } = markAll.dataset;
+      const { channel, ts, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
       markAll.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
     noiseMarkRecent.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -2780,10 +2780,10 @@ bodyEl.addEventListener('click', (e) => {
     for (const item of noiseItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
-      const { channel, ts, threadTs } = markAll.dataset;
+      const { channel, ts, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
       markAll.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
     noiseMarkOlder.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -2806,10 +2806,10 @@ bodyEl.addEventListener('click', (e) => {
       if (!markAll) continue;
       const ts = parseFloat(markAll.dataset.ts);
       if (!ts || ts >= sevenDaysAgo) continue;
-      const { channel, ts: markTs, threadTs } = markAll.dataset;
+      const { channel, ts: markTs, threadTs, hasMention } = markAll.dataset;
       markAll.textContent = '...';
       markAll.dataset.pending = 'true';
-      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, requestId: `readall_${Date.now()}_${count}` }, '*');
+      window.postMessage({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` }, '*');
       count++;
     }
     bankruptcyBtn.textContent = count > 0
@@ -3027,12 +3027,12 @@ function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   if (!markAll) return;
   if (requireThread && !markAll.dataset.threadTs) return;
   if (markAll.classList.contains('done') || markAll.dataset.pending) return;
-  const { channel, ts, threadTs } = markAll.dataset;
+  const { channel, ts, threadTs, hasMention } = markAll.dataset;
   const markTs = overrideTs || ts;
   if (overrideTs) markAll.dataset.ts = markTs;
   markAll.textContent = '...';
   markAll.dataset.pending = 'true';
-  window.postMessage({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, requestId: `readall_${Date.now()}` }, '*');
+  window.postMessage({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` }, '*');
 }
 
 function sendReply(form, channel, threadTs, text) {

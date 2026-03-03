@@ -827,10 +827,14 @@
     }
 
     if (msgType === `${FSLACK}:markRead`) {
-      const { channel, ts, thread_ts, requestId } = event.data;
+      const { channel, ts, thread_ts, has_mention, requestId } = event.data;
       try {
         if (thread_ts) {
           await slackApi('subscriptions.thread.mark', { channel, thread_ts, ts });
+          // Also clear channel-level mention badge when thread had an @-mention
+          if (has_mention) {
+            await slackApi('conversations.mark', { channel, ts }).catch(() => {});
+          }
         } else {
           await slackApi('conversations.mark', { channel, ts });
         }
