@@ -25,7 +25,7 @@ header {
   flex-shrink: 0;
 }
 #close-btn { display: none; }
-.last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; }
 .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
 .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
 .refresh-link:hover { text-decoration: underline; }

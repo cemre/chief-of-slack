@@ -123,14 +123,6 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 const closeBtn = document.getElementById('close-btn');
 document.getElementById('refresh-link').addEventListener('click', startFetch);
 
-// ── Hide nav toggle ──
-const hideNavCheckbox = document.getElementById('hide-nav-checkbox');
-chrome.storage.local.get('fslackHideNav', (r) => {
-  hideNavCheckbox.checked = r.fslackHideNav !== false; // default on
-});
-hideNavCheckbox.addEventListener('change', () => {
-  chrome.storage.local.set({ fslackHideNav: hideNavCheckbox.checked });
-});
 
 // ── In-place Slack navigation (via relay to inject.js) ──
 function navigateSlack(channel, ts) {
@@ -1643,7 +1635,9 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
 
     if (cat === 'act_now' || cat === 'priority') {
-      item._reason = reasons[item._llmId] || undefined;
+      // Skip AI reason for short DMs — the message itself is readable enough
+      const shortDm = isDm && (item.messages || []).reduce((n, m) => n + (m.text || '').length, 0) < 200;
+      item._reason = shortDm ? undefined : (reasons[item._llmId] || undefined);
       if (!item._reason && llmCat !== cat) {
         const ch = data.channels?.[item.channel_id] || item.channel_id;
         console.log(`[fslack] no LLM reason for ${item._llmId} (#${ch}): LLM said "${llmCat}", overridden to "${cat}"` +

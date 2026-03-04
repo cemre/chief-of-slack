@@ -427,11 +427,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     activeSlackTabId = sender.tab.id;
   }
 
-  // Open side panel from content script button
-  if (msg?.type === `${FSLACK}:openPanel` && sender.tab) {
-    chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => {});
-    return false;
-  }
 
   // Relay fslack:* messages from content script → side panel
   if (msg?.type?.startsWith(`${FSLACK}:`) && !LLM_TYPES.has(msg.type) && sender.tab) {

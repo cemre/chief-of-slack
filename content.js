@@ -45,56 +45,69 @@ chrome.storage.onChanged.addListener((changes) => {
   }
 });
 
-// ── "Open Flack" button in Slack's top nav ──
-function injectFlackButton() {
+// ── Injected buttons in Slack's top nav ──
+function injectNavButtons() {
   if (document.getElementById('fslack-open-btn')) return;
-  // Slack's top-right nav area
-  const topNav = document.querySelector('.p-ia4_top_nav__right_container')
-    || document.querySelector('.p-ia4_top_nav');
-  if (!topNav) return;
-  const btn = document.createElement('button');
-  btn.id = 'fslack-open-btn';
-  btn.textContent = 'Flack';
-  btn.title = 'Open Flack (⌘⇧F)';
-  btn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: `${FSLACK}:openPanel` }).catch(() => {});
-  });
-  // Insert before first child to put it on the left side of the right container
-  if (topNav.classList.contains('p-ia4_top_nav__right_container')) {
-    topNav.insertBefore(btn, topNav.firstChild);
-  } else {
-    topNav.appendChild(btn);
+
+  // Nav toggle button — top left corner (inside the native UI spacer)
+  const spacer = document.querySelector('.p-ia4_top_nav__native_ui_spacer');
+  if (spacer && !document.getElementById('fslack-nav-toggle')) {
+    const toggle = document.createElement('button');
+    toggle.id = 'fslack-nav-toggle';
+    toggle.title = 'Toggle Slack sidebar';
+    function updateToggleLabel(hidden) {
+      toggle.textContent = hidden ? '☰ Show Nav' : '☰ Hide Nav';
+      toggle.classList.toggle('nav-hidden', hidden);
+    }
+    chrome.storage.local.get('fslackHideNav', (r) => {
+      updateToggleLabel(r.fslackHideNav !== false);
+    });
+    toggle.addEventListener('click', () => {
+      chrome.storage.local.get('fslackHideNav', (r) => {
+        const newVal = r.fslackHideNav === false;
+        chrome.storage.local.set({ fslackHideNav: newVal });
+        updateToggleLabel(newVal);
+      });
+    });
+    spacer.style.display = 'flex';
+    spacer.style.alignItems = 'center';
+    spacer.style.paddingLeft = '8px';
+    spacer.style.boxSizing = 'border-box';
+    spacer.appendChild(toggle);
   }
+
 }
 
-// Inject button once Slack DOM is ready
+// Inject buttons once Slack DOM is ready
 const _btnObserver = new MutationObserver(() => {
   if (document.querySelector('.p-ia4_top_nav')) {
-    injectFlackButton();
+    injectNavButtons();
     _btnObserver.disconnect();
   }
 });
 _btnObserver.observe(document.body, { childList: true, subtree: true });
-// Also try immediately in case DOM is already ready
-injectFlackButton();
+injectNavButtons();
 
-// Style for the button
+// Styles for injected buttons
 const _flackBtnStyle = document.createElement('style');
 _flackBtnStyle.textContent = `
-  #fslack-open-btn {
+  #fslack-nav-toggle {
     height: 26px;
     padding: 0 8px;
-    border: 1px solid rgba(255,255,255,0.2);
+    border: 1.5px solid rgba(0,0,0,0.4);
     border-radius: 6px;
-    background: rgba(255,255,255,0.1);
-    color: #fff;
+    background: transparent;
+    color: rgba(0,0,0,0.6);
     font-size: 12px;
     font-weight: 600;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     cursor: pointer;
-    margin-right: 4px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
   }
-  #fslack-open-btn:hover { background: rgba(255,255,255,0.2); }
+  #fslack-nav-toggle:hover { background: rgba(0,0,0,0.06); }
 `;
 document.head.appendChild(_flackBtnStyle);
 
