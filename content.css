@@ -30,6 +30,8 @@ header {
 .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
 .refresh-link:hover { text-decoration: underline; }
 .last-updated.stale { color: #e01e5a; }
+.hide-nav-toggle { font-size: 11px; color: #616061; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; user-select: none; }
+.hide-nav-toggle input { margin: 0; }
 button {
   background: #007a5a;
   color: #fff;
@@ -140,7 +142,7 @@ a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
 .item-text a, .item-reply a { color: #1d9bd1; text-decoration: none; }
 .item-text a:hover, .item-reply a:hover { text-decoration: underline; }
 .item-text:first-child { margin-top: 0; }
-.item-text code {
+.item-text code, .item-reply code {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 0.85em;
   background: rgba(255,255,255,0.06);
@@ -149,7 +151,7 @@ a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
   border-radius: 3px;
   border: 1px solid rgba(255,255,255,0.06);
 }
-.item-text pre {
+.item-text pre, .item-reply pre {
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 0.85em;
   background: rgba(255,255,255,0.06);
@@ -159,7 +161,7 @@ a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
   overflow-x: auto;
   margin: 4px 0;
 }
-.item-text pre code {
+.item-text pre code, .item-reply pre code {
   background: none;
   border: none;
   padding: 0;
@@ -176,7 +178,7 @@ ul.slack-list, ol.slack-list {
   margin: 2px 0;
   padding-left: 20px;
 }
-.item-text s { opacity: 0.7; }
+.item-text s, .item-reply s { opacity: 0.7; }
 .fwd-quote {
   margin: 6px 0 2px;
   padding: 4px 0 4px 12px;

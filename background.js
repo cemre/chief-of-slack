@@ -12,19 +12,20 @@ let activeSlackTabId = null;
 
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'sidepanel') return;
+  console.log('[fslack bg] side panel connected');
   panelPort = port;
 
   // Relay messages from side panel → content script
   port.onMessage.addListener(async (msg) => {
     if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
     const tabId = await getSlackTabId();
+    console.log(`[fslack bg] panel→content: ${msg.type}, tabId=${tabId}`);
     if (!tabId) return;
-    try {
-      chrome.tabs.sendMessage(tabId, msg);
-    } catch {}
+    chrome.tabs.sendMessage(tabId, msg).catch((e) => console.warn(`[fslack bg] sendMessage failed: ${e.message}`));
   });
 
   port.onDisconnect.addListener(() => {
+    console.log('[fslack bg] side panel disconnected');
     panelPort = null;
   });
 });
@@ -426,8 +427,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     activeSlackTabId = sender.tab.id;
   }
 
+  // Open side panel from content script button
+  if (msg?.type === `${FSLACK}:openPanel` && sender.tab) {
+    chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => {});
+    return false;
+  }
+
   // Relay fslack:* messages from content script → side panel
   if (msg?.type?.startsWith(`${FSLACK}:`) && !LLM_TYPES.has(msg.type) && sender.tab) {
+    console.log(`[fslack bg] content→panel: ${msg.type}, panelPort=${!!panelPort}`);
     if (panelPort) {
       try { panelPort.postMessage(msg); } catch {}
     }

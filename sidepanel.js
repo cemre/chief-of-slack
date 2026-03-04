@@ -11,9 +11,14 @@ let port = null;
 const pendingOneShot = {}; // { requestId: callback } for one-off response handlers
 
 function connectPort() {
+  console.log('[fslack panel] connectPort()');
   port = chrome.runtime.connect({ name: 'sidepanel' });
-  port.onMessage.addListener(handlePortMessage);
+  port.onMessage.addListener((msg) => {
+    console.log(`[fslack panel] received: ${msg.type}`);
+    handlePortMessage(msg);
+  });
   port.onDisconnect.addListener(() => {
+    console.log('[fslack panel] port disconnected');
     port = null;
     stopDmWatcher();
     // Try to reconnect after a brief delay
@@ -23,6 +28,14 @@ function connectPort() {
   });
   // Signal to content.js that we're connected
   port.postMessage({ type: `${FSLACK}:sidepanelConnected` });
+
+  // If no fslack:ready arrives within 5s, nudge the user
+  setTimeout(() => {
+    const status = document.getElementById('status');
+    if (status && status.textContent === 'Waiting for Slack tab...') {
+      status.innerHTML = 'No Slack tab found. Open <a href="https://app.slack.com" target="_blank" style="color:#1d9bd1">app.slack.com</a> then click refresh above.';
+    }
+  }, 5000);
 }
 
 function sendToInject(msg) {
@@ -109,6 +122,15 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 
 const closeBtn = document.getElementById('close-btn');
 document.getElementById('refresh-link').addEventListener('click', startFetch);
+
+// ── Hide nav toggle ──
+const hideNavCheckbox = document.getElementById('hide-nav-checkbox');
+chrome.storage.local.get('fslackHideNav', (r) => {
+  hideNavCheckbox.checked = r.fslackHideNav !== false; // default on
+});
+hideNavCheckbox.addEventListener('change', () => {
+  chrome.storage.local.set({ fslackHideNav: hideNavCheckbox.checked });
+});
 
 // ── In-place Slack navigation (via relay to inject.js) ──
 function navigateSlack(channel, ts) {
@@ -1600,7 +1622,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isDm = item._type === 'dm' || item._isDmThread;
     const isMentioned = item._isMentioned || false;
     const mentionInRoot = item._mentionInRoot || false;
-    const isQualified = isDm || isPrivate || isMentioned || mentionInRoot;
+    const isQualified = isDm || isPrivate || isMentioned;
     const userReplied = item._userReplied || false;
     const llmCat = cat; // original LLM classification before overrides
 
@@ -3754,6 +3776,9 @@ function handlePortMessage(msg) {
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
 
   if (msg.type === `${FSLACK}:ready`) {
+    // If the view is already rendered (reconnect after service worker idle),
+    // don't re-render and blow away the user's scroll/expand state.
+    if (bodyEl.querySelector('.item')) return;
     if (showFromCache()) return;
     startFetch();
     return;
@@ -3865,8 +3890,11 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   vipSeenTimestamps = result.fslackVipSeen || {};
   mutedThreadKeys = new Set(result.fslackMutedThreads || []);
 
-  // Try showing cached view immediately
-  showFromCache();
+  // Show cached view immediately — panel is usable even without a Slack connection
+  const hadCache = showFromCache();
+  if (!hadCache) {
+    bodyEl.innerHTML = '<div id="status">Waiting for Slack tab...</div>';
+  }
 
   // Connect port to background.js (which relays to content.js → inject.js)
   connectPort();
