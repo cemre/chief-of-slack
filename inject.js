@@ -1022,6 +1022,12 @@
     }
   });
 
-  // Signal ready
-  window.postMessage({ type: `${FSLACK}:ready` }, '*');
+  // Signal ready — include workspace domain for iframe URL construction
+  let teamDomain = null;
+  try {
+    const localConfig = JSON.parse(localStorage.getItem('localConfig_v2'));
+    const team = localConfig.teams[localConfig.lastActiveTeamId];
+    teamDomain = team.domain || team.name;
+  } catch {}
+  window.postMessage({ type: `${FSLACK}:ready`, teamDomain }, '*');
 })();

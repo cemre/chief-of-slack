@@ -1,30 +1,75 @@
-// background.js — service worker: icon toggle + Claude API prioritization
+// background.js — service worker: side panel relay + Claude API prioritization
 
 const FSLACK = 'fslack';
 const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
 
-// ── Icon click toggles the overlay ──
-chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.url?.startsWith('https://app.slack.com')) return;
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      args: [`${FSLACK}:toggleOverlay`],
-      func: (toggleMessageType) => {
-        const host = document.getElementById('fslack-host');
-        if (host && typeof host.__fslackToggle === 'function') {
-          try {
-            host.__fslackToggle();
-            return;
-          } catch (_err) {
-            // Fall back to message dispatch below
-          }
-        }
-        window.postMessage({ type: toggleMessageType }, '*');
-      },
-    });
-  } catch {
-    // Tab not ready or no permission — ignore
+// ── Side panel behavior: open on icon click ──
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
+// ── Port management ──
+let panelPort = null;
+let activeSlackTabId = null;
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'sidepanel') return;
+  panelPort = port;
+
+  // Relay messages from side panel → content script
+  port.onMessage.addListener(async (msg) => {
+    if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
+    const tabId = await getSlackTabId();
+    if (!tabId) return;
+    try {
+      chrome.tabs.sendMessage(tabId, msg);
+    } catch {}
+  });
+
+  port.onDisconnect.addListener(() => {
+    panelPort = null;
+  });
+});
+
+// ── Generic relay: content script → side panel ──
+// fslack:* messages from content script get forwarded to side panel port
+// LLM messages (prioritize, summarize, etc.) are handled directly below
+const LLM_TYPES = new Set([
+  `${FSLACK}:prioritize`,
+  `${FSLACK}:summarize`,
+  `${FSLACK}:summarizeVip`,
+  `${FSLACK}:summarizeBotThread`,
+  `${FSLACK}:summarizeThreadReplies`,
+  `${FSLACK}:setApiKey`,
+  `${FSLACK}:getApiKey`,
+]);
+
+// ── Track active Slack tab ──
+async function getSlackTabId() {
+  if (activeSlackTabId) {
+    try {
+      const tab = await chrome.tabs.get(activeSlackTabId);
+      if (tab?.url?.startsWith('https://app.slack.com')) return activeSlackTabId;
+    } catch {}
+  }
+  // Fallback: query for active Slack tab
+  const [tab] = await chrome.tabs.query({ url: 'https://app.slack.com/*', active: true, currentWindow: true });
+  if (tab) { activeSlackTabId = tab.id; return tab.id; }
+  const [anyTab] = await chrome.tabs.query({ url: 'https://app.slack.com/*' });
+  if (anyTab) { activeSlackTabId = anyTab.id; return anyTab.id; }
+  return null;
+}
+
+// ── Keyboard shortcut toggle ──
+chrome.commands.onCommand.addListener(async (command) => {
+  if (command !== 'toggle-flack') return;
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url?.startsWith('https://app.slack.com')) return;
+  // Toggle: if panel port exists, close it; otherwise open
+  if (panelPort) {
+    try { await chrome.sidePanel.setOptions({ enabled: false, tabId: tab.id }); } catch {}
+    // Re-enable for future opens
+    setTimeout(() => { chrome.sidePanel.setOptions({ enabled: true, tabId: tab.id }).catch(() => {}); }, 100);
+  } else {
+    try { await chrome.sidePanel.open({ tabId: tab.id }); } catch {}
   }
 });
 
@@ -374,8 +419,22 @@ async function handleBotThreadSummarize(item) {
   }
 }
 
-// ── Message handler ──
+// ── Message handler (LLM calls + API key) ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Track active Slack tab from content script messages
+  if (sender.tab?.id && sender.tab.url?.startsWith('https://app.slack.com')) {
+    activeSlackTabId = sender.tab.id;
+  }
+
+  // Relay fslack:* messages from content script → side panel
+  if (msg?.type?.startsWith(`${FSLACK}:`) && !LLM_TYPES.has(msg.type) && sender.tab) {
+    if (panelPort) {
+      try { panelPort.postMessage(msg); } catch {}
+    }
+    return false;
+  }
+
+  // LLM handlers (from side panel or content script)
   if (msg.type === `${FSLACK}:prioritize`) {
     handlePrioritize(msg.data, msg.selfName).then(sendResponse);
     return true; // async response
