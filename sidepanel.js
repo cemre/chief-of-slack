@@ -3390,15 +3390,16 @@ function prioritizeAndRender(data) {
   if (totalItems === 0) {
     // Only noise/dropped/bot — render what we have
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise, digests: preFiltered.digests };
-    // Fast fetch: merge cached channel items
+    // Fast fetch: merge cached channel items (excluding freshly fetched mention channels)
     if (isFastFetch && cachedView?.prioritized) {
       const cached = cachedView.prioritized;
-      const isChannel = (item) => item._type === 'channel';
-      prioritized.actNow.push(...(cached.actNow || []).filter(isChannel));
-      prioritized.priority.push(...(cached.priority || []).filter(isChannel));
-      prioritized.whenFree.push(...(cached.whenFree || []).filter(isChannel));
-      prioritized.noise.push(...(cached.noise || []).filter(isChannel));
-      prioritized.digests.push(...(cached.digests || []).filter(isChannel));
+      const freshChannelIds = new Set((data.channelPosts || []).map(cp => cp.channel_id));
+      const isCachedChannel = (item) => item._type === 'channel' && !freshChannelIds.has(item.channel_id);
+      prioritized.actNow.push(...(cached.actNow || []).filter(isCachedChannel));
+      prioritized.priority.push(...(cached.priority || []).filter(isCachedChannel));
+      prioritized.whenFree.push(...(cached.whenFree || []).filter(isCachedChannel));
+      prioritized.noise.push(...(cached.noise || []).filter(isCachedChannel));
+      prioritized.digests.push(...(cached.digests || []).filter(isCachedChannel));
       if (cachedView.data?.channels) data.channels = { ...cachedView.data.channels, ...data.channels };
       if (cachedView.data?.channelMeta) data.channelMeta = { ...cachedView.data.channelMeta, ...data.channelMeta };
       if (cachedView.data?.users) data.users = { ...cachedView.data.users, ...data.users };
@@ -3477,15 +3478,16 @@ function prioritizeAndRender(data) {
       const prioritized = mapPriorities(mergedPriorities, forLlm, preFiltered.noise, preFiltered.whenFree, data, mergedReasons);
       prioritized.digests = preFiltered.digests;
 
-      // Fast fetch: merge cached channel items from previous full fetch
+      // Fast fetch: merge cached channel items from previous full fetch (excluding freshly fetched mention channels)
       if (isFastFetch && cachedView?.prioritized) {
         const cached = cachedView.prioritized;
-        const isChannel = (item) => item._type === 'channel';
-        prioritized.actNow.push(...(cached.actNow || []).filter(isChannel));
-        prioritized.priority.push(...(cached.priority || []).filter(isChannel));
-        prioritized.whenFree.push(...(cached.whenFree || []).filter(isChannel));
-        prioritized.noise.push(...(cached.noise || []).filter(isChannel));
-        prioritized.digests.push(...(cached.digests || []).filter(isChannel));
+        const freshChannelIds = new Set((data.channelPosts || []).map(cp => cp.channel_id));
+        const isCachedChannel = (item) => item._type === 'channel' && !freshChannelIds.has(item.channel_id);
+        prioritized.actNow.push(...(cached.actNow || []).filter(isCachedChannel));
+        prioritized.priority.push(...(cached.priority || []).filter(isCachedChannel));
+        prioritized.whenFree.push(...(cached.whenFree || []).filter(isCachedChannel));
+        prioritized.noise.push(...(cached.noise || []).filter(isCachedChannel));
+        prioritized.digests.push(...(cached.digests || []).filter(isCachedChannel));
         // Merge cached channel/user maps into data for rendering
         if (cachedView.data?.channels) data.channels = { ...cachedView.data.channels, ...data.channels };
         if (cachedView.data?.channelMeta) data.channelMeta = { ...cachedView.data.channelMeta, ...data.channelMeta };

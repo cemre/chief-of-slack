@@ -39,12 +39,13 @@
     return data;
   }
 
-  async function resolveUsers(userIds, cachedUsers = {}, cachedMentionHints = {}, onProgress) {
+  async function resolveUsers(userIds, cachedUsers = {}, cachedMentionHints = {}, cachedFullNames = {}, onProgress) {
     const users = { ...cachedUsers };
     const mentionHints = { ...cachedMentionHints };
+    const fullNames = { ...cachedFullNames };
     const unique = [...new Set(userIds)].filter(Boolean);
     const idsToFetch = unique.filter((uid) => !users[uid] || !mentionHints[uid]);
-    if (idsToFetch.length === 0) return { users, mentionHints };
+    if (idsToFetch.length === 0) return { users, mentionHints, fullNames };
 
     let done = 0;
     const total = idsToFetch.length;
@@ -65,14 +66,16 @@
       for (const [id, user] of results) {
         if (user) {
           users[id] = user.profile?.display_name || user.name || id;
+          fullNames[id] = user.real_name || user.profile?.real_name_normalized || users[id];
           mentionHints[id] = buildMentionHintsForUser(user);
         } else {
           if (!users[id]) users[id] = id;
+          if (!fullNames[id]) fullNames[id] = users[id];
           if (!mentionHints[id]) mentionHints[id] = [];
         }
       }
     }
-    return { users, mentionHints };
+    return { users, mentionHints, fullNames };
   }
 
   function buildMentionHintsForUser(user = {}) {
@@ -539,10 +542,11 @@
     const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
     const missingProfiles = uniqueUserIds.filter((uid) => !cachedUsers[uid] || !cachedUserMentionHints[uid]).length;
     progress(5, `Resolving ${missingProfiles} user profiles (${uniqueUserIds.length - missingProfiles} cached)...`);
-    const { users, mentionHints } = await resolveUsers(
+    const { users, mentionHints, fullNames } = await resolveUsers(
       allUserIds,
       cachedUsers,
       cachedUserMentionHints,
+      cachedFullNames || {},
       (done, total) => {
         if (total > 0) progress(5, `Resolving users... ${done}/${total}`);
       }
@@ -604,6 +608,7 @@
       dms,
       channelPosts,
       users,
+      fullNames,
       channels,
       channelMeta,
       lastRead,
@@ -613,7 +618,7 @@
     };
   }
 
-  async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
+  async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // Fast mode: only counts + threads + DMs (no channel history)
     progress(1, 'Getting counts + user info...');
     const [counts, { selfId, muted }] = await Promise.all([
@@ -733,7 +738,52 @@
     }
     progress(3, `Done. ${dms.length} DMs.`);
 
-    // 5. Resolve users for threads + DMs only
+    // 4. Fetch channel history for channels with @mentions (critical messages only)
+    const mentionChannels = (counts.channels || [])
+      .filter((c) => c.mention_count > 0 && !muted.has(c.id))
+      .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
+    const channelPosts = [];
+    if (mentionChannels.length > 0) {
+      progress(4, `Fetching ${mentionChannels.length} channels with mentions...`);
+      await Promise.all(
+        mentionChannels.map(async (ch) => {
+          try {
+            const hist = await slackApi('conversations.history', {
+              channel: ch.id,
+              oldest: ch.last_read,
+              limit: '20',
+            });
+            const msgs = (hist.messages || [])
+              .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))
+              .filter((m) => m.user !== selfId)
+              .map((m) => ({
+                user: m.user,
+                text: extractText(m),
+                fwd: extractFwd(m),
+                ts: m.ts,
+                thread_ts: m.thread_ts || null,
+                subtype: m.subtype,
+                bot_id: m.bot_id,
+                reply_count: m.reply_count || 0,
+                reply_users: m.reply_users || [],
+                files: extractFiles(m),
+              }));
+            if (msgs.length > 0) {
+              channelPosts.push({
+                channel_id: ch.id,
+                mention_count: ch.mention_count,
+                messages: msgs,
+                sort_ts: msgs[0]?.ts || '0',
+              });
+            }
+          } catch { /* skip failed channels */ }
+        })
+      );
+      channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+      progress(4, `Done. ${channelPosts.length} channels with mentions fetched.`);
+    }
+
+    // 5. Resolve users for threads + DMs + mention channels
     const allUserIds = [];
     const mentionedChannelIds = [];
     function collectMentions(text) {
@@ -755,14 +805,21 @@
         collectMentions(m.text);
       });
     });
+    channelPosts.forEach((cp) => {
+      cp.messages.forEach((m) => {
+        if (m.user) allUserIds.push(m.user);
+        collectMentions(m.text);
+        (m.reply_users || []).forEach((uid) => allUserIds.push(uid));
+      });
+    });
     const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
     const missingProfiles = uniqueUserIds.filter((uid) => !cachedUsers[uid] || !cachedUserMentionHints[uid]).length;
     progress(5, `Resolving ${missingProfiles} user profiles (${uniqueUserIds.length - missingProfiles} cached)...`);
-    const { users, mentionHints } = await resolveUsers(allUserIds, cachedUsers, cachedUserMentionHints);
+    const { users, mentionHints, fullNames } = await resolveUsers(allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {});
     progress(5, `Done. ${Object.keys(users).length} users resolved.`);
 
-    // 6. Channel names for threads only (no channel posts)
-    const allChannelIds = [...threads.map((t) => t.channel_id), ...mentionedChannelIds];
+    // 6. Channel names for threads + mention channels
+    const allChannelIds = [...threads.map((t) => t.channel_id), ...channelPosts.map((cp) => cp.channel_id), ...mentionedChannelIds];
     const channelIds = [...new Set(allChannelIds.filter(Boolean))];
     const channels = { ...cachedChannels };
     const channelMeta = { ...cachedChannelMeta };
@@ -799,8 +856,9 @@
       threadUnreads: counts.threads,
       threads,
       dms,
-      channelPosts: [],
+      channelPosts,
       users,
+      fullNames,
       channels,
       channelMeta,
       lastRead,
