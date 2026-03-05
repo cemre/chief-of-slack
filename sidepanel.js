@@ -152,14 +152,20 @@ let knownDmChannelIds = new Set(); // DM channels already in the current render
 let mutedThreadKeys = new Set();   // Set of "channel:threadTs" strings for muted threads
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
-chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers', 'fslackUserMentionHints'], (cached) => {
+const USERS_CACHE_VERSION = 2; // bump to invalidate stale user name cache
+chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers', 'fslackUserMentionHints', 'fslackUsersCacheVersion'], (cached) => {
   const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
   if (cached.fslackEmoji && cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS) {
     customEmojiMap = cached.fslackEmoji;
   }
   if (cached.fslackChannels) channelNameMap = cached.fslackChannels;
-  if (cached.fslackUsers) mergeCachedUsers(cached.fslackUsers);
-  if (cached.fslackUserMentionHints) mergeCachedMentionHints(cached.fslackUserMentionHints, { replace: true });
+  if (cached.fslackUsersCacheVersion === USERS_CACHE_VERSION) {
+    if (cached.fslackUsers) mergeCachedUsers(cached.fslackUsers);
+    if (cached.fslackUserMentionHints) mergeCachedMentionHints(cached.fslackUserMentionHints, { replace: true });
+  } else {
+    chrome.storage.local.remove(['fslackUsers', 'fslackUserMentionHints']);
+    chrome.storage.local.set({ fslackUsersCacheVersion: USERS_CACHE_VERSION });
+  }
 });
 
 // Load standard emoji map (bundled JSON) async
@@ -1067,8 +1073,9 @@ function renderThreadItem(t, data, cssClass) {
     html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
   }
   html += reasonBadge(t, cssClass);
-  const rootSeenClass = seenCount > 0 ? ' root-seen' : '';
-  const needsRootSummary = seenCount > 0 && (t.root_text || '').length > 300;
+  const isRootFromSelf = t.root_user === data.selfId;
+  const rootSeenClass = (seenCount > 0 || isRootFromSelf) ? ' root-seen' : '';
+  const needsRootSummary = (seenCount > 0 || isRootFromSelf) && (t.root_text || '').length > 300;
   let rootContentHtml;
   if (needsRootSummary && t._rootSummary) {
     rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span class="root-summary">${escapeHtml(t._rootSummary)}</span>${msgTime(t.ts, t.channel_id)}`;
