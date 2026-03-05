@@ -21,7 +21,7 @@ chrome.runtime.onConnect.addListener((port) => {
     const tabId = await getSlackTabId();
     console.log(`[fslack bg] panel→content: ${msg.type}, tabId=${tabId}`);
     if (!tabId) return;
-    chrome.tabs.sendMessage(tabId, msg).catch((e) => console.warn(`[fslack bg] sendMessage failed: ${e.message}`));
+    chrome.tabs.sendMessage(tabId, msg).catch(() => injectAndRetry(tabId, msg));
   });
 
   port.onDisconnect.addListener(() => {
@@ -44,6 +44,20 @@ const LLM_TYPES = new Set([
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
 ]);
+
+// ── Inject content script if missing, then retry the message ──
+async function injectAndRetry(tabId, msg) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js'],
+    });
+    console.log(`[fslack bg] injected content.js into tab ${tabId}`);
+    await chrome.tabs.sendMessage(tabId, msg);
+  } catch (e) {
+    console.warn(`[fslack bg] inject+retry failed: ${e.message}`);
+  }
+}
 
 // ── Track active Slack tab ──
 async function getSlackTabId() {
@@ -107,14 +121,14 @@ IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, cl
 ITEMS:
 ${serialized}
 
-For every act_now or priority item, and any item where the user is @mentioned,
-provide a terse reason (under 10 words, lowercase, no period) as
-"[person] [verb] [thing]" — e.g. "josh asked you to confirm the deploy",
-"brahm is blocked on your review", "thibault shared the report you requested".
-Always describe the specific action/ask, even for DMs and @mentions.
-Collect these in a "_reasons" key mapping item IDs to reason strings.
+For EVERY item, respond with a [category, summary] pair. The summary is a terse
+description (under 10 words, lowercase, no period) as "[person] [verb] [thing]" —
+e.g. ["act_now", "josh asked you to confirm the deploy"],
+["priority", "rosey asks you to come to bug bash"],
+["noise", "brahm shared windows alpha status update"].
+The summary must justify the category — if you can't describe someone waiting on me, it's not act_now.
 
-Respond with ONLY a JSON object mapping each item's "id" to its category, plus a "_noiseOrder" key (array of noise/drop IDs sorted by work-relevance) and a "_reasons" key (map of act_now/priority IDs to reason strings). No explanation, no markdown fences, just the JSON object.`;
+Respond with ONLY a JSON object mapping each item's "id" to its [category, summary] pair, plus a "_noiseOrder" key (array of noise/drop IDs sorted by work-relevance). No explanation, no markdown fences, just the JSON object.`;
 }
 
 // ── Retry wrapper for transient API errors (429/529) ──
@@ -170,9 +184,19 @@ async function handlePrioritize(payload, selfName) {
       const parsed = JSON.parse(jsonMatch[0]);
       const noiseOrder = Array.isArray(parsed._noiseOrder) ? parsed._noiseOrder : [];
       delete parsed._noiseOrder;
-      const reasons = (parsed._reasons && typeof parsed._reasons === 'object') ? parsed._reasons : {};
-      delete parsed._reasons;
-      return { priorities: parsed, noiseOrder, reasons };
+      // Support both [category, summary] pairs and legacy flat format
+      const priorities = {};
+      const reasons = {};
+      for (const [key, val] of Object.entries(parsed)) {
+        if (Array.isArray(val) && val.length >= 2) {
+          priorities[key] = val[0];
+          reasons[key] = val[1];
+        } else {
+          priorities[key] = val; // legacy: plain category string
+        }
+      }
+      console.log('[fslack bg] LLM response:', JSON.stringify({ priorities, reasons }, null, 2));
+      return { priorities, noiseOrder, reasons };
     }
     return { error: 'parse_error', raw: text };
   } catch (err) {
