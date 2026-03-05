@@ -39,6 +39,7 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeVip`,
   `${FSLACK}:summarizeBotThread`,
   `${FSLACK}:summarizeThreadReplies`,
+  `${FSLACK}:summarizeFullThread`,
   `${FSLACK}:summarizeRoot`,
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
@@ -371,6 +372,62 @@ async function handleThreadReplySummarize(item) {
   }
 }
 
+// ── Build full-thread bullet-point summarization prompt ──
+function buildFullThreadSummarizePrompt(item) {
+  const serialized = JSON.stringify(item.replies, null, 0);
+  return `You are summarizing a Slack thread for Cemre (also known as "gem"), a Head of Product Management & Insights.
+
+Summarize the ENTIRE thread (root message + replies) as terse bullet points.
+Each bullet: "- [FirstName] [verb] [specific thing]"
+Use first names only. Be concrete — name the artifact, question, or decision, not a vague category.
+Combine multiple small messages from the same person into one bullet when possible.
+Maximum 5 bullets. Fewer is better if the thread is short.
+
+Channel: #${item.channel}
+
+ROOT MESSAGE by ${item.rootUser}: ${item.rootText}
+
+REPLIES:
+${serialized}
+
+Respond with ONLY a JSON object: {"summary": "- bullet1\\n- bullet2\\n..."}
+No markdown fences, no explanation.`;
+}
+
+// ── Call Claude API for full-thread bullet summarization ──
+async function handleFullThreadSummarize(item) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  try {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: buildFullThreadSummarizePrompt(item) }],
+      }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Build bot thread summarization prompt ──
 function buildBotThreadPrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
@@ -506,6 +563,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeThreadReplies`) {
     handleThreadReplySummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:summarizeFullThread`) {
+    handleFullThreadSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:summarizeRoot`) {

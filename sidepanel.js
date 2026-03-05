@@ -129,6 +129,34 @@ function navigateSlack(channel, ts) {
   sendToInject({ type: `${FSLACK}:navigate`, channel, ts });
 }
 
+// ── Debug (temporary) ──
+window._fslackDebug = function(channelId) {
+  const cid = channelId || 'C093Q028BPF'; // dia-release-leads
+  if (!cachedView) { console.log('[debug] no cached view'); return; }
+  const d = cachedView.data || {};
+  const p = cachedView.prioritized || {};
+  const info = {
+    selfId: d.selfId,
+    channelName: (d.channels || {})[cid],
+    channelMeta: (d.channelMeta || {})[cid],
+    inNoiseChannels: !!noiseChannels[cid],
+    inDigestChannels: !!digestChannels[cid],
+    inNeverNoiseChannels: !!neverNoiseChannels[cid],
+    rawChannelPost: (d.channelPosts || []).find(cp => cp.channel_id === cid),
+    rawThread: (d.threads || []).find(t => t.channel_id === cid),
+    inActNow: (p.actNow || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId, _reason: i._reason })),
+    inPriority: (p.priority || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId, _reason: i._reason })),
+    inWhenFree: (p.whenFree || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId })),
+    inNoise: (p.noise || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId })),
+    inDigests: (p.digests || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId })),
+    preFilterLog: window._preFilterLog?.[cid] || 'no log',
+  };
+  const json = JSON.stringify(info, null, 2);
+  navigator.clipboard.writeText(json).then(() => console.log('[debug] copied to clipboard'));
+  console.log('[debug]', json);
+  return info;
+};
+
 // ── State ──
 let cachedView = null; // { data, popular, prioritized, ts }
 let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
@@ -142,6 +170,7 @@ let customEmojiMap = null;
 let standardEmojiMap = null;
 let channelNameMap = {};
 let cachedUserMap = {};
+let cachedFullNameMap = {};
 let cachedUserMentionHints = {};
 let reactionRequestCounter = 0;
 const pendingReactButtons = {};
@@ -220,7 +249,7 @@ function muteThreadLocally(channel, threadTs) {
   removeCachedItem(channel, threadTs);
 }
 function loadCachedPrefs(callback) {
-  chrome.storage.local.get(['fslackUsers', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
     digestChannels = cached.fslackDigestChannels || {};
@@ -228,12 +257,14 @@ function loadCachedPrefs(callback) {
     vipSeenTimestamps = cached.fslackVipSeen || {};
     mutedThreadKeys = new Set(cached.fslackMutedThreads || []);
     mergeCachedUsers(cached.fslackUsers || {});
+    mergeCachedFullNames(cached.fslackFullNames || {});
     mergeCachedMentionHints(cached.fslackUserMentionHints || {}, { replace: true });
     const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
     const cachedEmoji = (cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS)
       ? (cached.fslackEmoji || {}) : null;
     callback({
       cachedUsers: cached.fslackUsers || {},
+      cachedFullNames: cached.fslackFullNames || {},
       cachedUserMentionHints: cached.fslackUserMentionHints || {},
       cachedChannels: cached.fslackChannels || {},
       cachedChannelMeta: cached.fslackChannelMeta || {},
@@ -1077,29 +1108,38 @@ function renderThreadItem(t, data, cssClass) {
   html += `</div>`;
   html += reasonBadge(t, cssClass);
   const isRootFromSelf = t.root_user === data.selfId;
-  const rootSeenClass = (seenCount > 0 || isRootFromSelf) ? ' root-seen' : '';
-  const needsRootSummary = (seenCount > 0 || isRootFromSelf) && (t.root_text || '').length > 300;
-  let rootContentHtml;
-  if (needsRootSummary && t._rootSummary) {
-    rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span class="root-summary">${escapeHtml(t._rootSummary)}</span>${msgTime(t.ts, t.channel_id)}`;
-  } else if (needsRootSummary) {
-    const rootSummaryKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
-    const _rtid = truncateId;
-    const rootTextHtml = truncate(t.root_text, 400, data.users);
-    const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
-    rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span id="${rootSummaryKey}" class="root-summary-pending">${rootTextHtml}${rootExtras}</span>${msgTime(t.ts, t.channel_id)}`;
-  } else {
-    const _rtid = truncateId;
-    const rootTextHtml = truncate(t.root_text, 400, data.users);
-    const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
-    rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${rootTextHtml}${rootExtras}${msgTime(t.ts, t.channel_id)}`;
-  }
-  html += `<div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${msgActions(t.channel_id, t.ts)}</div>`;
-  // Thread reply summarization for non-DM threads that meet summary criteria
   const shouldSummarize = threadNeedsSummary(t);
   const threadKey = shouldSummarize ? `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}` : '';
   const repliesMsgId = shouldSummarize ? `${threadKey}-replies` : '';
+
+  // When full-thread summary is active, replace root content with bullet summary
+  let rootContentHtml;
+  let rootSeenClass = '';
+  if (shouldSummarize && t._fullThreadSummary) {
+    const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim());
+    rootContentHtml = `<div class="deep-summary" style="margin:2px 0">${bullets.map(b => escapeHtml(b)).join('<br>')}</div>${msgTime(t.ts, t.channel_id)}`;
+  } else if (shouldSummarize && !t._fullThreadSummary) {
+    rootContentHtml = `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:2px 0">Summarizing thread...</div>${msgTime(t.ts, t.channel_id)}`;
+  } else {
+    rootSeenClass = (seenCount > 0 || isRootFromSelf) ? ' root-seen' : '';
+    const needsRootSummary = (seenCount > 0 || isRootFromSelf) && (t.root_text || '').length > 300;
+    if (needsRootSummary && t._rootSummary) {
+      rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span class="root-summary">${escapeHtml(t._rootSummary)}</span>${msgTime(t.ts, t.channel_id)}`;
+    } else if (needsRootSummary) {
+      const rootSummaryKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
+      const _rtid = truncateId;
+      const rootTextHtml = truncate(t.root_text, 400, data.users);
+      const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+      rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span id="${rootSummaryKey}" class="root-summary-pending">${rootTextHtml}${rootExtras}</span>${msgTime(t.ts, t.channel_id)}`;
+    } else {
+      const _rtid = truncateId;
+      const rootTextHtml = truncate(t.root_text, 400, data.users);
+      const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+      rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${rootTextHtml}${rootExtras}${msgTime(t.ts, t.channel_id)}`;
+    }
+  }
+  html += `<div class="item-right">
+      <div class="msg-row"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${msgActions(t.channel_id, t.ts)}</div>`;
 
   html += '<div class="thread-replies-container">';
   if (seenCount > 0) {
@@ -1109,13 +1149,7 @@ function renderThreadItem(t, data, cssClass) {
   }
 
   if (shouldSummarize) {
-    if (t._threadSummary) {
-      html += `<div class="msg-row"><div class="msg-content"><div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(t._threadSummary)}</div></div></div>`;
-      html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
-    } else {
-      html += `<div class="msg-row"><div class="msg-content"><div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies...</div></div></div>`;
-      html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
-    }
+    html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
     html += `<div class="deep-messages" id="${repliesMsgId}">`;
   }
 
@@ -1401,6 +1435,7 @@ function containsSelfMention(text, selfId) {
 function applyPreFilters(data) {
   const { selfId, threads, dms, channelPosts, channels, users } = data;
   const meta = data.channelMeta || {};
+  window._preFilterLog = {}; // debug: track routing decisions
 
   const noise = [];
   const whenFree = [];
@@ -1519,6 +1554,10 @@ function applyPreFilters(data) {
     const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
     cp._isMentioned = containsSelfMention(allCpTexts, selfId);
 
+    // Debug: log routing for every channel post
+    const _dbgCh = channels[cp.channel_id] || cp.channel_id;
+    const _dbgLog = (route) => { window._preFilterLog[cp.channel_id] = { channel: _dbgCh, route, _isMentioned: cp._isMentioned, mention_count: cp.mention_count, msgCount: cp.messages.length, selfId, textSnippet: allCpTexts.slice(0, 200) }; };
+
     // Dedup: if every message in this channel post is already a thread root, skip it
     // but carry over mention_count and _isMentioned to the thread
     const cpMsgsInThreads = cp.messages.filter((m) => threadRootKeys.has(`${cp.channel_id}:${m.ts}`));
@@ -1530,6 +1569,7 @@ function applyPreFilters(data) {
           if (cp._isMentioned) t._isMentioned = true;
         }
       }
+      _dbgLog('dedup-to-thread');
       continue;
     }
 
@@ -1549,21 +1589,25 @@ function applyPreFilters(data) {
       if (coldMsgs.length > 0) {
         noise.push({ ...cp, messages: coldMsgs, _type: 'channel' });
       }
+      _dbgLog('diaChannelNames');
       continue;
     }
 
     // User-marked digest channels
     if (digestChannels[cp.channel_id]) {
+      _dbgLog('digestChannel');
       routeToDigest(cp);
       continue;
     }
 
     // Persistent channel preferences — bypass LLM entirely
     if (noiseChannels[cp.channel_id]) {
+      _dbgLog('noiseChannel');
       noise.push(cp);
       continue;
     }
     if (neverNoiseChannels[cp.channel_id]) {
+      _dbgLog('neverNoiseChannel');
       whenFree.push(cp);
       continue;
     }
@@ -1571,10 +1615,12 @@ function applyPreFilters(data) {
     // All-bot messages → digest (deep analysis only for 4+)
     if (cp.messages.every(isBot)) {
       if (cp.messages.length >= 4) cp._deepAnalysis = true;
+      _dbgLog('allBot');
       routeToDigest(cp);
       continue;
     }
 
+    _dbgLog('forLlm');
     forLlm.channelPosts.push(cp);
   }
 
@@ -1614,11 +1660,11 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       channel: ch,
       isPrivate: meta[t.channel_id]?.isPrivate || false,
       isMentioned: t._isMentioned || false,
-      rootUser: uname(t.root_user, data.users),
+      rootUser: fullName(t.root_user, data.fullNames),
       rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 1000, data.users),
       userReplied: t._userReplied,
       newReplies: t.unread_replies.map((r) => ({
-        user: uname(r.user, data.users),
+        user: fullName(r.user, data.fullNames),
         text: plainTruncate(textWithFwd(r.text, r.fwd), 1000, data.users),
       })),
     };
@@ -1626,7 +1672,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       const readReplies = t.full_replies.filter((r) => !r.is_unread);
       if (readReplies.length > 0) {
         item.recentContext = readReplies.map((r) => ({
-          user: uname(r.user, data.users),
+          user: fullName(r.user, data.fullNames),
           text: plainTruncate(r.text, 500, data.users),
         }));
       }
@@ -1637,14 +1683,14 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
   for (let i = 0; i < forLlm.dms.length; i++) {
     const dm = forLlm.dms[i];
     const participantIds = (dm.members || []).filter((uid) => uid && uid !== data.selfId);
-    const participantNames = [...new Set(participantIds.map((uid) => uname(uid, data.users)))].filter(Boolean);
+    const participantNames = [...new Set(participantIds.map((uid) => fullName(uid, data.fullNames)))].filter(Boolean);
     items.push({
       id: `dm_${i}`,
       type: 'dm',
       isGroup: !!dm.isGroup,
       participants: participantNames,
       messages: dm.messages.map((m) => ({
-        user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
+        user: m.subtype === 'bot_message' ? 'Bot' : fullName(m.user, data.fullNames),
         text: plainTruncate(textWithFwd(m.text, m.fwd), 1000, data.users),
       })),
     });
@@ -1661,7 +1707,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       isMentioned: cp._isMentioned || false,
       mentionCount: cp.mention_count || 0,
       messages: cp.messages.map((m) => ({
-        user: m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users),
+        user: m.subtype === 'bot_message' ? 'Bot' : fullName(m.user, data.fullNames),
         text: plainTruncate(textWithFwd(m.text, m.fwd), 1000, data.users),
       })),
     });
@@ -2030,6 +2076,17 @@ function mergeCachedUsers(users) {
     changed = true;
   }
   if (changed) mentionLookupDirty = true;
+}
+
+function mergeCachedFullNames(names) {
+  if (!names) return;
+  for (const [uid, name] of Object.entries(names)) {
+    if (uid && name) cachedFullNameMap[uid] = name;
+  }
+}
+
+function fullName(uid, fullNames) {
+  return fullNames?.[uid] || cachedFullNameMap[uid] || cachedUserMap[uid] || uid;
 }
 
 function mergeCachedMentionHints(hints, { replace = false } = {}) {
@@ -3120,7 +3177,7 @@ function runBotThreadSummarization(whenFreeItems, data) {
 
 // ── Async thread reply summarization (non-DM threads meeting summary criteria) ──
 function runThreadReplySummarization(allItems, data) {
-  const threads = allItems.filter((item) => item._type === 'thread' && !item._threadSummary && threadNeedsSummary(item));
+  const threads = allItems.filter((item) => item._type === 'thread' && !item._fullThreadSummary && threadNeedsSummary(item));
   if (threads.length === 0) return;
 
   const MAX_PAYLOAD_BYTES = 3000;
@@ -3132,7 +3189,7 @@ function runThreadReplySummarization(allItems, data) {
       const replies = [];
       let bytes = 0;
       for (const r of unread) {
-        const entry = { user: uname(r.user, data.users), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
+        const entry = { user: fullName(r.user, data.fullNames), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
         const s = JSON.stringify(entry);
         if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
         bytes += s.length;
@@ -3143,23 +3200,24 @@ function runThreadReplySummarization(allItems, data) {
       try {
         response = await new Promise((resolve) =>
           chrome.runtime.sendMessage({
-            type: `${FSLACK}:summarizeThreadReplies`,
-            data: { channel: ch, rootUser: uname(t.root_user, data.users), rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 400, data.users), replies }
+            type: `${FSLACK}:summarizeFullThread`,
+            data: { channel: ch, rootUser: fullName(t.root_user, data.fullNames), rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 400, data.users), replies }
           }, resolve)
         );
       } catch { continue; }
       if (!response?.summary?.summary) continue;
 
-      t._threadSummary = response.summary.summary;
+      t._fullThreadSummary = response.summary.summary;
       const threadKey = `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
       const loadingEl = document.getElementById(`${threadKey}-loading`);
       if (!loadingEl) continue;
 
-      // Replace loading text with summary
+      // Replace loading text with bullet summary in the root content area
+      const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim());
       const summaryEl = document.createElement('div');
       summaryEl.className = 'deep-summary';
-      summaryEl.style.cssText = 'margin:6px 0 2px';
-      summaryEl.textContent = t._threadSummary;
+      summaryEl.style.cssText = 'margin:2px 0';
+      summaryEl.innerHTML = bullets.map(b => escapeHtml(b)).join('<br>');
       loadingEl.replaceWith(summaryEl);
     }
   })();
@@ -3169,6 +3227,7 @@ function runRootSummarization(allItems, data) {
   const threads = allItems.filter((item) => {
     if (item._type !== 'thread') return false;
     if (item._rootSummary) return false;
+    if (threadNeedsSummary(item)) return false; // full-thread summary covers root
     const seenCount = Math.max(0, (item.reply_count || 0) - (item.unread_replies || []).length);
     return seenCount > 0 && (item.root_text || '').length > 300;
   });
@@ -3182,7 +3241,7 @@ function runRootSummarization(allItems, data) {
         response = await new Promise((resolve) =>
           chrome.runtime.sendMessage({
             type: `${FSLACK}:summarizeRoot`,
-            data: { channel: ch, user: uname(t.root_user, data.users), text: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 800, data.users) }
+            data: { channel: ch, user: fullName(t.root_user, data.fullNames), text: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 800, data.users) }
           }, resolve)
         );
       } catch { continue; }
@@ -3255,7 +3314,7 @@ function runChannelThreadSummarization(allItems, data) {
       const replies = [];
       let bytes = 0;
       for (const r of rawReplies) {
-        const entry = { user: uname(r.user, data.users), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
+        const entry = { user: fullName(r.user, data.fullNames), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
         const s = JSON.stringify(entry);
         if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
         bytes += s.length;
@@ -3267,7 +3326,7 @@ function runChannelThreadSummarization(allItems, data) {
         response = await new Promise((resolve) =>
           chrome.runtime.sendMessage({
             type: `${FSLACK}:summarizeThreadReplies`,
-            data: { channel: ch, rootUser: uname(m.user, data.users), rootText: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users), replies }
+            data: { channel: ch, rootUser: fullName(m.user, data.fullNames), rootText: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users), replies }
           }, resolve)
         );
       } catch (err) { console.error(`[chThreadSumm] sendMessage error for key=${key}`, err); return; }
@@ -3995,6 +4054,10 @@ function handlePortMessage(msg) {
         mergeCachedUsers(msg.data.users);
         toStore.fslackUsers = cachedUserMap;
       }
+      if (msg.data.fullNames) {
+        mergeCachedFullNames(msg.data.fullNames);
+        toStore.fslackFullNames = cachedFullNameMap;
+      }
       if (msg.data.userMentionHints) {
         mergeCachedMentionHints(msg.data.userMentionHints);
         toStore.fslackUserMentionHints = cachedUserMentionHints;
@@ -4021,6 +4084,10 @@ function handlePortMessage(msg) {
       if (msg.data.users) {
         mergeCachedUsers(msg.data.users);
         toStore.fslackUsers = cachedUserMap;
+      }
+      if (msg.data.fullNames) {
+        mergeCachedFullNames(msg.data.fullNames);
+        toStore.fslackFullNames = cachedFullNameMap;
       }
       if (msg.data.userMentionHints) {
         mergeCachedMentionHints(msg.data.userMentionHints);
