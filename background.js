@@ -104,9 +104,10 @@ IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, cl
 ITEMS:
 ${serialized}
 
-For every act_now or priority item, also provide a terse reason (under 10 words,
-lowercase, no period) as "[person] [verb] [thing]" — e.g. "josh asked you to confirm
-the deploy", "brahm is blocked on your review", "ori asked you to read the RFC".
+For every act_now or priority item, and any item where the user is @mentioned,
+provide a terse reason (under 10 words, lowercase, no period) as
+"[person] [verb] [thing]" — e.g. "josh asked you to confirm the deploy",
+"brahm is blocked on your review", "thibault shared the report you requested".
 Always describe the specific action/ask, even for DMs and @mentions.
 Collect these in a "_reasons" key mapping item IDs to reason strings.
 
@@ -318,14 +319,14 @@ function buildThreadReplySummarizePrompt(item) {
   const serialized = JSON.stringify(item.replies, null, 0);
   return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
 
-A thread in #${item.channel} has new unread replies. The original message and replies are below.
+A thread in #${item.channel} has new unread replies. The original post is shown below for context only — the user can already see it, so do NOT repeat or restate it.
 
-Summarize the unread replies in 1-2 terse sentences. Focus on:
-- What was discussed or decided
+Summarize ONLY what's new in the unread replies in 1-2 terse sentences. Focus on:
+- What new information, decisions, or actions came from the replies
 - Key points from different people (use first names)
-- Current status if relevant
+- Do NOT restate what the original post said or asked
 
-ORIGINAL POST by ${item.rootUser}: ${item.rootText}
+ORIGINAL POST (already visible, for context only) by ${item.rootUser}: ${item.rootText}
 
 UNREAD REPLIES:
 ${serialized}

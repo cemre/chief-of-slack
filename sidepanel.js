@@ -1046,7 +1046,7 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise 
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
-  return ` <span class="item-sep">·</span> <span class="item-reason ${cls}">${escapeHtml(item._reason)}</span>`;
+  return `<div class="item-reason ${cls}">${escapeHtml(item._reason)}</div>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -1072,6 +1072,7 @@ function renderThreadItem(t, data, cssClass) {
   if (!t._mentionInReplies && t.mention_count > 0) {
     html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
   }
+  html += `</div>`;
   html += reasonBadge(t, cssClass);
   const isRootFromSelf = t.root_user === data.selfId;
   const rootSeenClass = (seenCount > 0 || isRootFromSelf) ? ' root-seen' : '';
@@ -1091,8 +1092,7 @@ function renderThreadItem(t, data, cssClass) {
     const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
     rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${rootTextHtml}${rootExtras}${msgTime(t.ts, t.channel_id)}`;
   }
-  html += `</div>
-    <div class="item-right">
+  html += `<div class="item-right">
       <div class="msg-row"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${msgActions(t.channel_id, t.ts)}</div>`;
   // Thread reply summarization for non-DM threads that meet summary criteria
   const shouldSummarize = threadNeedsSummary(t);
@@ -1162,8 +1162,8 @@ function renderDmItem(dm, data, cssClass) {
   const partner = dmPartnerName(dm, data);
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      ${channelLink(escapeHtml(partner), dm.channel_id)} <span class="item-sep">·</span> ${itemTime(latest.ts, dm.channel_id)}${reasonBadge(dm, cssClass)}
-    </div>
+      ${channelLink(escapeHtml(partner), dm.channel_id)} <span class="item-sep">·</span> ${itemTime(latest.ts, dm.channel_id)}
+    </div>${reasonBadge(dm, cssClass)}
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
     const sender = dm.isGroup ? `${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), dm.channel_id, m.ts)} ` : '';
@@ -1209,14 +1209,14 @@ function renderChannelItem(cp, data, cssClass) {
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
       ${channelLink('#' + escapeHtml(ch), cp.channel_id)} <span class="item-sep">·</span> ${itemTime(latest?.ts, cp.channel_id)}`;
-  html += reasonBadge(cp, cssClass);
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
     const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
     html += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
   }
-  html += `</div>
-    <div class="item-right">`;
+  html += `</div>`;
+  html += reasonBadge(cp, cssClass);
+  html += `<div class="item-right">`;
   if (cp._summary) {
     const zendesk = extractZendeskSummary(cp._summary);
     const summaryMsg = cp.messages[0];
