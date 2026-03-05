@@ -122,7 +122,6 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 
 const closeBtn = document.getElementById('close-btn');
 document.getElementById('refresh-link').addEventListener('click', startFetch);
-document.getElementById('full-refresh-link').addEventListener('click', startFullFetch);
 
 
 // ── In-place Slack navigation (via relay to inject.js) ──
@@ -1060,9 +1059,7 @@ function renderThreadItem(t, data, cssClass) {
     <div class="item-left">
       ${channelLink(channelLabel, t.channel_id)}
       ${itemTime(markAllTs, t.channel_id)}`;
-  if (t._mentionInReplies) {
-    html += `<div class="item-mention">@mentioned</div>`;
-  } else if (t.mention_count > 0 || t._isMentioned) {
+  if (!t._mentionInReplies && t.mention_count > 0) {
     html += `<div class="item-mention">replies to @mention</div>`;
   }
   html += reasonBadge(t, cssClass);
@@ -1742,7 +1739,14 @@ function sortNoiseItems(items, noiseOrder = []) {
   });
 }
 
-function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], deepDigestsLoading = false) {
+function cacheDivider(ts) {
+  if (!ts) return '';
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  const label = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+  return `<div class="cache-divider"><span class="cache-divider-label">cached ${label}</span><span class="cache-divider-refresh" id="cache-divider-refresh">refresh</span></div>`;
+}
+
+function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], deepDigestsLoading = false, cachedTs = null) {
   const { actNow, priority, whenFree, noise } = prioritized;
   const digests = prioritized.digests || [];
   let html = '';
@@ -1771,6 +1775,9 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += `<div class="noise-section-footer"><button id="priority-mark-read-btn">Mark all priority as read</button></div>`;
     html += '</section>';
   }
+
+  // Cache divider — shown once before the cached sections on fast fetch
+  html += cacheDivider(cachedTs);
 
   // When You Have a Moment (collapsed by default)
   if (whenFree.length > 0) {
@@ -1885,6 +1892,10 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older Noise');
   wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'Saved');
   wireNoiseToggle('digests-toggle', 'digest-items', 'Digests');
+
+  // Wire cache divider refresh button
+  const cacheDivRefresh = document.getElementById('cache-divider-refresh');
+  if (cacheDivRefresh) cacheDivRefresh.addEventListener('click', startFullFetch);
 }
 
 // ── New DM watcher — polls for DMs that arrive after initial fetch ──
@@ -3245,7 +3256,7 @@ function prioritizeAndRender(data) {
       if (cachedView.data?.channelMeta) data.channelMeta = { ...cachedView.data.channelMeta, ...data.channelMeta };
       if (cachedView.data?.users) data.users = { ...cachedView.data.users, ...data.users };
     }
-    renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
+    renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || [], false, isFastFetch && cachedView ? cachedView.ts : null);
     runBotThreadSummarization(prioritized.whenFree, data);
     const allElevatedEarly = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
     runThreadReplySummarization(allElevatedEarly, data);
@@ -3347,7 +3358,7 @@ function prioritizeAndRender(data) {
 
       // Fast fetch: skip deep noise summarization (channel data is from cache, already summarized)
       if (isFastFetch) {
-        renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
+        renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || [], false, cachedView ? cachedView.ts : null);
         runBotThreadSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);
         runChannelThreadSummarization(allElevated, data);

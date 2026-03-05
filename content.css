@@ -276,6 +276,24 @@ ul.slack-list, ol.slack-list {
   margin: 0;
 }
 .section-toggle:hover { color: #fff; }
+.cache-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px 4px;
+  border-top: 1px solid #363940;
+  margin-top: 4px;
+}
+.cache-divider-label {
+  font-size: 11px;
+  color: #616061;
+}
+.cache-divider-refresh {
+  font-size: 11px;
+  color: #1d9bd1;
+  cursor: pointer;
+}
+.cache-divider-refresh:hover { text-decoration: underline; }
 .priority-badge {
   display: inline-block;
   font-size: 10px;
