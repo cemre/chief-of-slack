@@ -1854,7 +1854,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Act Now + Priority
   if (actNow.length > 0 || (priority && priority.length > 0)) {
     html += '<section class="priority-section">';
-    html += '<h2>Priority</h2>';
+    html += '<h2 class="priority-header">Priority</h2>';
     for (const item of actNow) html += renderAnyItem(item, data, 'act-now');
     for (const item of (priority || [])) html += renderAnyItem(item, data, 'priority-item');
     if (priority && priority.length > 0) {
@@ -2038,53 +2038,46 @@ function insertNewDm(dm, data) {
   // Skip all-bot DMs — they'd go to whenFree in a full fetch
   if (dm.messages.every((m) => m.bot_id || m.subtype === 'bot_message')) return;
 
-  // Determine priority: VIP → act_now, else → priority
-  const senders = (dm.messages || []).map((m) => uname(m.user, data.users).toLowerCase());
-  const isVip = senders.some((s) => VIPS.includes(s));
-  const section = isVip ? 'act-now' : 'priority-item';
-  const sectionHeader = isVip ? 'Act Now' : 'Priority';
+  // Ensure a reason badge so the collapsed item isn't invisible
+  if (!dm._reason) {
+    const partner = dmPartnerName(dm, data);
+    dm._reason = `${partner} DM'd you`;
+  }
 
-  const itemHtml = renderDmItem(dm, data, section);
+  // All live DMs go into the Priority section at the top
+  const itemHtml = renderDmItem(dm, data, 'priority-item');
   if (!itemHtml) return;
 
-  // Wrap in a container for the fade-in animation
   const wrapper = document.createElement('div');
   wrapper.classList.add('dm-watch-new');
   wrapper.innerHTML = itemHtml;
 
-  // Find or create the target section
-  const headerClass = isVip ? 'act-now' : 'priority-header';
-  let sectionEl = document.querySelector(`h2.${headerClass}`)?.closest('.priority-section');
+  // Find existing Priority section, or create one
+  let sectionEl = document.querySelector('h2.priority-header')?.closest('.priority-section');
   if (!sectionEl) {
-    // Create the section and insert at the top of bodyEl
     sectionEl = document.createElement('section');
     sectionEl.className = 'priority-section';
     const h2 = document.createElement('h2');
-    h2.className = headerClass;
-    h2.textContent = sectionHeader;
+    h2.className = 'priority-header';
+    h2.textContent = 'Priority';
     sectionEl.appendChild(h2);
-    // act-now goes first; priority goes after act-now if it exists
-    if (isVip) {
-      bodyEl.insertBefore(sectionEl, bodyEl.firstChild);
-    } else {
-      const actNowSection = document.querySelector('h2.act-now')?.closest('.priority-section');
-      if (actNowSection) actNowSection.after(sectionEl);
-      else bodyEl.insertBefore(sectionEl, bodyEl.firstChild);
-    }
+    // Insert after saved section if present, otherwise at top
+    const savedSection = document.querySelector('#saved-items-toggle')?.closest('.priority-section');
+    if (savedSection) savedSection.after(sectionEl);
+    else bodyEl.insertBefore(sectionEl, bodyEl.firstChild);
   }
 
-  // Insert after the h2 header (prepend within the section)
+  // Insert right after the h2 header (top of section)
   const h2 = sectionEl.querySelector('h2');
   if (h2 && h2.nextSibling) h2.after(wrapper);
   else sectionEl.appendChild(wrapper);
 
   // Update the cached view so mark-read etc. works
   if (cachedView?.prioritized) {
-    const bucket = isVip ? cachedView.prioritized.actNow : cachedView.prioritized.priority;
-    bucket.unshift(dm);
+    cachedView.prioritized.priority.unshift(dm);
   }
 
-  console.log(`[fslack] New DM detected: ${dmPartnerName(dm, data)} → ${sectionHeader}`);
+  console.log(`[fslack] New DM detected: ${dmPartnerName(dm, data)} → Priority`);
 }
 
 
