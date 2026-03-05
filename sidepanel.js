@@ -122,6 +122,7 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 
 const closeBtn = document.getElementById('close-btn');
 document.getElementById('refresh-link').addEventListener('click', startFetch);
+document.getElementById('full-refresh-link').addEventListener('click', startFullFetch);
 
 
 // ── In-place Slack navigation (via relay to inject.js) ──
@@ -212,13 +213,7 @@ function muteThreadLocally(channel, threadTs) {
   }
   removeCachedItem(channel, threadTs);
 }
-function startFetch() {
-  if (fetchBtn.disabled) return;
-  fetchBtn.disabled = true;
-  fetchBtn.textContent = 'Fetching...';
-  bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
-  resetFetchState();
-  // Load cached names and pass to inject.js
+function loadCachedPrefs(callback) {
   chrome.storage.local.get(['fslackUsers', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
     noiseChannels = cached.fslackNoiseChannels || {};
     neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
@@ -231,14 +226,59 @@ function startFetch() {
     const EMOJI_TTL_MS = 24 * 60 * 60 * 1000;
     const cachedEmoji = (cached.fslackEmojiTs && Date.now() - cached.fslackEmojiTs < EMOJI_TTL_MS)
       ? (cached.fslackEmoji || {}) : null;
-    sendToInject({
-      type: `${FSLACK}:fetch`,
+    callback({
       cachedUsers: cached.fslackUsers || {},
       cachedUserMentionHints: cached.fslackUserMentionHints || {},
       cachedChannels: cached.fslackChannels || {},
       cachedChannelMeta: cached.fslackChannelMeta || {},
       cachedEmoji,
     });
+  });
+}
+
+function startFetch() {
+  if (fetchBtn.disabled) return;
+  fetchBtn.disabled = true;
+  fetchBtn.textContent = 'Fetching...';
+  bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
+  resetFetchState();
+  isFastFetch = true;
+
+  // First-ever fetch (no cache at all): auto-promote to full fetch
+  if (!cachedView) {
+    console.log('[fslack] No cached view — auto-promoting to full fetch');
+    fetchBtn.disabled = false; // allow startFullFetch to proceed
+    startFullFetch();
+    return;
+  }
+
+  loadCachedPrefs((cachePayload) => {
+    sendToInject({ type: `${FSLACK}:fetchFast`, ...cachePayload });
+  });
+  // Only fetch popular/saved if we don't have them cached
+  if (!cachedView?.popular || cachedView.popular.length === 0) {
+    sendToInject({ type: `${FSLACK}:fetchPopular` });
+  } else {
+    pendingPopular = cachedView.popular;
+    gotPopular = true;
+  }
+  if (!cachedView?.saved || cachedView.saved.length === 0) {
+    sendToInject({ type: `${FSLACK}:fetchSaved`, requestId: `saved_${Date.now()}` });
+  } else {
+    pendingSaved = cachedView.saved;
+    gotSaved = true;
+  }
+}
+
+function startFullFetch() {
+  if (fetchBtn.disabled) return;
+  fetchBtn.disabled = true;
+  fetchBtn.textContent = 'Fetching...';
+  bodyEl.innerHTML = '<div id="status">Starting full fetch...</div>';
+  resetFetchState();
+  isFastFetch = false;
+  loadCachedPrefs((cachePayload) => {
+    sendToInject({ type: `${FSLACK}:fetch`, ...cachePayload });
   });
   sendToInject({ type: `${FSLACK}:fetchPopular` });
   sendToInject({ type: `${FSLACK}:fetchSaved`, requestId: `saved_${Date.now()}` });
@@ -871,11 +911,18 @@ function newerRepliesBadge(channel, threadTs, afterTs, count, containerId) {
   return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${threadTs}" data-mode="newer" data-newer-count="${count}"${afterAttr}${timeAttr}${containerAttr}>${THREAD_BADGE_ICON}View ${count} newer ${count === 1 ? 'reply' : 'replies'}${timeHtml}</span>`;
 }
 
-function renderFwd(fwd, users) {
+function renderFwd(fwd, users, max = 300) {
   if (!fwd) return '';
   const label = fwd.author ? `fwd from ${escapeHtml(fwd.author)}` : 'fwd';
-  const body = formatSlackHtml(fwd.text, users);
-  return `<blockquote class="fwd-quote"><span class="fwd-label">${label}</span>${body}</blockquote>`;
+  const cleaned = cleanSlackText(fwd.text, users);
+  if (cleaned.length <= max) {
+    const body = formatSlackHtml(fwd.text, users);
+    return `<blockquote class="fwd-quote"><span class="fwd-label">${label}</span>${body}</blockquote>`;
+  }
+  const id = `trunc_${++truncateId}`;
+  const short = applyEmoji(applyMrkdwn(escapeHtml(cleaned.replace(/\n+/g, ' ').slice(0, max))), customEmojiMap);
+  const full = formatSlackHtml(fwd.text, users);
+  return `<blockquote class="fwd-quote"><span class="fwd-label">${label}</span><span id="${id}-short">${short}... <span class="see-more" data-trunc-id="${id}">See more</span></span><span id="${id}-full" style="display:none">${full} <span class="see-less" data-trunc-id="${id}">See less</span></span></blockquote>`;
 }
 
 // Render message text + files + thread badge with merged "See more" / "N replies"
@@ -901,12 +948,13 @@ function renderMsgBody(m, channel, users, maxLen = 400, threadUi = null, opts = 
       badge = threadBadge(m, channel, truncIdForBadge, badgeOpts);
     }
   }
+  const outerTruncId = truncateId;
   const fwdHtml = renderFwd(m.fwd, users);
   const filesHtml = renderFiles(m.files);
   const extras = fwdHtml + filesHtml;
   const timeHtml = badge ? '' : msgTime(m.ts, channel);
   if (wasTruncated && extras) {
-    return textHtml + `<span id="trunc_${truncateId}-files" style="display:none">${extras}</span>` + badge + timeHtml;
+    return textHtml + `<span id="trunc_${outerTruncId}-files" style="display:none">${extras}</span>` + badge + timeHtml;
   }
   if (filesHtml && timeHtml) {
     return textHtml + fwdHtml + `<div class="files-time-row">${filesHtml}${timeHtml}</div>` + badge;
@@ -928,6 +976,8 @@ function threadRepliesContainer(m, channel, threadUi = null) {
 function threadNeedsSummary(t) {
   if (!t || t._isDmThread) return false;
   if (t._forceThreadSummary) return true;
+  // Always summarize threads where the user was @mentioned (explains why they were tagged)
+  if (t._isMentioned) return true;
   return (t.unread_replies || []).length >= 5;
 }
 
@@ -1169,9 +1219,12 @@ function renderChannelItem(cp, data, cssClass) {
         const afterAttr = threadUi?.afterTs ? ` data-after-ts="${threadUi.afterTs}"` : '';
         const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
         const repliesId = `${key}-replies`;
+        const summaryHtml = m._chThreadSummary
+          ? `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(m._chThreadSummary)}</div>`
+          : `<div id="${key}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
         html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}`
           + `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
-          + `<div id="${key}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`
+          + summaryHtml
           + `<span class="show-messages-link" data-target="${repliesId}" data-fetch-replies="1" data-channel="${cp.channel_id}" data-ts="${threadTs}" style="margin-top:2px">show ${m.reply_count} ${m.reply_count === 1 ? 'reply' : 'replies'} ↓</span>`
           + `<div class="deep-messages" id="${repliesId}"></div>`
           + `</div></div>${msgActions(cp.channel_id, m.ts)}`;
@@ -1638,6 +1691,8 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
       // Skip AI reason for short DMs — the message itself is readable enough
       const shortDm = isDm && (item.messages || []).reduce((n, m) => n + (m.text || '').length, 0) < 200;
       item._reason = shortDm ? undefined : (reasons[item._llmId] || undefined);
+      // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
+      if (!item._reason && isMentioned) item._reason = 'You were mentioned';
       if (!item._reason && llmCat !== cat) {
         const ch = data.channels?.[item.channel_id] || item.channel_id;
         console.log(`[fslack] no LLM reason for ${item._llmId} (#${ch}): LLM said "${llmCat}", overridden to "${cat}"` +
@@ -3074,12 +3129,13 @@ function runChannelThreadSummarization(allItems, data) {
     });
   }
 
-  // Collect all qualifying messages, then process in parallel
+  // Collect all qualifying messages, skip already-summarized
   const tasks = [];
   for (const cp of items) {
     const ch = data.channels[cp.channel_id] || cp.channel_id;
     for (const m of cp.messages) {
       if ((m.reply_count || 0) < 10) continue;
+      if (m._chThreadSummary) continue; // already summarized (from cache)
       const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
       tasks.push({ cp, ch, m, key });
     }
@@ -3117,6 +3173,9 @@ function runChannelThreadSummarization(allItems, data) {
         );
       } catch (err) { console.error(`[chThreadSumm] sendMessage error for key=${key}`, err); return; }
       if (!response?.summary?.summary) { console.warn(`[chThreadSumm] no summary in response for key=${key}`, response); loadingEl.remove(); return; }
+
+      // Cache summary on the message object so it persists across renders
+      m._chThreadSummary = response.summary.summary;
 
       console.log(`[chThreadSumm] got summary for key=${key}: "${response.summary.summary.slice(0, 80)}…"`);
       const summaryEl = document.createElement('div');
@@ -3173,6 +3232,19 @@ function prioritizeAndRender(data) {
   if (totalItems === 0) {
     // Only noise/dropped/bot — render what we have
     const prioritized = { actNow: [], priority: [], whenFree: preFiltered.whenFree, noise: preFiltered.noise, digests: preFiltered.digests };
+    // Fast fetch: merge cached channel items
+    if (isFastFetch && cachedView?.prioritized) {
+      const cached = cachedView.prioritized;
+      const isChannel = (item) => item._type === 'channel';
+      prioritized.actNow.push(...(cached.actNow || []).filter(isChannel));
+      prioritized.priority.push(...(cached.priority || []).filter(isChannel));
+      prioritized.whenFree.push(...(cached.whenFree || []).filter(isChannel));
+      prioritized.noise.push(...(cached.noise || []).filter(isChannel));
+      prioritized.digests.push(...(cached.digests || []).filter(isChannel));
+      if (cachedView.data?.channels) data.channels = { ...cachedView.data.channels, ...data.channels };
+      if (cachedView.data?.channelMeta) data.channelMeta = { ...cachedView.data.channelMeta, ...data.channelMeta };
+      if (cachedView.data?.users) data.users = { ...cachedView.data.users, ...data.users };
+    }
     renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
     runBotThreadSummarization(prioritized.whenFree, data);
     const allElevatedEarly = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
@@ -3245,6 +3317,23 @@ function prioritizeAndRender(data) {
 
       const prioritized = mapPriorities(mergedPriorities, forLlm, preFiltered.noise, preFiltered.whenFree, data, mergedReasons);
       prioritized.digests = preFiltered.digests;
+
+      // Fast fetch: merge cached channel items from previous full fetch
+      if (isFastFetch && cachedView?.prioritized) {
+        const cached = cachedView.prioritized;
+        const isChannel = (item) => item._type === 'channel';
+        prioritized.actNow.push(...(cached.actNow || []).filter(isChannel));
+        prioritized.priority.push(...(cached.priority || []).filter(isChannel));
+        prioritized.whenFree.push(...(cached.whenFree || []).filter(isChannel));
+        prioritized.noise.push(...(cached.noise || []).filter(isChannel));
+        prioritized.digests.push(...(cached.digests || []).filter(isChannel));
+        // Merge cached channel/user maps into data for rendering
+        if (cachedView.data?.channels) data.channels = { ...cachedView.data.channels, ...data.channels };
+        if (cachedView.data?.channelMeta) data.channelMeta = { ...cachedView.data.channelMeta, ...data.channelMeta };
+        if (cachedView.data?.users) data.users = { ...cachedView.data.users, ...data.users };
+        console.log('[fslack] Fast fetch: merged cached channel items into prioritized result');
+      }
+
       prioritized.noise = sortNoiseItems(prioritized.noise, mergedNoiseOrder);
       const deepNoise = prioritized.noise.filter((item) =>
         (item.fullMessages?.history || item.messages || []).length >= 3
@@ -3255,6 +3344,16 @@ function prioritizeAndRender(data) {
       const digestItems = prioritized.digests || [];
 
       const allElevated = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
+
+      // Fast fetch: skip deep noise summarization (channel data is from cache, already summarized)
+      if (isFastFetch) {
+        renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
+        runBotThreadSummarization(prioritized.whenFree, data);
+        runThreadReplySummarization(allElevated, data);
+        runChannelThreadSummarization(allElevated, data);
+        saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
+        return;
+      }
 
       if (deepNoise.length === 0 && digestItems.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
@@ -3492,6 +3591,7 @@ function render(data) {
 let pendingUnreads = null;
 let gotUnreads = false;
 let gotPopular = false;
+let isFastFetch = false;
 
 function resetFetchState() {
   pendingUnreads = null;
@@ -3501,6 +3601,7 @@ function resetFetchState() {
   gotUnreads = false;
   gotPopular = false;
   gotSaved = false;
+  isFastFetch = false;
   stopDmWatcher();
 }
 
@@ -3787,6 +3888,33 @@ function handlePortMessage(msg) {
   }
 
   if (msg.type === `${FSLACK}:result`) {
+    pendingUnreads = msg.data;
+    gotUnreads = true;
+    if (msg.data) {
+      const toStore = {};
+      if (msg.data.users) {
+        mergeCachedUsers(msg.data.users);
+        toStore.fslackUsers = cachedUserMap;
+      }
+      if (msg.data.userMentionHints) {
+        mergeCachedMentionHints(msg.data.userMentionHints);
+        toStore.fslackUserMentionHints = cachedUserMentionHints;
+      }
+      if (msg.data.channels) toStore.fslackChannels = msg.data.channels;
+      if (msg.data.channelMeta) toStore.fslackChannelMeta = msg.data.channelMeta;
+      if (msg.data.emoji && !msg.data.emojiFromCache) {
+        toStore.fslackEmoji = msg.data.emoji;
+        toStore.fslackEmojiTs = Date.now();
+      }
+      if (Object.keys(toStore).length > 0) chrome.storage.local.set(toStore);
+      customEmojiMap = msg.data.emoji || null;
+      if (msg.data.channels) channelNameMap = msg.data.channels;
+    }
+    tryPrioritize();
+    return;
+  }
+
+  if (msg.type === `${FSLACK}:fastResult`) {
     pendingUnreads = msg.data;
     gotUnreads = true;
     if (msg.data) {
