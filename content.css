@@ -391,6 +391,8 @@ ul.slack-list, ol.slack-list {
 .action-btn.reacted { opacity: 0.3; }
 .action-btn.saved { color: #ecb22e; }
 .item.read-done { opacity: 0.4; }
+.item.muted-pending { opacity: 0.3; }
+.undo-mute { color: #e8912d !important; }
 .reply-form {
   display: flex;
   align-items: flex-end;

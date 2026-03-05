@@ -2468,11 +2468,27 @@ bodyEl.addEventListener('click', (e) => {
     }
     muteThreadLocally(channel, threadTs);
     const itemEl = muteBtn.closest('.item');
-    if (itemEl) {
-      itemEl.style.opacity = '0.3';
-      setTimeout(() => itemEl.remove(), 150);
-    }
+    if (itemEl) itemEl.classList.add('muted-pending');
+    muteBtn.textContent = 'undo mute';
+    muteBtn.classList.add('undo-mute');
     sendToInject({ type: `${FSLACK}:muteThread`, channel, thread_ts: threadTs, requestId: `mute_${Date.now()}` });
+    return;
+  }
+
+  // Undo mute thread
+  const undoMuteBtn = e.target.closest('.undo-mute');
+  if (undoMuteBtn) {
+    const { channel, threadTs } = undoMuteBtn.dataset;
+    const key = threadKey(channel, threadTs);
+    if (key) {
+      mutedThreadKeys.delete(key);
+      persistMutedThreads();
+    }
+    const itemEl = undoMuteBtn.closest('.item');
+    if (itemEl) itemEl.classList.remove('muted-pending');
+    undoMuteBtn.textContent = 'mute thread';
+    undoMuteBtn.classList.remove('undo-mute');
+    undoMuteBtn.dataset.pending = '';
     return;
   }
 
@@ -3952,7 +3968,6 @@ function handlePortMessage(msg) {
 
   if (msg.type === `${FSLACK}:progress`) {
     bodyEl.innerHTML = `<div id="status">
-      <div class="step">Step ${msg.step}/7</div>
       <div class="detail">${msg.detail || ''}</div>
     </div>`;
     return;

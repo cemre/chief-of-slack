@@ -91,6 +91,8 @@ CONTEXT:
 - If I posted or replied in a thread (userReplied=true) and someone then asks a question — even without @mentioning me — treat it as a question directed at me.
 - If I asked a question in my reply (userReplied=true) and someone answers it or gives a status update in response, classify as at least when_free — I want to see the answer to my question.
 - A bare @mention with no question or explicit request (e.g. "thanks @gem" or a signature "@gem") should NOT become act_now. Only treat a mention as act_now when it includes a question mark or clear ask ("@gem can you...", "@gem do you know...?").
+- "recentContext" contains earlier messages I already read — use them to understand the conversation flow. "newReplies" are the unread messages I haven't seen yet.
+- When writing reasons, describe what the NEW unread messages say, not what I already said. If someone completed something I asked for, say "[person] completed [thing]" not "[person] needs you to [thing]".
 
 CATEGORIES:
 - "drop": I already replied in this thread (userReplied=true) AND the new messages are just acknowledgments, +1s, emoji reactions, or the conversation continuing without needing me. Do NOT drop if someone asks a question, needs me to unblock something, or is answering a question I asked.
