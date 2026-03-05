@@ -295,6 +295,7 @@ function showFromCache() {
     const allElevatedCache = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])];
     runThreadReplySummarization(allElevatedCache, cachedView.data);
     runChannelThreadSummarization(allElevatedCache, cachedView.data);
+    runRootSummarization(allElevatedCache, cachedView.data);
     startDmWatcher(cachedView.data);
     return true;
   }
@@ -577,7 +578,7 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault(); e.stopPropagation();
     if (k === 'm') (parentItem?.querySelector('.mark-all-read') || parentItem?.querySelector('.vip-mark-seen'))?.click();
     else if (k === 't' && !isVip) (parentItem?.querySelector('.action-mute') || parentItem?.querySelector('.action-mute-channel'))?.click();
-    else if (k === 'o' && !parentItem?.classList.contains('vip-item')) parentItem?.querySelector('.item-channel[data-channel]')?.click();
+    else if (k === 'o' && !parentItem?.classList.contains('vip-item')) (parentItem?.querySelector('.action-open') || parentItem?.querySelector('.item-channel[data-channel]'))?.click();
     return;
   }
 }, true);
@@ -977,7 +978,9 @@ function threadNeedsSummary(t) {
   if (t._forceThreadSummary) return true;
   // Always summarize threads where the user was @mentioned (explains why they were tagged)
   if (t._isMentioned) return true;
-  return (t.unread_replies || []).length >= 5;
+  const replies = t.unread_replies || [];
+  const totalChars = replies.reduce((sum, r) => sum + (r.text || '').length, 0);
+  return totalChars >= 300;
 }
 
 // threadTs = root ts for reply context. isDm = true sends reply as top-level DM (no thread).
@@ -1021,7 +1024,9 @@ function itemTime(ts, channel) {
 }
 
 function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false, hasMention = false) {
+  const openTs = threadTs || markTs;
   return `<div class="item-actions">
+    <span class="action-open" data-channel="${channel}" data-ts="${openTs}"><kbd>O</kbd> open</span>
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}${hasMention ? ' data-has-mention="1"' : ''}><kbd>M</kbd> mark read</span>
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
@@ -1063,13 +1068,26 @@ function renderThreadItem(t, data, cssClass) {
     html += `<div class="item-mention">replies to @mention</div>`;
   }
   html += reasonBadge(t, cssClass);
-  const _rtid = truncateId;
-  const rootTextHtml = truncate(t.root_text, 400, data.users);
-  const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
   const rootSeenClass = seenCount > 0 ? ' root-seen' : '';
+  const needsRootSummary = seenCount > 0 && (t.root_text || '').length > 300;
+  let rootContentHtml;
+  if (needsRootSummary && t._rootSummary) {
+    rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span class="root-summary">${escapeHtml(t._rootSummary)}</span>${msgTime(t.ts, t.channel_id)}`;
+  } else if (needsRootSummary) {
+    const rootSummaryKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
+    const _rtid = truncateId;
+    const rootTextHtml = truncate(t.root_text, 400, data.users);
+    const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+    rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} <span id="${rootSummaryKey}" class="root-summary-pending">${rootTextHtml}${rootExtras}</span>${msgTime(t.ts, t.channel_id)}`;
+  } else {
+    const _rtid = truncateId;
+    const rootTextHtml = truncate(t.root_text, 400, data.users);
+    const rootExtras = wrapFilesIfTruncated(_rtid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+    rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${rootTextHtml}${rootExtras}${msgTime(t.ts, t.channel_id)}`;
+  }
   html += `</div>
     <div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text${rootSeenClass}">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${rootTextHtml}${rootExtras}${msgTime(t.ts, t.channel_id)}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+      <div class="msg-row"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${msgActions(t.channel_id, t.ts)}</div>`;
   // Thread reply summarization for non-DM threads that meet summary criteria
   const shouldSummarize = threadNeedsSummary(t);
   const threadKey = shouldSummarize ? `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}` : '';
@@ -1084,10 +1102,10 @@ function renderThreadItem(t, data, cssClass) {
 
   if (shouldSummarize) {
     if (t._threadSummary) {
-      html += `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(t._threadSummary)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content"><div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(t._threadSummary)}</div></div></div>`;
       html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
     } else {
-      html += `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies...</div>`;
+      html += `<div class="msg-row"><div class="msg-content"><div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies...</div></div></div>`;
       html += `<span class="show-messages-link" data-target="${repliesMsgId}" style="margin-top:2px">show ${unread.length} ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
     }
     html += `<div class="deep-messages" id="${repliesMsgId}">`;
@@ -2288,6 +2306,14 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
+  // Open in Slack
+  const openBtn = e.target.closest('.action-open');
+  if (openBtn) {
+    const { channel, ts } = openBtn.dataset;
+    navigateSlack(channel, ts);
+    return;
+  }
+
   // Mark all read / undo
   const markAll = e.target.closest('.mark-all-read');
   if (markAll) {
@@ -3109,6 +3135,42 @@ function runThreadReplySummarization(allItems, data) {
     }
   })();
 }
+// ── Async root message summarization (long seen root messages) ──
+function runRootSummarization(allItems, data) {
+  const threads = allItems.filter((item) => {
+    if (item._type !== 'thread') return false;
+    if (item._rootSummary) return false;
+    const seenCount = Math.max(0, (item.reply_count || 0) - (item.unread_replies || []).length);
+    return seenCount > 0 && (item.root_text || '').length > 300;
+  });
+  if (threads.length === 0) return;
+
+  (async () => {
+    for (const t of threads) {
+      const ch = data.channels[t.channel_id] || t.channel_id;
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({
+            type: `${FSLACK}:summarizeRoot`,
+            data: { channel: ch, user: uname(t.root_user, data.users), text: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 800, data.users) }
+          }, resolve)
+        );
+      } catch { continue; }
+      if (!response?.summary?.summary) continue;
+
+      t._rootSummary = response.summary.summary;
+      const rootKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
+      const pendingEl = document.getElementById(rootKey);
+      if (!pendingEl) continue;
+
+      const summarySpan = document.createElement('span');
+      summarySpan.className = 'root-summary';
+      summarySpan.textContent = t._rootSummary;
+      pendingEl.replaceWith(summarySpan);
+    }
+  })();
+}
 // ── Async channel-post thread summarization (fetch replies then summarize) ──
 function runChannelThreadSummarization(allItems, data) {
   console.log(`[chThreadSumm] called with ${allItems.length} items, types:`, allItems.map(i => `${i._type}/${i._summarizeThreads ? 'summ' : 'no'}`));
@@ -3258,6 +3320,7 @@ function prioritizeAndRender(data) {
     const allElevatedEarly = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
     runThreadReplySummarization(allElevatedEarly, data);
     runChannelThreadSummarization(allElevatedEarly, data);
+    runRootSummarization(allElevatedEarly, data);
     saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
     return;
   }
@@ -3359,6 +3422,7 @@ function prioritizeAndRender(data) {
         runBotThreadSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);
         runChannelThreadSummarization(allElevated, data);
+        runRootSummarization(allElevated, data);
         saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
         return;
       }
@@ -3368,6 +3432,7 @@ function prioritizeAndRender(data) {
         runBotThreadSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);
         runChannelThreadSummarization(allElevated, data);
+        runRootSummarization(allElevated, data);
         saveViewCache(data, pendingPopular, prioritized, pendingSaved || []);
         return;
       }
@@ -3377,6 +3442,7 @@ function prioritizeAndRender(data) {
       runBotThreadSummarization(prioritized.whenFree, data);
       runThreadReplySummarization(allElevated, data);
       runChannelThreadSummarization(allElevated, data);
+      runRootSummarization(allElevated, data);
       saveViewCache(data, pendingPopular, { ...prioritized, noise: regularNoise, digests: digestItems }, pendingSaved || []);
 
       // Summarize each deep-noise and digest channel individually with a byte cap on messages sent
