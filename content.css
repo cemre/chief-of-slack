@@ -274,8 +274,6 @@ ul.slack-list, ol.slack-list {
   align-items: center;
   gap: 8px;
   padding: 10px 16px 4px;
-  border-top: 1px solid #363940;
-  margin-top: 4px;
 }
 .cache-divider-label {
   font-size: 11px;

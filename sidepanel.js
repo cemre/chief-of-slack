@@ -150,6 +150,7 @@ let focusedItemIndex = -1;  // keyboard nav: index into visible items, -1 = none
 let dmWatchTimer = null;         // interval ID for new-DM polling
 let knownDmChannelIds = new Set(); // DM channels already in the current render
 let mutedThreadKeys = new Set();   // Set of "channel:threadTs" strings for muted threads
+let autoRefreshTimer = null;       // auto-refresh when top sections are empty
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
 const USERS_CACHE_VERSION = 2; // bump to invalidate stale user name cache
@@ -243,6 +244,7 @@ function loadCachedPrefs(callback) {
 
 function startFetch() {
   if (fetchBtn.disabled) return;
+  if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
@@ -1305,15 +1307,17 @@ function renderDeepSummarizedItem(cp, data) {
 function renderSavedItem(item, data) {
   const channel = item.item_id;
   const ts = item.ts;
-  const ch = data.channels?.[channel] || channel;
+  const chName = data.channels?.[channel];
   const msg = item.message || {};
   const user = msg.user;
+  const isDm = channel.startsWith('D');
+  const channelLabel = chName ? '#' + escapeHtml(chName) : isDm && user ? escapeHtml(uname(user, data.users)) : escapeHtml(channel);
   const _stid = truncateId;
   const textHtml = msg.text ? truncate(msg.text, 400, data.users) : '';
   const savedExtras = wrapFilesIfTruncated(_stid, renderFwd(msg.fwd, data.users), renderFiles(msg.files));
   return `<div class="item saved-item" data-complete-request-id="">
     <div class="item-left">
-      ${channelLink('#' + escapeHtml(ch), channel)} <span class="item-sep">·</span> ${itemTime(ts, channel)}
+      ${channelLink(channelLabel, channel)} <span class="item-sep">·</span> ${itemTime(ts, channel)}
     </div>
     <div class="item-right">
       <div class="msg-row">
@@ -1889,6 +1893,13 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   resetThreadUnreadIndex();
   lastRenderData = data;
   mentionLookupDirty = true;
+
+  // Auto-refresh after 5 minutes if act_now + priority are both empty
+  if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
+  autoRefreshTimer = null;
+  if (!loading && actNow.length === 0 && (!priority || priority.length === 0)) {
+    autoRefreshTimer = setTimeout(() => { autoRefreshTimer = null; startFetch(); }, 5 * 60 * 1000);
+  }
 
   // Wire up noise toggles
   function wireNoiseToggle(toggleId, itemsId, label) {
@@ -2768,17 +2779,19 @@ bodyEl.addEventListener('click', (e) => {
   }
 });
 
-// Click-to-focus: move keyboard nav to clicked item
+// Click-to-focus: track position for keyboard nav without showing highlight
 bodyEl.addEventListener('click', (e) => {
   const nav = e.target.closest('.msg-row, .item, .section-toggle');
   if (!nav) return;
-  // Prefer the most specific navigable element (msg-row inside item)
   const target = nav.classList.contains('item')
     ? (nav.querySelector('.msg-row') ? e.target.closest('.msg-row') || nav : nav)
     : nav;
   const els = getNavigableElements();
   const idx = els.indexOf(target);
-  if (idx >= 0) focusItem(idx);
+  if (idx >= 0) {
+    unfocusItem();
+    focusedItemIndex = idx;
+  }
 });
 
 function seenRepliesLabel(count) {
