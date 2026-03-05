@@ -278,7 +278,7 @@
     window.postMessage({ type: `${FSLACK}:progress`, step, detail }, '*');
   }
 
-  async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
+  async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
     const [counts, { selfId, muted }] = await Promise.all([
@@ -388,10 +388,21 @@
         for (const msg of msgs) {
           if (msg.files) await ensureTranscripts(msg.files);
         }
+        // Fetch recent context (up to 5 messages before last_read) for LLM summarization
+        let recentContext = [];
+        if (oldestTs && oldestTs !== '0') {
+          try {
+            const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
+            recentContext = (ctxHist.messages || [])
+              .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
+              .reverse(); // oldest first
+          } catch { /* non-critical */ }
+        }
         if (msgs.length > 0) {
           const dmPayload = {
             channel_id: conv.id,
             messages: msgs,
+            recentContext,
           };
           if (conv.kind === 'mpim') {
             dmPayload.isGroup = true;
@@ -718,8 +729,17 @@
         for (const msg of msgs) {
           if (msg.files) await ensureTranscripts(msg.files);
         }
+        let recentContext = [];
+        if (oldestTs && oldestTs !== '0') {
+          try {
+            const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
+            recentContext = (ctxHist.messages || [])
+              .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
+              .reverse();
+          } catch { /* non-critical */ }
+        }
         if (msgs.length > 0) {
-          const dmPayload = { channel_id: conv.id, messages: msgs };
+          const dmPayload = { channel_id: conv.id, messages: msgs, recentContext };
           if (conv.kind === 'mpim') {
             dmPayload.isGroup = true;
             let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
