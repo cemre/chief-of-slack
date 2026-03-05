@@ -38,6 +38,7 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarize`,
   `${FSLACK}:summarizeVip`,
   `${FSLACK}:summarizeBotThread`,
+  `${FSLACK}:summarizeChannelPost`,
   `${FSLACK}:summarizeThreadReplies`,
   `${FSLACK}:summarizeFullThread`,
   `${FSLACK}:summarizeRoot`,
@@ -505,6 +506,58 @@ async function handleBotThreadSummarize(item) {
   }
 }
 
+// ── Build channel post summarization prompt ──
+function buildChannelPostPrompt(item) {
+  const serialized = JSON.stringify(item.messages, null, 0);
+  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+
+Summarize what people are discussing in #${item.channel} as exactly 3 bullet points.
+Each bullet: "- [first name] [verb] [specific thing]"
+Use first names only. Be concrete — name the specific artifact, issue, or topic, not a vague category.
+Combine multiple small messages from the same person into one bullet when possible.
+If fewer than 3 distinct topics, use fewer bullets.
+
+MESSAGES:
+${serialized}
+
+Respond with ONLY a JSON object: {"summary": "- bullet1\\n- bullet2\\n- bullet3"}
+No markdown fences, no explanation.`;
+}
+
+// ── Call Claude API for channel post summarization ──
+async function handleChannelPostSummarize(item) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  try {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: buildChannelPostPrompt(item) }],
+      }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Build root message summarization prompt ──
 function buildRootSummarizePrompt(item) {
   return `Summarize this Slack message in 1 terse sentence (under 120 chars). Just the key point, no preamble.
@@ -583,6 +636,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeBotThread`) {
     handleBotThreadSummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:summarizeChannelPost`) {
+    handleChannelPostSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:summarizeThreadReplies`) {

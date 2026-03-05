@@ -331,6 +331,7 @@ function showFromCache() {
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
     renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
+    runWhenFreeChannelSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
     const allElevatedCache = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])];
     runThreadReplySummarization(allElevatedCache, cachedView.data);
     runChannelThreadSummarization(allElevatedCache, cachedView.data);
@@ -1261,7 +1262,9 @@ function renderChannelItem(cp, data, cssClass) {
   const ch = data.channels[cp.channel_id] || cp.channel_id;
   const latest = cp.messages[0];
   const collapsible = cssClass === 'act-now' || cssClass === 'priority-item';
-  let html = `<div class="item ${cssClass}">`;
+  const needsChannelSummary = cssClass === 'when-free' && cp.messages.length >= 3 && !cp._isBotThread;
+  const csKeyAttr = needsChannelSummary ? ` data-channel-summary-key="ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}"` : '';
+  let html = `<div class="item ${cssClass}"${csKeyAttr}>`;
   html += reasonBadge(cp, cssClass);
   if (collapsible) html += '<div class="item-details">';
   html += `<div class="item-left">
@@ -1278,6 +1281,31 @@ function renderChannelItem(cp, data, cssClass) {
     const summaryMsg = cp.messages[0];
     const senderName = summaryMsg ? (summaryMsg.subtype === 'bot_message' ? 'Bot' : uname(summaryMsg.user, data.users)) : 'Bot';
     html += `<div class="msg-row"><div class="msg-content item-text">${userLink(senderName, cp.channel_id, summaryMsg?.ts)} ${escapeHtml(zendesk || cp._summary)}</div>${summaryMsg ? msgActions(cp.channel_id, summaryMsg.ts) : ''}</div>`;
+  } else if (cssClass === 'when-free' && cp.messages.length >= 3 && !cp._isBotThread) {
+    // When-free channel items with 3+ messages: show summary or loading state
+    const csKey = `ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
+    const csMsgId = `${csKey}-msgs`;
+    let messagesHtml = '';
+    for (const m of cp.messages.slice(0, 10).reverse()) {
+      const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
+      messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    }
+    if (cp._channelSummary) {
+      const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
+      html += `<div class="msg-row"><div class="msg-content">
+        <ul class="deep-summary">${bullets}</ul>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${csMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
+        </div>
+      </div></div>
+      <div class="deep-messages" id="${csMsgId}">${messagesHtml}</div>`;
+    } else {
+      html += `<div class="msg-row"><div class="msg-content">
+        <div id="${csKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Summarizing...</div>
+      </div></div>
+      <div class="deep-messages" style="display:block" id="${csMsgId}">${messagesHtml}</div>`;
+    }
   } else {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
@@ -3214,6 +3242,57 @@ function runBotThreadSummarization(whenFreeItems, data) {
   })();
 }
 
+// ── Async when-free channel post summarization ──
+function runWhenFreeChannelSummarization(whenFreeItems, data) {
+  const channels = whenFreeItems.filter((item) =>
+    item._type === 'channel' && !item._isBotThread && !item._deepSummary && item.messages.length >= 3 && !item._channelSummary
+  );
+  if (channels.length === 0) return;
+
+  (async () => {
+    for (const cp of channels) {
+      const ch = data.channels[cp.channel_id] || cp.channel_id;
+      const messages = cp.messages.map((m) => ({
+        user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
+        text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+      }));
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, messages } }, resolve)
+        );
+      } catch { continue; }
+      if (!response?.summary?.summary) continue;
+
+      cp._channelSummary = response.summary.summary;
+      const key = `ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
+      const itemEl = document.querySelector(`[data-channel-summary-key="${key}"]`);
+      if (!itemEl) continue;
+
+      const csMsgId = `${key}-msgs`;
+      let messagesHtml = '';
+      for (const m of cp.messages.slice(0, 10).reverse()) {
+        const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+      }
+      const rightEl = itemEl.querySelector('.item-right');
+      const actionsEl = itemEl.querySelector('.item-actions');
+      const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
+      const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
+      rightEl.innerHTML = `
+        <div class="msg-row"><div class="msg-content">
+          <ul class="deep-summary">${bullets}</ul>
+          <div style="display:flex;gap:12px;margin-top:6px;">
+            <span class="show-messages-link" data-target="${csMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
+            <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark as read</span>
+          </div>
+        </div></div>
+        <div class="deep-messages" id="${csMsgId}">${messagesHtml}</div>
+        ${actionsHtml}`;
+    }
+  })();
+}
+
 // ── Async thread reply summarization (non-DM threads meeting summary criteria) ──
 function runThreadReplySummarization(allItems, data) {
   const threads = allItems.filter((item) => item._type === 'thread' && !item._fullThreadSummary && threadNeedsSummary(item));
@@ -3461,6 +3540,7 @@ function prioritizeAndRender(data) {
     }
     renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || [], false, isFastFetch && cachedView ? cachedView.ts : null);
     runBotThreadSummarization(prioritized.whenFree, data);
+    runWhenFreeChannelSummarization(prioritized.whenFree, data);
     const allElevatedEarly = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
     runThreadReplySummarization(allElevatedEarly, data);
     runChannelThreadSummarization(allElevatedEarly, data);
@@ -3565,6 +3645,7 @@ function prioritizeAndRender(data) {
       if (isFastFetch) {
         renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || [], false, cachedView ? cachedView.ts : null);
         runBotThreadSummarization(prioritized.whenFree, data);
+        runWhenFreeChannelSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);
         runChannelThreadSummarization(allElevated, data);
         runRootSummarization(allElevated, data);
@@ -3575,6 +3656,7 @@ function prioritizeAndRender(data) {
       if (deepNoise.length === 0 && digestItems.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
         runBotThreadSummarization(prioritized.whenFree, data);
+        runWhenFreeChannelSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);
         runChannelThreadSummarization(allElevated, data);
         runRootSummarization(allElevated, data);
@@ -3585,6 +3667,7 @@ function prioritizeAndRender(data) {
       // Render main sections; loading indicators show for each type
       renderPrioritized({ ...prioritized, noise: regularNoise, digests: digestItems }, data, pendingPopular, false, deepNoise.length > 0, pendingSaved || [], digestItems.length > 0);
       runBotThreadSummarization(prioritized.whenFree, data);
+      runWhenFreeChannelSummarization(prioritized.whenFree, data);
       runThreadReplySummarization(allElevated, data);
       runChannelThreadSummarization(allElevated, data);
       runRootSummarization(allElevated, data);
