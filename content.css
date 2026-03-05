@@ -380,7 +380,6 @@ ul.slack-list, ol.slack-list {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.msg-row:hover > .msg-content { border-radius: 6px; }
 .msg-row:hover > .msg-actions,
 .msg-row.kb-focused > .msg-actions { opacity: 1; }
 .msg-time { color: #616061; font-size: 11px; margin-left: 6px; opacity: 0; transition: opacity 0.15s; white-space: nowrap; }
@@ -398,6 +397,7 @@ ul.slack-list, ol.slack-list {
 .action-btn.reacted { opacity: 0.3; }
 .action-btn.saved { color: #ecb22e; }
 .item.read-done { opacity: 0.4; }
+.root-seen .msg-files { display: none; }
 .item.muted-pending { opacity: 0.3; }
 .undo-mute { color: #e8912d !important; }
 .reply-form {
@@ -432,6 +432,8 @@ ul.slack-list, ol.slack-list {
 }
 .deep-summary { font-style: italic; color: #ababad; margin-top: 4px; line-height: 1.46; }
 ul.deep-summary { margin: 4px 0; padding-left: 18px; }
+.deep-replies { font-size: 12px; }
+.self-bullet { color: #717274; }
 .deep-type-badge {
   display: inline-block;
   font-size: 10px;

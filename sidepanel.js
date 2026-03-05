@@ -1118,8 +1118,22 @@ function renderThreadItem(t, data, cssClass) {
   let rootContentHtml;
   let rootSeenClass = '';
   if (shouldSummarize && t._fullThreadSummary) {
-    const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim());
-    rootContentHtml = `<div class="deep-summary" style="margin:2px 0">${bullets.map(b => escapeHtml(b)).join('<br>')}</div>${msgTime(t.ts, t.channel_id)}`;
+    const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim()).map(b => b.replace(/^-\s*/, ''));
+    const selfName = (data.users?.[data.selfId] || '').toLowerCase();
+    const rootBullet = bullets[0] || '';
+    const rootNamePart = rootBullet.split(/\s/)[0].toLowerCase();
+    const rootIsSelf = selfName && rootNamePart === selfName;
+    const rootHtml = `<div class="deep-summary${rootIsSelf ? ' self-bullet' : ''}" style="margin:2px 0">${escapeHtml(rootBullet)}</div>`;
+    let repliesHtml = '';
+    if (bullets.length > 1) {
+      const replyLis = bullets.slice(1).map(b => {
+        const namePart = b.split(/\s/)[0].toLowerCase();
+        const isSelf = selfName && namePart === selfName;
+        return `<li${isSelf ? ' class="self-bullet"' : ''}>${escapeHtml(b)}</li>`;
+      }).join('');
+      repliesHtml = `<ul class="deep-summary deep-replies">${replyLis}</ul>`;
+    }
+    rootContentHtml = `${rootHtml}${repliesHtml}${msgTime(t.ts, t.channel_id)}`;
   } else if (shouldSummarize && !t._fullThreadSummary) {
     rootContentHtml = `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:2px 0">Summarizing thread...</div>${msgTime(t.ts, t.channel_id)}`;
   } else {
@@ -2717,7 +2731,7 @@ bodyEl.addEventListener('click', (e) => {
   // Mark all priority as read
   const priorityMarkRead = e.target.closest('#priority-mark-read-btn');
   if (priorityMarkRead && !priorityMarkRead.disabled) {
-    const priorityItemEls = bodyEl.querySelectorAll('.item.priority-item:not(.read-done)');
+    const priorityItemEls = bodyEl.querySelectorAll('.item.priority-item:not(.read-done), .item.act-now:not(.read-done)');
     let count = 0;
     for (const item of priorityItemEls) {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
@@ -3238,12 +3252,28 @@ function runThreadReplySummarization(allItems, data) {
       if (!loadingEl) continue;
 
       // Replace loading text with bullet summary in the root content area
-      const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim());
-      const summaryEl = document.createElement('div');
-      summaryEl.className = 'deep-summary';
-      summaryEl.style.cssText = 'margin:2px 0';
-      summaryEl.innerHTML = bullets.map(b => escapeHtml(b)).join('<br>');
-      loadingEl.replaceWith(summaryEl);
+      const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim()).map(b => b.replace(/^-\s*/, ''));
+      const selfName = (data.users?.[data.selfId] || '').toLowerCase();
+      const rootBullet = bullets[0] || '';
+      const rootNamePart = rootBullet.split(/\s/)[0].toLowerCase();
+      const rootIsSelf = selfName && rootNamePart === selfName;
+      const wrapper = document.createDocumentFragment();
+      const rootDiv = document.createElement('div');
+      rootDiv.className = 'deep-summary' + (rootIsSelf ? ' self-bullet' : '');
+      rootDiv.style.cssText = 'margin:2px 0';
+      rootDiv.textContent = rootBullet;
+      wrapper.appendChild(rootDiv);
+      if (bullets.length > 1) {
+        const ul = document.createElement('ul');
+        ul.className = 'deep-summary deep-replies';
+        ul.innerHTML = bullets.slice(1).map(b => {
+          const namePart = b.split(/\s/)[0].toLowerCase();
+          const isSelf = selfName && namePart === selfName;
+          return `<li${isSelf ? ' class="self-bullet"' : ''}>${escapeHtml(b)}</li>`;
+        }).join('');
+        wrapper.appendChild(ul);
+      }
+      loadingEl.replaceWith(wrapper);
     }
   })();
 }
