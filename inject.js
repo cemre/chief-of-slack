@@ -64,7 +64,7 @@
       );
       for (const [id, user] of results) {
         if (user) {
-          users[id] = user.real_name || user.profile?.real_name_normalized || user.name || id;
+          users[id] = user.profile?.display_name || user.name || id;
           mentionHints[id] = buildMentionHintsForUser(user);
         } else {
           if (!users[id]) users[id] = id;

@@ -72,26 +72,22 @@ section h2 {
 }
 .item-left {
   flex: none;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.4;
 }
-.item-left .item-channel { width: 100%; }
-.item-left .item-time { order: 1; }
-.item-left .item-replied { order: 0; }
+.item-sep { color: #616061; }
 .item-channel {
   font-size: 13px;
   color: #ababad;
   font-weight: 700;
-  display: block;
-  word-break: break-word;
 }
 .item-channel[data-channel] { cursor: pointer; }
 .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .inline-channel { display: inline; }
-.item-time { font-size: 11px; color: #616061; display: block; margin-top: 2px; }
+.item-time { font-size: 11px; color: #616061; display: inline; margin-top: 0; }
 a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
 .item-time[data-channel] { cursor: pointer; }
 .item-time[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
@@ -116,26 +112,22 @@ a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
   font-size: 11px;
   font-weight: 700;
   color: #e01e5a;
-  margin-top: 2px;
 }
 .item-reason {
   font-size: 11px;
   font-style: italic;
-  margin-top: 2px;
-  line-height: 1.3;
 }
 .item-reason.reason-act-now { color: #e01e5a; }
 .item-reason.reason-priority { color: #e8912d; }
 .item-replied {
   font-size: 11px;
   color: #ababad;
-  margin-top: 4px;
 }
 .item-right {
   flex: 1;
   min-width: 0;
 }
-.item-user { font-weight: 700; color: #fff; display: block; }
+.item-user { font-weight: 700; color: #fff; display: inline; }
 .item-user[data-channel] { cursor: pointer; }
 .item-user[data-channel]:hover { text-decoration: underline; }
 .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }
@@ -318,6 +310,7 @@ ul.slack-list, ol.slack-list {
   font-size: 11px;
   color: #616061;
   margin-top: 4px;
+  width: 100%;
 }
 .api-key-form {
   padding: 40px 16px;
@@ -358,6 +351,8 @@ ul.slack-list, ol.slack-list {
 .seen-replies-container .item-reply { color: #717274; }
 .root-seen { color: #717274; }
 .root-seen .item-user { color: #888; }
+.root-summary { font-style: italic; }
+.root-summary-pending { }
 .msg-row {
   display: flex;
   flex-wrap: wrap;
@@ -377,7 +372,7 @@ ul.slack-list, ol.slack-list {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.msg-row:hover > .msg-content { background: rgba(255,255,255,0.04); box-shadow: 0 0 0 8px rgba(255,255,255,0.04); border-radius: 6px; }
+.msg-row:hover > .msg-content { border-radius: 6px; }
 .msg-row:hover > .msg-actions,
 .msg-row.kb-focused > .msg-actions { opacity: 1; }
 .msg-time { color: #616061; font-size: 11px; margin-left: 6px; opacity: 0; transition: opacity 0.15s; white-space: nowrap; }

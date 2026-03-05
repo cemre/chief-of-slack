@@ -1040,7 +1040,7 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise 
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
-  return `<div class="item-reason ${cls}">${escapeHtml(item._reason)}</div>`;
+  return ` <span class="item-sep">·</span> <span class="item-reason ${cls}">${escapeHtml(item._reason)}</span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -1062,10 +1062,9 @@ function renderThreadItem(t, data, cssClass) {
   const markAllTs = lastUnread?.ts || t.ts;
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      ${channelLink(channelLabel, t.channel_id)}
-      ${itemTime(markAllTs, t.channel_id)}`;
+      ${channelLink(channelLabel, t.channel_id)} <span class="item-sep">·</span> ${itemTime(markAllTs, t.channel_id)}`;
   if (!t._mentionInReplies && t.mention_count > 0) {
-    html += `<div class="item-mention">replies to @mention</div>`;
+    html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
   }
   html += reasonBadge(t, cssClass);
   const rootSeenClass = seenCount > 0 ? ' root-seen' : '';
@@ -1156,9 +1155,7 @@ function renderDmItem(dm, data, cssClass) {
   const partner = dmPartnerName(dm, data);
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      ${channelLink(escapeHtml(partner), dm.channel_id)}
-      ${itemTime(latest.ts, dm.channel_id)}
-      ${reasonBadge(dm, cssClass)}
+      ${channelLink(escapeHtml(partner), dm.channel_id)} <span class="item-sep">·</span> ${itemTime(latest.ts, dm.channel_id)}${reasonBadge(dm, cssClass)}
     </div>
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
@@ -1204,13 +1201,12 @@ function renderChannelItem(cp, data, cssClass) {
   const latest = cp.messages[0];
   let html = `<div class="item ${cssClass}">
     <div class="item-left">
-      ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
-      ${itemTime(latest?.ts, cp.channel_id)}`;
+      ${channelLink('#' + escapeHtml(ch), cp.channel_id)} <span class="item-sep">·</span> ${itemTime(latest?.ts, cp.channel_id)}`;
   html += reasonBadge(cp, cssClass);
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
     const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
-    html += `<div class="item-replied">${names}${overflow} replied</div>`;
+    html += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
   }
   html += `</div>
     <div class="item-right">`;
@@ -1280,8 +1276,7 @@ function renderDeepSummarizedItem(cp, data) {
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
-      ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
-      ${newestTs ? `<a class="item-time" data-channel="${cp.channel_id}" data-ts="${newestTs}" href="${slackPermalink(cp.channel_id, newestTs)}" target="_blank">${timeDisplay}</a>` : `<span class="item-time">${timeDisplay}</span>`}
+      ${channelLink('#' + escapeHtml(ch), cp.channel_id)} <span class="item-sep">·</span> ${newestTs ? `<a class="item-time" data-channel="${cp.channel_id}" data-ts="${newestTs}" href="${slackPermalink(cp.channel_id, newestTs)}" target="_blank">${timeDisplay}</a>` : `<span class="item-time">${timeDisplay}</span>`}
     </div>
     <div class="item-right">
       <div class="msg-row"><div class="msg-content">
@@ -1311,8 +1306,7 @@ function renderSavedItem(item, data) {
   const savedExtras = wrapFilesIfTruncated(_stid, renderFwd(msg.fwd, data.users), renderFiles(msg.files));
   return `<div class="item saved-item" data-complete-request-id="">
     <div class="item-left">
-      ${channelLink('#' + escapeHtml(ch), channel)}
-      ${itemTime(ts, channel)}
+      ${channelLink('#' + escapeHtml(ch), channel)} <span class="item-sep">·</span> ${itemTime(ts, channel)}
     </div>
     <div class="item-right">
       <div class="msg-row">
@@ -1360,8 +1354,7 @@ function renderBotThreadItem(cp, data, cssClass) {
 
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
-      ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
-      ${itemTime(allMsgs[allMsgs.length - 1]?.ts, cp.channel_id)}
+      ${channelLink('#' + escapeHtml(ch), cp.channel_id)} <span class="item-sep">·</span> ${itemTime(allMsgs[allMsgs.length - 1]?.ts, cp.channel_id)}
     </div>
     <div class="item-right">
       ${contentHtml}

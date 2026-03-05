@@ -39,6 +39,7 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeVip`,
   `${FSLACK}:summarizeBotThread`,
   `${FSLACK}:summarizeThreadReplies`,
+  `${FSLACK}:summarizeRoot`,
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
 ]);
@@ -420,6 +421,52 @@ async function handleBotThreadSummarize(item) {
   }
 }
 
+// ── Build root message summarization prompt ──
+function buildRootSummarizePrompt(item) {
+  return `Summarize this Slack message in 1 terse sentence (under 120 chars). Just the key point, no preamble.
+
+Author: ${item.user}
+Channel: #${item.channel}
+Message: ${item.text}
+
+Respond with ONLY a JSON object: {"summary": "..."}
+No markdown fences, no explanation.`;
+}
+
+// ── Call Claude API for root message summarization ──
+async function handleRootSummarize(item) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  try {
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: buildRootSummarizePrompt(item) }],
+      }),
+    });
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+    const data = await resp.json();
+    const text = data.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
+    return { error: 'parse_error', raw: text };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
 // ── Message handler (LLM calls + API key) ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Track active Slack tab from content script messages
@@ -456,6 +503,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeThreadReplies`) {
     handleThreadReplySummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:summarizeRoot`) {
+    handleRootSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {
