@@ -1188,9 +1188,6 @@ function renderChannelItem(cp, data, cssClass) {
     <div class="item-left">
       ${channelLink('#' + escapeHtml(ch), cp.channel_id)}
       ${itemTime(latest?.ts, cp.channel_id)}`;
-  if (cp.mention_count > 0 || cp._isMentioned) {
-    html += `<div class="item-mention">@mentioned</div>`;
-  }
   html += reasonBadge(cp, cssClass);
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
@@ -1689,7 +1686,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
       const shortDm = isDm && (item.messages || []).reduce((n, m) => n + (m.text || '').length, 0) < 200;
       item._reason = shortDm ? undefined : (reasons[item._llmId] || undefined);
       // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
-      if (!item._reason && isMentioned) item._reason = 'You were mentioned';
+      if (!item._reason && isMentioned) item._reason = item._mentionInReplies && !item._mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
       if (!item._reason && llmCat !== cat) {
         const ch = data.channels?.[item.channel_id] || item.channel_id;
         console.log(`[fslack] no LLM reason for ${item._llmId} (#${ch}): LLM said "${llmCat}", overridden to "${cat}"` +
@@ -3571,9 +3568,6 @@ function render(data) {
         <div class="item-left">
           <span class="item-channel" data-channel="${cp.channel_id}">#${ch}</span>
           ${itemTime(latest?.ts, cp.channel_id)}`;
-      if (cp.mention_count > 0 || cp._isMentioned) {
-        html += `<div class="item-mention">@mentioned</div>`;
-      }
       html += `</div>
         <div class="item-right">`;
       for (const m of cp.messages.slice(0, 3)) {
