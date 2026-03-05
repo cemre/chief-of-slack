@@ -1079,7 +1079,7 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise 
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
-  return `<div class="item-reason ${cls}">${escapeHtml(item._reason)}</div>`;
+  return `<div class="item-reason item-reason-toggle ${cls}">${escapeHtml(item._reason)} ↓</div>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -1099,14 +1099,16 @@ function renderThreadItem(t, data, cssClass) {
   }
 
   const markAllTs = lastUnread?.ts || t.ts;
-  let html = `<div class="item ${cssClass}">
-    <div class="item-left">
+  const collapsible = cssClass === 'act-now' || cssClass === 'priority-item';
+  let html = `<div class="item ${cssClass}">`;
+  html += reasonBadge(t, cssClass);
+  if (collapsible) html += '<div class="item-details">';
+  html += `<div class="item-left">
       ${channelLink(channelLabel, t.channel_id)} <span class="item-sep">·</span> ${itemTime(markAllTs, t.channel_id)}`;
   if (!t._mentionInReplies && t.mention_count > 0) {
     html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
   }
   html += `</div>`;
-  html += reasonBadge(t, cssClass);
   const isRootFromSelf = t.root_user === data.selfId;
   const shouldSummarize = threadNeedsSummary(t);
   const threadKey = shouldSummarize ? `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}` : '';
@@ -1166,7 +1168,7 @@ function renderThreadItem(t, data, cssClass) {
 
   html += '</div>';
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread, '', false, t._isMentioned || t.mention_count > 0);
-  html += '</div></div>';
+  html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
 
@@ -1196,10 +1198,12 @@ function renderDmItem(dm, data, cssClass) {
   if (!dm.messages || dm.messages.length === 0) return '';
   const latest = dm.messages[0];
   const partner = dmPartnerName(dm, data);
-  let html = `<div class="item ${cssClass}">
+  const collapsible = cssClass === 'act-now' || cssClass === 'priority-item';
+  let html = `<div class="item ${cssClass}">${reasonBadge(dm, cssClass)}
+    ${collapsible ? '<div class="item-details">' : ''}
     <div class="item-left">
       ${channelLink(escapeHtml(partner), dm.channel_id)} <span class="item-sep">·</span> ${itemTime(latest.ts, dm.channel_id)}
-    </div>${reasonBadge(dm, cssClass)}
+    </div>
     <div class="item-right">`;
   for (const m of [...dm.messages].reverse()) {
     const sender = dm.isGroup ? `${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), dm.channel_id, m.ts)} ` : '';
@@ -1209,7 +1213,7 @@ function renderDmItem(dm, data, cssClass) {
     html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${msgTime(m.ts, dm.channel_id)}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
-  html += '</div></div>';
+  html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
 
@@ -1242,8 +1246,11 @@ function buildThreadUiMeta(data, channelId, message) {
 function renderChannelItem(cp, data, cssClass) {
   const ch = data.channels[cp.channel_id] || cp.channel_id;
   const latest = cp.messages[0];
-  let html = `<div class="item ${cssClass}">
-    <div class="item-left">
+  const collapsible = cssClass === 'act-now' || cssClass === 'priority-item';
+  let html = `<div class="item ${cssClass}">`;
+  html += reasonBadge(cp, cssClass);
+  if (collapsible) html += '<div class="item-details">';
+  html += `<div class="item-left">
       ${channelLink('#' + escapeHtml(ch), cp.channel_id)} <span class="item-sep">·</span> ${itemTime(latest?.ts, cp.channel_id)}`;
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
@@ -1251,7 +1258,6 @@ function renderChannelItem(cp, data, cssClass) {
     html += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
   }
   html += `</div>`;
-  html += reasonBadge(cp, cssClass);
   html += `<div class="item-right">`;
   if (cp._summary) {
     const zendesk = extractZendeskSummary(cp._summary);
@@ -1289,7 +1295,7 @@ function renderChannelItem(cp, data, cssClass) {
     }
   }
   html += itemActions(cp.channel_id, latest?.ts, null, false, ch, cssClass === 'noise-item');
-  html += '</div></div>';
+  html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
 
@@ -1684,7 +1690,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
     const dm = forLlm.dms[i];
     const participantIds = (dm.members || []).filter((uid) => uid && uid !== data.selfId);
     const participantNames = [...new Set(participantIds.map((uid) => fullName(uid, data.fullNames)))].filter(Boolean);
-    items.push({
+    const dmItem = {
       id: `dm_${i}`,
       type: 'dm',
       isGroup: !!dm.isGroup,
@@ -1693,7 +1699,14 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
         user: m.subtype === 'bot_message' ? 'Bot' : fullName(m.user, data.fullNames),
         text: plainTruncate(textWithFwd(m.text, m.fwd), 1000, data.users),
       })),
-    });
+    };
+    if (dm.recentContext?.length) {
+      dmItem.recentContext = dm.recentContext.map((m) => ({
+        user: fullName(m.user, data.fullNames),
+        text: plainTruncate(m.text, 500, data.users),
+      }));
+    }
+    items.push(dmItem);
   }
 
   for (let i = 0; i < forLlm.channelPosts.length; i++) {
@@ -1732,6 +1745,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isQualified = isDm || isPrivate || isMentioned;
     const userReplied = item._userReplied || false;
     const llmCat = cat; // original LLM classification before overrides
+    const chLabel = data.channels?.[item.channel_id] || item.channel_id;
 
     // DM overrides: VIP DMs → act_now, all other DMs → at least priority
     if (isDm) {
@@ -1750,17 +1764,28 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
 
     if (cat === 'act_now' || cat === 'priority') {
-      // Skip AI reason for short DMs — the message itself is readable enough
-      const shortDm = isDm && (item.messages || []).reduce((n, m) => n + (m.text || '').length, 0) < 200;
-      item._reason = shortDm ? undefined : (reasons[item._llmId] || undefined);
+      item._reason = reasons[item._llmId] || undefined;
       // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
       if (!item._reason && isMentioned) item._reason = item._mentionInReplies && !item._mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
-      if (!item._reason && llmCat !== cat) {
-        const ch = data.channels?.[item.channel_id] || item.channel_id;
-        console.log(`[fslack] no LLM reason for ${item._llmId} (#${ch}): LLM said "${llmCat}", overridden to "${cat}"` +
-          ` | isMentioned=${isMentioned} mentionInRoot=${mentionInRoot} mentionInReplies=${item._mentionInReplies || false} isDm=${isDm} isPrivate=${isPrivate}` +
-          ` | reasons keys: [${Object.keys(reasons).join(', ')}]`);
+      // Fallback: truncate most substantive message text to ~10 words
+      if (!item._reason) {
+        let raw = '';
+        if (item._type === 'thread') {
+          const replies = item.unread_replies || [];
+          raw = replies.reduce((best, r) => (r.text || '').length > best.length ? r.text : best, '') || item.root_text || '';
+        } else {
+          const msgs = item.messages || [];
+          raw = msgs.reduce((best, m) => (m.text || '').length > best.length ? m.text : best, '') || '';
+        }
+        // Strip Slack markup (<@U..>, <http...|label>, etc.) and trim to ~10 words
+        raw = raw.replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
+        const words = raw.split(/\s+/).filter(Boolean);
+        item._reason = words.length > 10 ? words.slice(0, 10).join(' ') + '...' : words.join(' ') || 'new message';
       }
+    }
+
+    if (cat !== llmCat || cat === 'act_now' || cat === 'priority') {
+      console.log(`[fslack] ${item._llmId} (${item._type}, #${chLabel}): LLM="${llmCat}" → final="${cat}" | isDm=${isDm} isPrivate=${isPrivate} isMentioned=${isMentioned} reason="${item._reason || ''}"`);
     }
 
     if (cat === 'act_now') { actNow.push(item); return; }
@@ -1826,18 +1851,15 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '</section>';
   }
 
-  // Act Now
-  if (actNow.length > 0) {
-    html += '<section class="priority-section"><h2 class="act-now">Act Now</h2>';
+  // Act Now + Priority
+  if (actNow.length > 0 || (priority && priority.length > 0)) {
+    html += '<section class="priority-section">';
+    html += '<h2>Priority</h2>';
     for (const item of actNow) html += renderAnyItem(item, data, 'act-now');
-    html += '</section>';
-  }
-
-  // Priority
-  if (priority && priority.length > 0) {
-    html += '<section class="priority-section"><h2 class="priority-header">Priority</h2>';
-    for (const item of priority) html += renderAnyItem(item, data, 'priority-item');
-    html += `<div class="noise-section-footer"><button id="priority-mark-read-btn">Mark all priority as read</button></div>`;
+    for (const item of (priority || [])) html += renderAnyItem(item, data, 'priority-item');
+    if (priority && priority.length > 0) {
+      html += `<div class="noise-section-footer"><button id="priority-mark-read-btn">Mark all priority as read</button></div>`;
+    }
     html += '</section>';
   }
 
@@ -1939,6 +1961,16 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   resetThreadUnreadIndex();
   lastRenderData = data;
   mentionLookupDirty = true;
+
+  // Wire reason-badge toggle (delegated)
+  bodyEl.addEventListener('click', (e) => {
+    const toggle = e.target.closest('.item-reason-toggle');
+    if (!toggle) return;
+    const details = toggle.nextElementSibling;
+    if (!details?.classList.contains('item-details')) return;
+    const expanded = details.classList.toggle('expanded');
+    toggle.textContent = toggle.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
+  });
 
   // Auto-refresh after 5 minutes if act_now + priority are both empty
   if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
