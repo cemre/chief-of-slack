@@ -7,3 +7,4 @@ NEVER prepend `cd "/path/to/project" &&` to shell commands. The working director
 - When asked to commit: immediately stage and commit without asking for confirmation or showing a draft message first.
 - NEVER auto-commit after making changes — only commit when explicitly asked.
 - NEVER git push unless explicitly asked to push.
+- For commit messages, use `git commit -m "first line" -m "Co-Authored-By: ..."` instead of HEREDOC/`$(cat <<EOF)` to avoid command substitution permission prompts.

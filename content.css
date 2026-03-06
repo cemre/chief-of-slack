@@ -92,7 +92,7 @@ section h2 {
 .item-channel[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .inline-channel { display: inline; }
 .item-time { font-size: 11px; color: #616061; display: inline; margin-top: 0; }
-a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
+a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
 .item-time[data-channel] { cursor: pointer; }
 .item-time[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .msg-time[data-channel] { cursor: pointer; }
@@ -435,6 +435,10 @@ ul.slack-list, ol.slack-list {
 ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .deep-replies { font-size: 12px; }
 .self-bullet { color: #717274; }
+.msg-row.summarized > .msg-actions { display: none !important; }
+.msg-row.summarized.expanded > .msg-actions { display: flex !important; }
+.msg-row.summarized.expanded > .msg-content:not(.thread-orig-root) { display: none; }
+.msg-row.summarized.expanded > .thread-orig-root { display: block !important; }
 .deep-type-badge {
   display: inline-block;
   font-size: 10px;

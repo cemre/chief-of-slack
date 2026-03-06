@@ -924,7 +924,8 @@ function userLink(name, channel, ts) {
 
 function channelLink(label, channelId) {
   if (!channelId) return `<span class="item-channel">${label}</span>`;
-  return `<span class="item-channel" data-channel="${channelId}">${label}</span>`;
+  const href = `https://app.slack.com/archives/${channelId}`;
+  return `<a class="item-channel" data-channel="${channelId}" href="${href}" target="_blank">${label}</a>`;
 }
 
 const THREAD_BADGE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
@@ -1134,9 +1135,9 @@ function renderThreadItem(t, data, cssClass) {
       }).join('');
       repliesHtml = `<ul class="deep-summary deep-replies">${replyLis}</ul>`;
     }
-    rootContentHtml = `${rootHtml}${repliesHtml}${msgTime(t.ts, t.channel_id)}`;
+    rootContentHtml = `${rootHtml}${repliesHtml}`;
   } else if (shouldSummarize && !t._fullThreadSummary) {
-    rootContentHtml = `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:2px 0">Summarizing thread...</div>${msgTime(t.ts, t.channel_id)}`;
+    rootContentHtml = `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:2px 0">Summarizing thread...</div>`;
   } else {
     rootSeenClass = (seenCount > 0 || isRootFromSelf) ? ' root-seen' : '';
     const needsRootSummary = (seenCount > 0 || isRootFromSelf) && (t.root_text || '').length > 300;
@@ -1155,8 +1156,16 @@ function renderThreadItem(t, data, cssClass) {
       rootContentHtml = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${rootTextHtml}${rootExtras}${msgTime(t.ts, t.channel_id)}`;
     }
   }
+  let origRootHtml = '';
+  if (shouldSummarize) {
+    const _ortid = truncateId;
+    const origText = truncate(t.root_text, 400, data.users);
+    const origExtras = wrapFilesIfTruncated(_ortid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+    origRootHtml = `<div class="msg-content item-text thread-orig-root" style="display:none">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${origText}${origExtras}${msgTime(t.ts, t.channel_id)}</div>`;
+  }
+  const sumClass = shouldSummarize ? ' summarized' : '';
   html += `<div class="item-right">
-      <div class="msg-row"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${msgActions(t.channel_id, t.ts)}</div>`;
+      <div class="msg-row${sumClass}"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${origRootHtml}${msgActions(t.channel_id, t.ts)}</div>`;
 
   html += '<div class="thread-replies-container">';
   if (seenCount > 0) {
@@ -2740,17 +2749,22 @@ bodyEl.addEventListener('click', (e) => {
           msgsDiv.style.display = 'block';
           showMsgsLink.classList.remove('loading');
           showMsgsLink.textContent = showMsgsLink.dataset.showText.replace('show', 'hide').replace('↓', '↑');
+          const msgRowFetch = showMsgsLink.closest('.item-right')?.querySelector('.msg-row.summarized');
+          if (msgRowFetch) msgRowFetch.classList.add('expanded');
         };
         sendToInject({ type: `${FSLACK}:fetchReplies`, channel, ts, requestId: reqId });
         return;
       }
       if (!showMsgsLink.dataset.showText) showMsgsLink.dataset.showText = showMsgsLink.textContent;
+      const msgRowToggle = showMsgsLink.closest('.item-right')?.querySelector('.msg-row.summarized');
       if (msgsDiv.style.display === 'block') {
         msgsDiv.style.display = 'none';
         showMsgsLink.textContent = showMsgsLink.dataset.showText;
+        if (msgRowToggle) msgRowToggle.classList.remove('expanded');
       } else {
         msgsDiv.style.display = 'block';
         showMsgsLink.textContent = showMsgsLink.dataset.showText.replace('show', 'hide').replace('↓', '↑');
+        if (msgRowToggle) msgRowToggle.classList.add('expanded');
       }
     }
     return;
@@ -3352,7 +3366,20 @@ function runThreadReplySummarization(allItems, data) {
         }).join('');
         wrapper.appendChild(ul);
       }
+      const msgRow = loadingEl.closest('.msg-row.summarized');
       loadingEl.replaceWith(wrapper);
+      if (msgRow && !msgRow.querySelector('.thread-orig-root')) {
+        const _ortid = truncateId;
+        const origText = truncate(t.root_text, 400, data.users);
+        const origExtras = wrapFilesIfTruncated(_ortid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+        const origDiv = document.createElement('div');
+        origDiv.className = 'msg-content item-text thread-orig-root';
+        origDiv.style.display = 'none';
+        origDiv.innerHTML = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${origText}${origExtras}${msgTime(t.ts, t.channel_id)}`;
+        const actionsEl = msgRow.querySelector('.msg-actions');
+        if (actionsEl) msgRow.insertBefore(origDiv, actionsEl);
+        else msgRow.appendChild(origDiv);
+      }
     }
   })();
 }
