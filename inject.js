@@ -117,6 +117,63 @@
     return data.emoji || {};
   }
 
+  // Sidebar section name → tier mapping (case-insensitive)
+  const SECTION_TIER_MAP = {
+    top: 'top',
+    daily: 'daily',
+    firehoses: 'firehoses',
+    weekly: 'weekly',
+    other: 'other',
+  };
+
+  async function fetchSidebarSections() {
+    // Check 1-hour localStorage cache (chrome.storage not available in page context)
+    const CACHE_TTL = 60 * 60 * 1000;
+    let cached = null;
+    try {
+      cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
+    } catch {}
+    if (cached && cached.ts && Date.now() - cached.ts < CACHE_TTL) {
+      return cached.data;
+    }
+
+    const result = {};
+    try {
+      const resp = await slackApi('users.channelSections.list');
+      const sections = resp.channel_sections || [];
+      for (const section of sections) {
+        const name = (section.name || '').toLowerCase().trim();
+        const tier = SECTION_TIER_MAP[name] || null;
+        if (!tier) continue;
+        // Collect channel IDs — handle pagination if needed
+        let channelIds = section.channel_ids || [];
+        if (section.channel_ids_page_cursor) {
+          let cursor = section.channel_ids_page_cursor;
+          while (cursor) {
+            try {
+              const page = await slackApi('users.channelSections.list', { cursor });
+              const pageSections = page.channel_sections || [];
+              const matching = pageSections.find((s) => s.channel_section_id === section.channel_section_id);
+              if (matching?.channel_ids?.length) channelIds = [...channelIds, ...matching.channel_ids];
+              cursor = matching?.channel_ids_page_cursor || null;
+            } catch { break; }
+          }
+        }
+        for (const cid of channelIds) result[cid] = tier;
+      }
+    } catch (err) {
+      console.warn(`[${FSLACK}] fetchSidebarSections failed:`, err);
+      if (cached?.data) return cached.data;
+      return {};
+    }
+
+    // Cache result in localStorage
+    try {
+      localStorage.setItem('fslackSidebarSections', JSON.stringify({ data: result, ts: Date.now() }));
+    } catch {}
+    return result;
+  }
+
   const NOISE_SUBTYPES = new Set([
     'channel_join', 'channel_leave', 'channel_topic', 'channel_purpose',
     'channel_name', 'channel_archive', 'channel_unarchive',
@@ -605,11 +662,13 @@
       if (mp.last_read) lastRead[mp.id] = mp.last_read;
     }
 
-    // 7. Custom emoji
+    // 7. Custom emoji + sidebar sections
     let emoji = cachedEmoji;
-    if (!emoji) {
-      try { emoji = await fetchEmojiList(); } catch { emoji = {}; }
-    }
+    const [emojiResult, sidebarSections] = await Promise.all([
+      emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
+      fetchSidebarSections(),
+    ]);
+    emoji = emojiResult;
 
     return {
       selfId,
@@ -626,6 +685,7 @@
       emoji,
       emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
+      sidebarSections,
     };
   }
 
@@ -864,11 +924,13 @@
     for (const im of (counts.ims || [])) { if (im.last_read) lastRead[im.id] = im.last_read; }
     for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
 
-    // 7. Emoji
+    // 7. Emoji + sidebar sections
     let emoji = cachedEmoji;
-    if (!emoji) {
-      try { emoji = await fetchEmojiList(); } catch { emoji = {}; }
-    }
+    const [emojiResult, sidebarSections] = await Promise.all([
+      emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
+      fetchSidebarSections(),
+    ]);
+    emoji = emojiResult;
 
     return {
       selfId,
@@ -885,6 +947,7 @@
       emoji,
       emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
+      sidebarSections,
     };
   }
 

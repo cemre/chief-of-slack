@@ -103,6 +103,10 @@ function buildPrompt(items, selfName) {
 ${nameClause}
 VIPs (messages from these people get higher priority): ${vipList}
 
+SIDEBAR SECTIONS: Items may include a "sidebarSection" field indicating channel importance in my Slack sidebar:
+- "top" or "daily" = high importance channels I actively monitor — treat activity here as more relevant
+- "weekly" or "other" = lower importance — use normal judgment
+
 CONTEXT:
 - If I posted or replied in a thread (userReplied=true) and someone then asks a question — even without @mentioning me — treat it as a question directed at me.
 - If I asked a question in my reply (userReplied=true) and someone answers it or gives a status update in response, classify as at least when_free — I want to see the answer to my question.

@@ -139,9 +139,8 @@ window._fslackDebug = function(channelId) {
     selfId: d.selfId,
     channelName: (d.channels || {})[cid],
     channelMeta: (d.channelMeta || {})[cid],
-    inNoiseChannels: !!noiseChannels[cid],
+    sidebarSection: sidebarSections[cid] || null,
     inDigestChannels: !!digestChannels[cid],
-    inNeverNoiseChannels: !!neverNoiseChannels[cid],
     rawChannelPost: (d.channelPosts || []).find(cp => cp.channel_id === cid),
     rawThread: (d.threads || []).find(t => t.channel_id === cid),
     inActNow: (p.actNow || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId, _reason: i._reason })),
@@ -160,8 +159,7 @@ window._fslackDebug = function(channelId) {
 // ── State ──
 let cachedView = null; // { data, popular, prioritized, ts }
 let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
-let noiseChannels = {};      // { [channelId]: channelName } — always force to noise
-let neverNoiseChannels = {}; // { [channelId]: channelName } — always force to whenFree
+let sidebarSections = {};    // { [channelId]: 'top'|'daily'|'firehoses'|'weekly'|'other' }
 let digestChannels = {};     // { [channelId]: channelName } — always force to digest section
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let myReactionsMap = {};     // { "channel:ts": ["+1", "yellow_heart", ...] }
@@ -249,9 +247,7 @@ function muteThreadLocally(channel, threadTs) {
   removeCachedItem(channel, threadTs);
 }
 function loadCachedPrefs(callback) {
-  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackNoiseChannels', 'fslackNeverNoiseChannels', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
-    noiseChannels = cached.fslackNoiseChannels || {};
-    neverNoiseChannels = cached.fslackNeverNoiseChannels || {};
+  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
     digestChannels = cached.fslackDigestChannels || {};
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     vipSeenTimestamps = cached.fslackVipSeen || {};
@@ -282,9 +278,9 @@ function startFetch() {
   resetFetchState();
   isFastFetch = true;
 
-  // First-ever fetch (no cache at all): auto-promote to full fetch
-  if (!cachedView) {
-    console.log('[fslack] No cached view — auto-promoting to full fetch');
+  // First-ever fetch or stale cache (>1h): auto-promote to full fetch
+  if (!cachedView || (cachedView.ts && Date.now() - cachedView.ts > 60 * 60 * 1000)) {
+    console.log(`[fslack] ${!cachedView ? 'No cached view' : 'Cache >1h old'} — auto-promoting to full fetch`);
     fetchBtn.disabled = false; // allow startFullFetch to proceed
     startFullFetch();
     return;
@@ -1069,7 +1065,7 @@ function itemTime(ts, channel) {
   return `<span class="item-time"${attrs}>${formatTime(ts)}</span>`;
 }
 
-function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise = false, hasMention = false) {
+function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused = false, hasMention = false) {
   const openTs = threadTs || markTs;
   return `<div class="item-actions">
     <span class="action-open" data-channel="${channel}" data-ts="${openTs}"><kbd>O</kbd> open</span>
@@ -1077,8 +1073,6 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', isNoise 
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
-    ${!threadTs && !isDm && !isNoise ? `<span class="action-always-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark noise</span>` : ''}
-    ${!threadTs && !isDm && isNoise ? `<span class="action-never-noise" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">never noise</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mark-digest" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark digest</span>` : ''}
   </div>`;
 }
@@ -1285,12 +1279,8 @@ function renderChannelItem(cp, data, cssClass) {
   let html = `<div class="item ${cssClass}"${csKeyAttr}>`;
   html += reasonBadge(cp, cssClass);
   if (collapsible) html += '<div class="item-details">';
-  html += `<div class="item-left${needsChannelSummary ? ' summary-toggle' : ''}"${needsChannelSummary ? ` data-target="${csMsgId}"` : ''}>
+  html += `<div class="item-left">
       ${channelLink('#' + escapeHtml(ch), cp.channel_id)}`;
-  if (needsChannelSummary) {
-    const arrowDir = cp._channelSummary ? '↓' : '↑';
-    html += ` <span class="item-sep">·</span> <span class="summary-reply-count">${cp.messages.length} msgs ${arrowDir}</span>`;
-  }
   html += ` <span class="item-sep">·</span> ${itemTime(latest?.ts, cp.channel_id)}`;
   if (cp._repliers?.length) {
     const names = cp._repliers.map(escapeHtml).join(', ');
@@ -1330,11 +1320,11 @@ function renderChannelItem(cp, data, cssClass) {
       }
     }
     if (cp._channelSummary) {
+      const arrowDir = '↓';
       const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
-      html += `<div class="msg-row"><div class="msg-content">
-        <ul class="deep-summary">${bullets}</ul>
-      </div></div>
-      <div class="deep-messages" id="${csMsgId}">${messagesHtml}</div>`;
+      html += `<div class="summary-toggle noise-toggle-row" data-target="${csMsgId}"><span class="summary-reply-count">${cp.messages.length} msgs ${arrowDir}</span></div>`;
+      html += `<div class="deep-summary-wrap summary-toggle" data-target="${csMsgId}"><ul class="deep-summary">${bullets}</ul></div>`;
+      html += `<div class="deep-messages" id="${csMsgId}">${messagesHtml}</div>`;
     } else {
       html += `<div class="msg-row"><div class="msg-content">
         <div id="${csKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Summarizing...</div>
@@ -1398,14 +1388,13 @@ function renderDeepSummarizedItem(cp, data) {
     </div>
     <div class="item-right">
       <div class="summary-toggle noise-toggle-row" data-target="${deepMsgId}"><span class="summary-reply-count">${msgs.length} msgs ↓</span></div>
-      <div class="deep-summary-wrap">
+      <div class="deep-summary-wrap summary-toggle" data-target="${deepMsgId}">
         ${cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : ''}<ul class="deep-summary">${deepBullets}</ul>
       </div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
         <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
-        <span class="show-messages-link action-never-noise" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">never noise</span>
         <span class="show-messages-link action-mark-digest" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">mark digest</span>
       </div>
     </div>
@@ -1561,6 +1550,7 @@ function applyPreFilters(data) {
     t._userReplied = (t.reply_users || []).includes(selfId);
     t._type = 'thread';
     t._isDmThread = t.channel_id?.startsWith('D') || false;
+    t._sidebarSection = sidebarSections[t.channel_id] || null;
 
     // Check unread replies for direct @-mentions (drives floor rule → forced priority)
     const unreadTexts = (t.unread_replies || []).map((r) => r.text).join(' ');
@@ -1624,13 +1614,14 @@ function applyPreFilters(data) {
   // Channel posts
   for (const cp of channelPostList) {
     cp._type = 'channel';
+    cp._sidebarSection = sidebarSections[cp.channel_id] || null;
 
     const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
     cp._isMentioned = containsSelfMention(allCpTexts, selfId);
 
     // Debug: log routing for every channel post
     const _dbgCh = channels[cp.channel_id] || cp.channel_id;
-    const _dbgLog = (route) => { window._preFilterLog[cp.channel_id] = { channel: _dbgCh, route, _isMentioned: cp._isMentioned, mention_count: cp.mention_count, msgCount: cp.messages.length, selfId, textSnippet: allCpTexts.slice(0, 200) }; };
+    const _dbgLog = (route) => { window._preFilterLog[cp.channel_id] = { channel: _dbgCh, route, _isMentioned: cp._isMentioned, mention_count: cp.mention_count, msgCount: cp.messages.length, selfId, sidebarSection: cp._sidebarSection, textSnippet: allCpTexts.slice(0, 200) }; };
 
     // Dedup: if every message in this channel post is already a thread root, skip it
     // but carry over mention_count and _isMentioned to the thread
@@ -1674,15 +1665,10 @@ function applyPreFilters(data) {
       continue;
     }
 
-    // Persistent channel preferences — bypass LLM entirely
-    if (noiseChannels[cp.channel_id]) {
-      _dbgLog('noiseChannel');
+    // Firehoses sidebar section → hard noise, bypass LLM
+    if (cp._sidebarSection === 'firehoses') {
+      _dbgLog('firehoses');
       noise.push(cp);
-      continue;
-    }
-    if (neverNoiseChannels[cp.channel_id]) {
-      _dbgLog('neverNoiseChannel');
-      whenFree.push(cp);
       continue;
     }
 
@@ -1734,6 +1720,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       channel: ch,
       isPrivate: meta[t.channel_id]?.isPrivate || false,
       isMentioned: t._isMentioned || false,
+      sidebarSection: t._sidebarSection || undefined,
       rootUser: fullName(t.root_user, data.fullNames),
       rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 1000, data.users),
       userReplied: t._userReplied,
@@ -1786,6 +1773,7 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
       channel: ch,
       isPrivate: meta[cp.channel_id]?.isPrivate || false,
       isMentioned: cp._isMentioned || false,
+      sidebarSection: cp._sidebarSection || undefined,
       mentionCount: cp.mention_count || 0,
       messages: cp.messages.map((m) => ({
         user: m.subtype === 'bot_message' ? 'Bot' : fullName(m.user, data.fullNames),
@@ -1810,6 +1798,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isDm = item._type === 'dm' || item._isDmThread;
     const isMentioned = item._isMentioned || false;
     const mentionInRoot = item._mentionInRoot || false;
+    const isImportantChannel = item._sidebarSection === 'top' || item._sidebarSection === 'daily';
     const isQualified = isDm || isPrivate || isMentioned;
     const userReplied = item._userReplied || false;
     const llmCat = cat; // original LLM classification before overrides
@@ -1828,8 +1817,11 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     // Floor: direct @mentions are at least priority (LLM can upgrade to act_now but not below priority)
     if (isMentioned && cat !== 'act_now') cat = 'priority';
 
-    // Hard gate: only DMs, private channels, or @mentions can reach act_now/priority
-    if (!isQualified && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
+    // Hard gate: only DMs, private channels, @mentions, or Top/Daily sidebar channels can reach act_now/priority
+    if (!isQualified && !isImportantChannel && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
+
+    // Floor for Top/Daily: never demote below when_free
+    if (isImportantChannel && (cat === 'noise' || cat === 'drop')) cat = 'when_free';
 
     if (cat === 'act_now' || cat === 'priority') {
       item._reason = reasons[item._llmId] || undefined;
@@ -1853,14 +1845,14 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     }
 
     if (cat !== llmCat || cat === 'act_now' || cat === 'priority') {
-      console.log(`[fslack] ${item._llmId} (${item._type}, #${chLabel}): LLM="${llmCat}" → final="${cat}" | isDm=${isDm} isPrivate=${isPrivate} isMentioned=${isMentioned} reason="${item._reason || ''}"`);
+      console.log(`[fslack] ${item._llmId} (${item._type}, #${chLabel}): LLM="${llmCat}" → final="${cat}" | isDm=${isDm} isPrivate=${isPrivate} isMentioned=${isMentioned} isImportant=${isImportantChannel} reason="${item._reason || ''}"`);
     }
 
     if (cat === 'act_now') { actNow.push(item); return; }
     if (cat === 'priority') { priority.push(item); return; }
 
-    // Public channel posts without @mention always go to noise (deep summarization pipeline)
-    if (item._type === 'channel' && !isPrivate && !isMentioned) { noise.push(item); return; }
+    // Public channel posts without @mention go to noise — unless in Top/Daily sidebar section
+    if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel) { noise.push(item); return; }
 
     if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
     if (cat === 'drop') return;
@@ -2678,41 +2670,8 @@ bodyEl.addEventListener('click', (e) => {
     markDigestBtn.dataset.pending = 'true';
     markDigestBtn.textContent = '...';
     digestChannels[channel] = channelName || channel;
-    delete noiseChannels[channel];
-    chrome.storage.local.set({ fslackDigestChannels: digestChannels, fslackNoiseChannels: noiseChannels }, () => {
+    chrome.storage.local.set({ fslackDigestChannels: digestChannels }, () => {
       markDigestBtn.closest('.item')?.remove();
-      cachedView = null;
-      chrome.storage.local.remove('fslackViewCache');
-    });
-    return;
-  }
-
-  // "always noise"
-  const alwaysNoiseBtn = e.target.closest('.action-always-noise');
-  if (alwaysNoiseBtn && !alwaysNoiseBtn.dataset.pending) {
-    const { channel, channelName } = alwaysNoiseBtn.dataset;
-    alwaysNoiseBtn.dataset.pending = 'true';
-    alwaysNoiseBtn.textContent = '...';
-    noiseChannels[channel] = channelName || channel;
-    delete neverNoiseChannels[channel];
-    chrome.storage.local.set({ fslackNoiseChannels: noiseChannels, fslackNeverNoiseChannels: neverNoiseChannels }, () => {
-      alwaysNoiseBtn.closest('.item')?.remove();
-      cachedView = null;
-      chrome.storage.local.remove('fslackViewCache');
-    });
-    return;
-  }
-
-  // "never noise"
-  const neverNoiseBtn = e.target.closest('.action-never-noise');
-  if (neverNoiseBtn && !neverNoiseBtn.dataset.pending) {
-    const { channel, channelName } = neverNoiseBtn.dataset;
-    neverNoiseBtn.dataset.pending = 'true';
-    neverNoiseBtn.textContent = '...';
-    neverNoiseChannels[channel] = channelName || channel;
-    delete noiseChannels[channel];
-    chrome.storage.local.set({ fslackNeverNoiseChannels: neverNoiseChannels, fslackNoiseChannels: noiseChannels }, () => {
-      neverNoiseBtn.closest('.item')?.remove();
       cachedView = null;
       chrome.storage.local.remove('fslackViewCache');
     });
@@ -4339,6 +4298,7 @@ function handlePortMessage(msg) {
     pendingUnreads = msg.data;
     gotUnreads = true;
     if (msg.data) {
+      if (msg.data.sidebarSections) sidebarSections = msg.data.sidebarSections;
       const toStore = {};
       if (msg.data.users) {
         mergeCachedUsers(msg.data.users);
@@ -4370,6 +4330,7 @@ function handlePortMessage(msg) {
     pendingUnreads = msg.data;
     gotUnreads = true;
     if (msg.data) {
+      if (msg.data.sidebarSections) sidebarSections = msg.data.sidebarSections;
       const toStore = {};
       if (msg.data.users) {
         mergeCachedUsers(msg.data.users);

@@ -465,6 +465,7 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .deep-messages { display: none; margin-top: 8px; }
 .item-left.summary-toggle { cursor: pointer; }
 .item-left.summary-toggle:hover .summary-reply-count { text-decoration: underline; }
+.deep-summary-wrap.summary-toggle { cursor: pointer; }
 .summary-reply-count { color: #1d9bd1; }
 
 .noise-section-footer {
