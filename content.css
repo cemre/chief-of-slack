@@ -254,6 +254,9 @@ ul.slack-list, ol.slack-list {
 .item.when-free { border-left: 3px solid #ecb22e; }
 .item.interesting { border-left: 3px solid #1d9bd1; }
 .item.noise-item { border-left: 3px solid #616061; opacity: 0.7; }
+.noise-inline-actions { opacity: 0; transition: opacity 0.1s; }
+.item.noise-item:hover .noise-inline-actions { opacity: 1; }
+.noise-toggle-row { cursor: pointer; padding: 2px 0; font-size: 13px; }
 .noise-items { display: none; }
 .noise-items.expanded { display: block; }
 .when-free-items { display: none; }
@@ -460,6 +463,9 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 }
 .show-messages-link:hover { text-decoration: underline; }
 .deep-messages { display: none; margin-top: 8px; }
+.item-left.summary-toggle { cursor: pointer; }
+.item-left.summary-toggle:hover .summary-reply-count { text-decoration: underline; }
+.summary-reply-count { color: #1d9bd1; }
 
 .noise-section-footer {
   padding: 20px 16px;

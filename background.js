@@ -210,25 +210,17 @@ function buildSummarizePrompt(item) {
   const serialized = JSON.stringify(item.messages, null, 0);
   return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
 
-Summarize what happened in this Slack channel in 1-3 terse clauses, and pick the best type.
+Summarize what happened in this Slack channel as 1-3 bullet points.
 
 Channel: #${item.channel}
 
-Types:
-- "key_update": intentional announcement or update from a person
-- "decision": a decision was made
-- "heated_discussion": back-and-forth debate
-- "needs_attention": something requires action
-- "feedback_digest": user feedback, bug reports, or support tickets (e.g. Zendesk)
-- "activity_digest": automated activity feed (e.g. Linear, GitHub, Jira)
-
-FORMAT: Write the summary as short clauses joined by semicolons.
-Each clause = [first name] [action verb] [specific thing].
+Each bullet = [first name] [action verb] [specific thing].
 Name the actual artifact, outcome, or content — not a vague category.
 
 Bad: "Matthew is coordinating end-of-week updates"
 Bad: "Cory introducing a new CLI tool and flagging policy updates"
-Good: "matthew merged a PR that fixes auth timeouts; cory shipped an org-admin CLI for provisioning and flagged that golden-triangle needs legal/policy sign-off"
+Good: "matthew merged a PR that fixes auth timeouts"
+Good: "cory shipped an org-admin CLI for provisioning and flagged that golden-triangle needs legal/policy sign-off"
 
 For automated channels, name the specific repos, tickets, or people involved.
 Omit filler. Use first names only. No passive voice.
@@ -237,7 +229,7 @@ MESSAGES:
 ${serialized}
 
 Respond with ONLY a JSON object:
-{"relevant": true, "type": "...", "summary": "..."}
+{"bullets": ["...", "..."]}
 No explanation, no markdown fences, just the JSON object.`;
 }
 
