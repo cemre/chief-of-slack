@@ -1108,13 +1108,10 @@ function renderThreadItem(t, data, cssClass) {
   let html = `<div class="item ${cssClass}">`;
   html += reasonBadge(t, cssClass);
   if (collapsible) html += '<div class="item-details">';
-  html += `<div class="item-left${shouldSummarize ? ' summary-toggle' : ''}"${shouldSummarize ? ` data-target="${repliesMsgId}"` : ''}>
+  html += `<div class="item-left">
       ${channelLink(channelLabel, t.channel_id)} <span class="item-sep">·</span> ${itemTime(markAllTs, t.channel_id)}`;
   if (!t._mentionInReplies && t.mention_count > 0) {
     html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
-  }
-  if (shouldSummarize) {
-    html += ` <span class="item-sep">·</span> <span class="summary-reply-count">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'} ↓</span>`;
   }
   html += `</div>`;
 
@@ -1166,8 +1163,13 @@ function renderThreadItem(t, data, cssClass) {
     origRootHtml = `<div class="msg-content item-text thread-orig-root" style="display:none">${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${origText}${origExtras}${msgTime(t.ts, t.channel_id)}</div>`;
   }
   const sumClass = shouldSummarize ? ' summarized' : '';
-  html += `<div class="item-right">
-      <div class="msg-row${sumClass}"><div class="msg-content item-text${rootSeenClass}">${rootContentHtml}</div>${origRootHtml}${msgActions(t.channel_id, t.ts)}</div>`;
+  html += `<div class="item-right">`;
+  if (shouldSummarize) {
+    html += `<div class="summary-toggle noise-toggle-row" data-target="${repliesMsgId}"><span class="summary-reply-count">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'} ↓</span></div>`;
+  }
+  const msgContentClass = `msg-content item-text${rootSeenClass}${shouldSummarize ? ' summary-toggle' : ''}`;
+  const msgContentTarget = shouldSummarize ? ` data-target="${repliesMsgId}"` : '';
+  html += `<div class="msg-row${sumClass}"><div class="${msgContentClass}"${msgContentTarget}>${rootContentHtml}</div>${origRootHtml}${msgActions(t.channel_id, t.ts)}</div>`;
 
   html += '<div class="thread-replies-container">';
   if (seenCount > 0) {
@@ -2046,7 +2048,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     if (toggle && items) {
       toggle.addEventListener('click', () => {
         const expanded = items.classList.toggle('expanded');
-        const count = items.querySelectorAll('.item').length;
+        const count = items.querySelectorAll('.item:not(.read-done)').length;
         toggle.textContent = `${label} · ${count} ${expanded ? '↑' : '↓'}`;
       });
     }
@@ -2705,7 +2707,7 @@ bodyEl.addEventListener('click', (e) => {
     const itemRight = item?.querySelector('.item-right');
     const msgRow = itemRight?.querySelector('.msg-row.summarized');
     const summaryWrap = itemRight?.querySelector('.deep-summary-wrap');
-    const countSpan = summaryToggle.querySelector('.summary-reply-count');
+    const countSpan = item?.querySelector('.summary-reply-count');
 
     if (msgsDiv.style.display === 'block') {
       msgsDiv.style.display = 'none';
@@ -3154,7 +3156,7 @@ async function kickoffVipSection(data) {
     return { vip, result: response?.summary };
   }));
 
-  let vipHtml = '<section class="priority-section"><h2 style="color:#ab7ae0">Creep on VIPs</h2>';
+  let vipHtml = '';
   let hasContent = false;
   for (let i = 0; i < summaries.length; i++) {
     const { vip, result } = summaries[i];
@@ -3186,12 +3188,12 @@ async function kickoffVipSection(data) {
         <span class="item-time">${formatTime(latestTs)}</span>
       </div>
       <div class="item-right">
-        <div class="msg-row"><div class="msg-content">
+        <div class="summary-toggle noise-toggle-row" data-target="${msgId}"><span class="summary-reply-count">${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span></div>
+        <div class="deep-summary-wrap summary-toggle" data-target="${msgId}">
           <ul class="deep-summary">${(result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join('')}</ul>
-        </div></div>
+        </div>
         <div class="deep-messages" id="${msgId}">${messagesHtml}</div>
         <div style="display:flex;gap:12px;margin-top:6px;">
-          <span class="show-messages-link" data-target="${msgId}" style="margin-top:0">show ${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'} ↓</span>
           <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
         </div>
       </div>
@@ -3203,7 +3205,6 @@ async function kickoffVipSection(data) {
     vipArea.dataset.loaded = '1';
     return;
   }
-  vipHtml += '</section>';
   vipArea.innerHTML = vipHtml;
   vipArea.dataset.loaded = '1';
 }
@@ -4200,6 +4201,28 @@ function handleCompleteSavedResult(msg) {
   }
 }
 
+function updateSectionToggleCount(itemEl) {
+  if (!itemEl) return;
+  const sections = [
+    ['when-free-items', 'when-free-toggle', 'When Free'],
+    ['noise-recent-items', 'noise-recent-toggle', 'Recent Noise'],
+    ['noise-older-items', 'noise-older-toggle', 'Older Noise'],
+    ['saved-items-list', 'saved-items-toggle', 'Saved'],
+    ['digest-items', 'digests-toggle', 'Digests'],
+  ];
+  for (const [itemsId, toggleId, label] of sections) {
+    const container = document.getElementById(itemsId);
+    if (container && container.contains(itemEl)) {
+      const toggle = document.getElementById(toggleId);
+      if (!toggle) return;
+      const count = container.querySelectorAll('.item:not(.read-done)').length;
+      const expanded = container.classList.contains('expanded');
+      toggle.textContent = `${label} · ${count} ${expanded ? '↑' : '↓'}`;
+      return;
+    }
+  }
+}
+
 function handleMarkReadResult(msg) {
   if (msg.ok) { removeCachedItem(msg.channel, msg.thread_ts); }
   const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
@@ -4209,7 +4232,7 @@ function handleMarkReadResult(msg) {
       markAll.textContent = 'undo';
       markAll.classList.add('done');
       const item = markAll.closest('.item');
-      if (item) item.classList.add('read-done');
+      if (item) { item.classList.add('read-done'); updateSectionToggleCount(item); }
     } else { markAll.textContent = 'mark read'; }
   }
 }
@@ -4221,7 +4244,7 @@ function handleMarkUnreadResult(msg) {
     if (msg.ok) {
       markAll.textContent = 'mark read';
       const item = markAll.closest('.item');
-      if (item) item.classList.remove('read-done');
+      if (item) { item.classList.remove('read-done'); updateSectionToggleCount(item); }
     } else {
       markAll.textContent = 'undo';
       markAll.classList.add('done');

@@ -28,8 +28,21 @@ let teamDomain = null;
 const _navHideStyle = document.createElement('style');
 _navHideStyle.textContent = `
   .p-tab_rail { display: none !important; }
-  .p-client_workspace__tabpanel > .enabled-managed-focus-container:first-child { display: none !important; }
+  .p-client_workspace__tabpanel > .enabled-managed-focus-container:first-child {
+    visibility: hidden !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+  }
   .p-client_workspace__tabpanel { grid-template-columns: 0px auto !important; }
+  /* Pull the compose button out of the hidden sidebar */
+  button[data-qa="composer_button"] {
+    visibility: visible !important;
+    position: fixed !important;
+    top: 2px !important;
+    left: 100px !important;
+    z-index: 999 !important;
+  }
 `;
 function hideSlackNav() { if (!_navHideStyle.parentNode) document.head.appendChild(_navHideStyle); }
 function showSlackNav() { _navHideStyle.remove(); }
@@ -110,6 +123,7 @@ _flackBtnStyle.textContent = `
   #fslack-nav-toggle:hover { background: rgba(0,0,0,0.06); }
 `;
 document.head.appendChild(_flackBtnStyle);
+
 
 // ── Relay: background.js / side panel → inject.js (page context) ──
 chrome.runtime.onMessage.addListener((msg) => {
