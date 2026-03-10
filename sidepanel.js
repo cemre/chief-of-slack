@@ -179,6 +179,33 @@ let knownDmChannelIds = new Set(); // DM channels already in the current render
 let mutedThreadKeys = new Set();   // Set of "channel:threadTs" strings for muted threads
 let autoRefreshTimer = null;       // auto-refresh when top sections are empty
 
+// ── LLM result caches (persist across fetches) ──
+// Prioritization: hash-based dedup to skip Claude calls when inbox unchanged
+let _prioritizationCache = null; // { importantHash, publicHash, result: { priorities, noiseOrder, reasons } }
+// Channel summaries: keyed by "channelId:latestTs"
+let _summaryCache = {};
+// VIP summaries: keyed by "vipName:latestTs"
+let _vipSummaryCache = {};
+// All summary types: keyed by "type:channelId:ts"
+let _allSummaryCache = {};
+
+// Simple string hash (djb2)
+function djb2Hash(str) {
+  let hash = 5381;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) + hash + str.charCodeAt(i)) & 0xffffffff;
+  }
+  return hash.toString(36);
+}
+
+// Load LLM caches from chrome.storage.local
+chrome.storage.local.get(['fslackPrioritizationCache', 'fslackSummaryCache', 'fslackVipSummaryCache', 'fslackAllSummaryCache'], (cached) => {
+  if (cached.fslackPrioritizationCache) _prioritizationCache = cached.fslackPrioritizationCache;
+  if (cached.fslackSummaryCache) _summaryCache = cached.fslackSummaryCache;
+  if (cached.fslackVipSummaryCache) _vipSummaryCache = cached.fslackVipSummaryCache;
+  if (cached.fslackAllSummaryCache) _allSummaryCache = cached.fslackAllSummaryCache;
+});
+
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
 const USERS_CACHE_VERSION = 2; // bump to invalidate stale user name cache
 chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fslackUsers', 'fslackUserMentionHints', 'fslackUsersCacheVersion'], (cached) => {
@@ -3129,9 +3156,15 @@ async function kickoffVipSection(data) {
     return;
   }
 
-  // Summarize each VIP in parallel with a byte cap
+  // Summarize each VIP in parallel with a byte cap (#10: cache by vipName:latestTs)
   const MAX_PAYLOAD_BYTES = 2000;
   const summaries = await Promise.all(relevantVips.map(async (vip) => {
+    const latestTs = vip.messages[0]?.ts || '';
+    const cacheKey = `${vip.name}:${latestTs}`;
+    if (_vipSummaryCache[cacheKey]) {
+      console.log(`[fslack] VIP summary cache HIT: ${cacheKey}`);
+      return { vip, result: _vipSummaryCache[cacheKey] };
+    }
     const messages = [];
     let bytes = 0;
     for (const m of vip.messages) {
@@ -3152,6 +3185,10 @@ async function kickoffVipSection(data) {
       );
     } catch {
       response = { error: 'send failed' };
+    }
+    if (response?.summary) {
+      _vipSummaryCache[cacheKey] = response.summary;
+      chrome.storage.local.set({ fslackVipSummaryCache: _vipSummaryCache });
     }
     return { vip, result: response?.summary };
   }));
@@ -3208,6 +3245,23 @@ async function kickoffVipSection(data) {
   vipArea.innerHTML = vipHtml;
   vipArea.dataset.loaded = '1';
 }
+// ── Persist summary helper ──
+function getCachedSummary(type, channelId, ts) {
+  const key = `${type}:${channelId}:${ts}`;
+  return _allSummaryCache[key] || null;
+}
+
+function setCachedSummary(type, channelId, ts, summary) {
+  const key = `${type}:${channelId}:${ts}`;
+  _allSummaryCache[key] = summary;
+  // Limit cache size to prevent storage bloat (keep most recent 200 entries)
+  const keys = Object.keys(_allSummaryCache);
+  if (keys.length > 200) {
+    for (const k of keys.slice(0, keys.length - 200)) delete _allSummaryCache[k];
+  }
+  chrome.storage.local.set({ fslackAllSummaryCache: _allSummaryCache });
+}
+
 // ── Async bot thread summarization ──
 function runBotThreadSummarization(whenFreeItems, data) {
   const botThreads = whenFreeItems.filter((item) => item._isBotThread && !item._botSummary);
@@ -3215,20 +3269,28 @@ function runBotThreadSummarization(whenFreeItems, data) {
 
   (async () => {
     for (const cp of botThreads) {
-      const ch = data.channels[cp.channel_id] || cp.channel_id;
-      const messages = cp.messages.map((m) => ({
-        user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
-        text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
-      }));
-      let response;
-      try {
-        response = await new Promise((resolve) =>
-          chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeBotThread`, data: { channel: ch, messages } }, resolve)
-        );
-      } catch { continue; }
-      if (!response?.summary?.summary) continue;
+      // #11: Check persistent cache
+      const cachedBot = getCachedSummary('bot', cp.channel_id, cp.sort_ts);
+      if (cachedBot) {
+        cp._botSummary = cachedBot;
+        console.log(`[fslack] Bot summary cache HIT: ${cp.channel_id}:${cp.sort_ts}`);
+      } else {
+        const ch = data.channels[cp.channel_id] || cp.channel_id;
+        const messages = cp.messages.map((m) => ({
+          user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
+          text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+        }));
+        let response;
+        try {
+          response = await new Promise((resolve) =>
+            chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeBotThread`, data: { channel: ch, messages } }, resolve)
+          );
+        } catch { continue; }
+        if (!response?.summary?.summary) continue;
+        cp._botSummary = response.summary.summary;
+        setCachedSummary('bot', cp.channel_id, cp.sort_ts, cp._botSummary);
+      }
 
-      cp._botSummary = response.summary.summary;
       const key = `bot-thread-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
       const itemEl = document.querySelector(`[data-bot-thread-key="${key}"]`);
       if (!itemEl) continue;
@@ -3268,20 +3330,28 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
 
   (async () => {
     for (const cp of channels) {
-      const ch = data.channels[cp.channel_id] || cp.channel_id;
-      const messages = cp.messages.map((m) => ({
-        user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
-        text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
-      }));
-      let response;
-      try {
-        response = await new Promise((resolve) =>
-          chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, messages } }, resolve)
-        );
-      } catch { continue; }
-      if (!response?.summary?.summary) continue;
+      // #11: Check persistent cache
+      const cachedChPost = getCachedSummary('chpost', cp.channel_id, cp.sort_ts);
+      if (cachedChPost) {
+        cp._channelSummary = cachedChPost;
+        console.log(`[fslack] Channel post summary cache HIT: ${cp.channel_id}:${cp.sort_ts}`);
+      } else {
+        const ch = data.channels[cp.channel_id] || cp.channel_id;
+        const messages = cp.messages.map((m) => ({
+          user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
+          text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+        }));
+        let response;
+        try {
+          response = await new Promise((resolve) =>
+            chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, messages } }, resolve)
+          );
+        } catch { continue; }
+        if (!response?.summary?.summary) continue;
+        cp._channelSummary = response.summary.summary;
+        setCachedSummary('chpost', cp.channel_id, cp.sort_ts, cp._channelSummary);
+      }
 
-      cp._channelSummary = response.summary.summary;
       const key = `ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
       const itemEl = document.querySelector(`[data-channel-summary-key="${key}"]`);
       if (!itemEl) continue;
@@ -3318,30 +3388,39 @@ function runThreadReplySummarization(allItems, data) {
 
   (async () => {
     for (const t of threads) {
-      const ch = data.channels[t.channel_id] || t.channel_id;
-      const unread = t.unread_replies || [];
-      const replies = [];
-      let bytes = 0;
-      for (const r of unread) {
-        const entry = { user: fullName(r.user, data.fullNames), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
-        const s = JSON.stringify(entry);
-        if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
-        bytes += s.length;
-        replies.push(entry);
+      // #11: Check persistent cache (key by latest unread reply ts)
+      const latestReplyTs = (t.unread_replies || []).slice(-1)[0]?.ts || t.ts;
+      const cachedThread = getCachedSummary('fullthread', t.channel_id, latestReplyTs);
+      if (cachedThread) {
+        t._fullThreadSummary = cachedThread;
+        console.log(`[fslack] Full thread summary cache HIT: ${t.channel_id}:${latestReplyTs}`);
+      } else {
+        const ch = data.channels[t.channel_id] || t.channel_id;
+        const unread = t.unread_replies || [];
+        const replies = [];
+        let bytes = 0;
+        for (const r of unread) {
+          const entry = { user: fullName(r.user, data.fullNames), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
+          const s = JSON.stringify(entry);
+          if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
+          bytes += s.length;
+          replies.push(entry);
+        }
+
+        let response;
+        try {
+          response = await new Promise((resolve) =>
+            chrome.runtime.sendMessage({
+              type: `${FSLACK}:summarizeFullThread`,
+              data: { channel: ch, rootUser: fullName(t.root_user, data.fullNames), rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 400, data.users), replies }
+            }, resolve)
+          );
+        } catch { continue; }
+        if (!response?.summary?.summary) continue;
+        t._fullThreadSummary = response.summary.summary;
+        setCachedSummary('fullthread', t.channel_id, latestReplyTs, t._fullThreadSummary);
       }
 
-      let response;
-      try {
-        response = await new Promise((resolve) =>
-          chrome.runtime.sendMessage({
-            type: `${FSLACK}:summarizeFullThread`,
-            data: { channel: ch, rootUser: fullName(t.root_user, data.fullNames), rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 400, data.users), replies }
-          }, resolve)
-        );
-      } catch { continue; }
-      if (!response?.summary?.summary) continue;
-
-      t._fullThreadSummary = response.summary.summary;
       const threadKey = `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
       const loadingEl = document.getElementById(`${threadKey}-loading`);
       if (!loadingEl) continue;
@@ -3398,19 +3477,26 @@ function runRootSummarization(allItems, data) {
 
   (async () => {
     for (const t of threads) {
-      const ch = data.channels[t.channel_id] || t.channel_id;
-      let response;
-      try {
-        response = await new Promise((resolve) =>
-          chrome.runtime.sendMessage({
-            type: `${FSLACK}:summarizeRoot`,
-            data: { channel: ch, user: fullName(t.root_user, data.fullNames), text: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 800, data.users) }
-          }, resolve)
-        );
-      } catch { continue; }
-      if (!response?.summary?.summary) continue;
-
-      t._rootSummary = response.summary.summary;
+      // #11: Check persistent cache
+      const cachedRoot = getCachedSummary('root', t.channel_id, t.ts);
+      if (cachedRoot) {
+        t._rootSummary = cachedRoot;
+        console.log(`[fslack] Root summary cache HIT: ${t.channel_id}:${t.ts}`);
+      } else {
+        const ch = data.channels[t.channel_id] || t.channel_id;
+        let response;
+        try {
+          response = await new Promise((resolve) =>
+            chrome.runtime.sendMessage({
+              type: `${FSLACK}:summarizeRoot`,
+              data: { channel: ch, user: fullName(t.root_user, data.fullNames), text: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 800, data.users) }
+            }, resolve)
+          );
+        } catch { continue; }
+        if (!response?.summary?.summary) continue;
+        t._rootSummary = response.summary.summary;
+        setCachedSummary('root', t.channel_id, t.ts, t._rootSummary);
+      }
       const rootKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
       const pendingEl = document.getElementById(rootKey);
       if (!pendingEl) continue;
@@ -3469,6 +3555,19 @@ function runChannelThreadSummarization(allItems, data) {
       const loadingEl = document.getElementById(`${key}-loading`);
       if (!loadingEl) { console.warn(`[chThreadSumm] no loadingEl for key=${key}`); return; }
 
+      // #11: Check persistent cache
+      const cachedChThread = getCachedSummary('chthread', cp.channel_id, m.ts);
+      if (cachedChThread) {
+        m._chThreadSummary = cachedChThread;
+        console.log(`[chThreadSumm] cache HIT for key=${key}`);
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'deep-summary';
+        summaryEl.style.cssText = 'margin:6px 0 2px';
+        summaryEl.textContent = cachedChThread;
+        loadingEl.replaceWith(summaryEl);
+        return;
+      }
+
       console.log(`[chThreadSumm] fetching replies for key=${key} channel=${cp.channel_id} ts=${m.ts}`);
       const rawReplies = await fetchRepliesAsync(cp.channel_id, m.ts);
       if (rawReplies.length === 0) { console.warn(`[chThreadSumm] no replies for key=${key}`); loadingEl.remove(); return; }
@@ -3497,6 +3596,7 @@ function runChannelThreadSummarization(allItems, data) {
 
       // Cache summary on the message object so it persists across renders
       m._chThreadSummary = response.summary.summary;
+      setCachedSummary('chthread', cp.channel_id, m.ts, m._chThreadSummary);
 
       console.log(`[chThreadSumm] got summary for key=${key}: "${response.summary.summary.slice(0, 80)}…"`);
       const summaryEl = document.createElement('div');
@@ -3594,6 +3694,10 @@ function prioritizeAndRender(data) {
     data, privateCount
   );
 
+  // #7: Content-hash dedup — skip Claude calls if payload unchanged
+  const importantHash = djb2Hash(JSON.stringify(importantItems));
+  const publicHash = djb2Hash(JSON.stringify(publicItems));
+
   function sendPrioritize(items) {
     return new Promise((resolve) => {
       if (items.length === 0) { resolve({ priorities: {}, noiseOrder: [] }); return; }
@@ -3604,7 +3708,37 @@ function prioritizeAndRender(data) {
     });
   }
 
-  Promise.all([sendPrioritize(importantItems), sendPrioritize(publicItems)]).then(([importantResp, publicResp]) => {
+  // #9: Merge prioritization calls when total items ≤ 25
+  let prioritizePromise;
+  if (totalItems <= 25 && importantItems.length > 0 && publicItems.length > 0) {
+    const allItems = [...importantItems, ...publicItems];
+    const allHash = djb2Hash(JSON.stringify(allItems));
+    if (_prioritizationCache && _prioritizationCache.allHash === allHash) {
+      console.log('[fslack] Prioritization cache HIT (merged) — skipping Claude call');
+      prioritizePromise = Promise.resolve([_prioritizationCache.result, { priorities: {}, noiseOrder: [] }]);
+    } else {
+      prioritizePromise = sendPrioritize(allItems).then((resp) => {
+        if (!resp?.error) {
+          _prioritizationCache = { allHash, importantHash: null, publicHash: null, result: resp };
+          chrome.storage.local.set({ fslackPrioritizationCache: _prioritizationCache });
+        }
+        return [resp, { priorities: {}, noiseOrder: [] }];
+      });
+    }
+  } else if (_prioritizationCache && _prioritizationCache.importantHash === importantHash && _prioritizationCache.publicHash === publicHash) {
+    console.log('[fslack] Prioritization cache HIT — skipping 2 Claude calls');
+    prioritizePromise = Promise.resolve([_prioritizationCache.importantResult, _prioritizationCache.publicResult]);
+  } else {
+    prioritizePromise = Promise.all([sendPrioritize(importantItems), sendPrioritize(publicItems)]).then(([iResp, pResp]) => {
+      if (!iResp?.error && !pResp?.error) {
+        _prioritizationCache = { importantHash, publicHash, allHash: null, importantResult: iResp, publicResult: pResp };
+        chrome.storage.local.set({ fslackPrioritizationCache: _prioritizationCache });
+      }
+      return [iResp, pResp];
+    });
+  }
+
+  prioritizePromise.then(([importantResp, publicResp]) => {
       if (importantResp?.error === 'extension_error' || publicResp?.error === 'extension_error') {
         render(data);
         return;
@@ -3689,6 +3823,29 @@ function prioritizeAndRender(data) {
         return { channel: ch, messages };
       }
 
+      // #8: Cached summarize — reuse if channelId:latestTs matches
+      async function cachedSummarize(cp) {
+        const allMsgs = cp.fullMessages?.history || cp.messages || [];
+        const latestTs = allMsgs[0]?.ts || '';
+        const cacheKey = `${cp.channel_id}:${latestTs}`;
+        if (_summaryCache[cacheKey]) {
+          console.log(`[fslack] Summary cache HIT: ${cacheKey}`);
+          return { cp, result: _summaryCache[cacheKey] };
+        }
+        const payload = buildSummarizePayload(cp);
+        let response;
+        try {
+          response = await new Promise((resolve) =>
+            chrome.runtime.sendMessage({ type: `${FSLACK}:summarize`, data: payload }, resolve)
+          );
+        } catch { return { cp, result: null }; }
+        if (response?.summary) {
+          _summaryCache[cacheKey] = response.summary;
+          chrome.storage.local.set({ fslackSummaryCache: _summaryCache });
+        }
+        return { cp, result: response?.summary };
+      }
+
       // Fast fetch: render from cache, then summarize any unsummarized noise items in-place
       if (isFastFetch) {
         const unsummarizedNoise = prioritized.noise.filter((item) =>
@@ -3711,16 +3868,7 @@ function prioritizeAndRender(data) {
           const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
           const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
 
-          const results = await Promise.all(unsummarizedNoise.map(async (cp) => {
-            const payload = buildSummarizePayload(cp);
-            let response;
-            try {
-              response = await new Promise((resolve) =>
-                chrome.runtime.sendMessage({ type: `${FSLACK}:summarize`, data: payload }, resolve)
-              );
-            } catch { return { cp, result: null }; }
-            return { cp, result: response?.summary };
-          }));
+          const results = await Promise.all(unsummarizedNoise.map(cachedSummarize));
 
           for (const { cp, result } of results) {
             if (result?.bullets?.length) {
@@ -3808,20 +3956,12 @@ function prioritizeAndRender(data) {
 
         const allDeepItems = [...deepNoise, ...digestItems];
         const results = await Promise.all(allDeepItems.map(async (cp) => {
-          const payload = buildSummarizePayload(cp);
-          let response;
-          try {
-            response = await new Promise((resolve) =>
-              chrome.runtime.sendMessage({ type: `${FSLACK}:summarize`, data: payload }, resolve)
-            );
-          } catch {
-            response = { error: 'send failed' };
-          }
+          const { result } = await cachedSummarize(cp);
           if (!cp._isDigestChannel) {
             noiseDone++;
             if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${noiseDone}/${deepNoise.length}`;
           }
-          return { cp, result: response?.summary, error: response?.error };
+          return { cp, result };
         }));
 
         if (deepNoiseArea) deepNoiseArea.textContent = '';

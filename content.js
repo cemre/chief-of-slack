@@ -35,6 +35,10 @@ _navHideStyle.textContent = `
     overflow: hidden !important;
   }
   .p-client_workspace__tabpanel { grid-template-columns: 0px auto !important; }
+  .p-client_workspace__tabpanel:has(.p-view_contents--secondary) {
+    grid-template-columns: 0px auto auto !important;
+    grid-template-areas: "p-view_contents--sidebar p-view_contents--primary p-view_contents--secondary" !important;
+  }
   /* Pull the compose button out of the hidden sidebar */
   button[data-qa="composer_button"] {
     visibility: visible !important;

@@ -10,6 +10,39 @@
   let _selfId = null; // cached after first fetch for lightweight polls
   let _cachedBootPrefs = null; // cached boot.prefs from last userBoot call
 
+  // ── Fast-fetch caches with TTL (#2, #3) ──
+  let _countsCache = null;     // { data, ts }
+  let _threadViewCache = null;  // { data, ts }
+  let _dmContextCache = {};     // { [channelId]: { lastRead, context } }
+  const FAST_CACHE_TTL = 60 * 1000; // 60s
+
+  // ── Mark-read batching (#5) ──
+  let _markReadQueue = [];
+  let _markReadTimer = null;
+
+  async function flushMarkReadQueue() {
+    const batch = _markReadQueue.splice(0);
+    _markReadTimer = null;
+    if (batch.length === 0) return;
+    console.log(`[${FSLACK}] Flushing ${batch.length} mark-read requests in parallel`);
+    await Promise.all(batch.map(async (req) => {
+      const { channel, ts, thread_ts, has_mention, requestId } = req;
+      try {
+        if (thread_ts) {
+          await slackApi('subscriptions.thread.mark', { channel, thread_ts, ts });
+          if (has_mention) {
+            await slackApi('conversations.mark', { channel, ts }).catch(() => {});
+          }
+        } else {
+          await slackApi('conversations.mark', { channel, ts });
+        }
+        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: false }, '*');
+      }
+    }));
+  }
+
   function getToken() {
     try {
       const localConfig = JSON.parse(localStorage.getItem('localConfig_v2'));
@@ -19,7 +52,13 @@
     }
   }
 
+  // ── API call counter (per fetch cycle) ──
+  let _slackApiCallCount = 0;
+  let _slackApiCallLog = [];
+
   async function slackApi(endpoint, params = {}) {
+    _slackApiCallCount++;
+    _slackApiCallLog.push(endpoint);
     const token = getToken();
     if (!token) throw new Error('No Slack token found');
 
@@ -37,6 +76,14 @@
     const data = await resp.json();
     if (!data.ok) throw new Error(`Slack API error: ${data.error}`);
     return data;
+  }
+
+  function resetApiCounter() {
+    const count = _slackApiCallCount;
+    const log = _slackApiCallLog;
+    _slackApiCallCount = 0;
+    _slackApiCallLog = [];
+    return { count, log };
   }
 
   async function resolveUsers(userIds, cachedUsers = {}, cachedMentionHints = {}, cachedFullNames = {}, onProgress) {
@@ -343,11 +390,14 @@
       getSelfIdAndMuted(),
     ]);
     _selfId = selfId;
+    // Update caches for subsequent fast fetches
+    _countsCache = { data: counts, ts: Date.now() };
     progress(1, `Done. ${(counts.channels||[]).filter(c=>c.has_unreads).length} unread channels, self=${selfId}`);
 
     // 2. Get unread threads — use unread_replies, filter out self-only
     progress(2, 'Fetching threads...');
     const threadView = await slackApi('subscriptions.thread.getView');
+    _threadViewCache = { data: threadView, ts: Date.now() };
     const threads = (threadView.threads || [])
       .map((t) => {
         const unread = (t.unread_replies || []).map((r) => ({
@@ -691,17 +741,26 @@
 
   async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // Fast mode: only counts + threads + DMs (no channel history)
+    const now = Date.now();
+
+    // #2: Reuse cached counts if fresh
     progress(1, 'Getting counts + user info...');
+    const countsPromise = (_countsCache && now - _countsCache.ts < FAST_CACHE_TTL)
+      ? (console.log(`[${FSLACK}] Reusing cached counts (${Math.round((now - _countsCache.ts) / 1000)}s old)`), Promise.resolve(_countsCache.data))
+      : slackApi('client.counts').then((d) => { _countsCache = { data: d, ts: Date.now() }; return d; });
+
     const [counts, { selfId, muted }] = await Promise.all([
-      slackApi('client.counts'),
+      countsPromise,
       getSelfIdAndMuted(),
     ]);
     _selfId = selfId;
     progress(1, `Done. self=${selfId}`);
 
-    // 2. Threads
+    // 2. Threads (#3: reuse cached threadView if fresh)
     progress(2, 'Fetching threads...');
-    const threadView = await slackApi('subscriptions.thread.getView');
+    const threadView = (_threadViewCache && Date.now() - _threadViewCache.ts < FAST_CACHE_TTL)
+      ? (console.log(`[${FSLACK}] Reusing cached threadView (${Math.round((Date.now() - _threadViewCache.ts) / 1000)}s old)`), _threadViewCache.data)
+      : await slackApi('subscriptions.thread.getView').then((d) => { _threadViewCache = { data: d, ts: Date.now() }; return d; });
     const threads = (threadView.threads || [])
       .map((t) => {
         const unread = (t.unread_replies || []).map((r) => ({
@@ -789,14 +848,21 @@
         for (const msg of msgs) {
           if (msg.files) await ensureTranscripts(msg.files);
         }
+        // #4: Skip DM context fetch if last_read hasn't changed (reuse cached context)
         let recentContext = [];
         if (oldestTs && oldestTs !== '0') {
-          try {
-            const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
-            recentContext = (ctxHist.messages || [])
-              .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
-              .reverse();
-          } catch { /* non-critical */ }
+          const dmCtx = _dmContextCache[conv.id];
+          if (dmCtx && dmCtx.lastRead === oldestTs) {
+            recentContext = dmCtx.context;
+          } else {
+            try {
+              const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
+              recentContext = (ctxHist.messages || [])
+                .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
+                .reverse();
+              _dmContextCache[conv.id] = { lastRead: oldestTs, context: recentContext };
+            } catch { /* non-critical */ }
+          }
         }
         if (msgs.length > 0) {
           const dmPayload = { channel_id: conv.id, messages: msgs, recentContext };
@@ -985,39 +1051,63 @@
   }
 
   const VIP_QUERIES = [
-    { name: 'JM',     query: 'from:<@U02KNNU0ZBN>' },
-    { name: 'Josh',   query: 'from:@josh' },
-    { name: 'Samir',  query: 'from:@samir' },
-    { name: 'Ori',    query: 'from:<@U0ABNTRG4HJ>' },
-    { name: 'Leith',  query: 'from:@leith' },
-    { name: 'Jane',   query: 'from:@jane' },
-    { name: 'Dustin', query: 'from:@dustin' },
-    { name: 'Tara',   query: 'from:@Tara' },
+    { name: 'JM',     query: 'from:<@U02KNNU0ZBN>', userId: 'U02KNNU0ZBN' },
+    { name: 'Josh',   query: 'from:@josh',          username: 'josh' },
+    { name: 'Samir',  query: 'from:@samir',         username: 'samir' },
+    { name: 'Ori',    query: 'from:<@U0ABNTRG4HJ>', userId: 'U0ABNTRG4HJ' },
+    { name: 'Leith',  query: 'from:@leith',         username: 'leith' },
+    { name: 'Jane',   query: 'from:@jane',          username: 'jane' },
+    { name: 'Dustin', query: 'from:@dustin',        username: 'dustin' },
+    { name: 'Tara',   query: 'from:@Tara',          username: 'tara' },
   ];
 
+  // Batched VIP search: combine queries with OR to reduce API calls (8→3)
   async function fetchVipActivity() {
-    return Promise.all(VIP_QUERIES.map(async (vip) => {
+    const BATCH_SIZE = 3;
+    const resultsByName = {};
+    for (const vip of VIP_QUERIES) resultsByName[vip.name] = { name: vip.name, messages: [] };
+
+    // Split into batches of 3
+    const batches = [];
+    for (let i = 0; i < VIP_QUERIES.length; i += BATCH_SIZE) {
+      batches.push(VIP_QUERIES.slice(i, i + BATCH_SIZE));
+    }
+
+    await Promise.all(batches.map(async (batch) => {
+      const combinedQuery = batch.map((v) => v.query).join(' OR ');
       try {
         const res = await slackApi('search.messages', {
-          query: vip.query,
+          query: combinedQuery,
           sort: 'timestamp',
-          count: '10',
+          count: String(batch.length * 12),
         });
-        const messages = (res.messages?.matches || []).slice(0, 10).map((m) => ({
-          user: m.user || m.username,
-          text: extractText(m),
-          fwd: extractFwd(m),
-          ts: m.ts,
-          files: extractFiles(m),
-          channel_id: m.channel?.id,
-          channel_name: m.channel?.name,
-          permalink: m.permalink,
-        }));
-        return { name: vip.name, messages };
-      } catch {
-        return { name: vip.name, messages: [] };
-      }
+        for (const m of (res.messages?.matches || [])) {
+          const formatted = {
+            user: m.user || m.username,
+            text: extractText(m),
+            fwd: extractFwd(m),
+            ts: m.ts,
+            files: extractFiles(m),
+            channel_id: m.channel?.id,
+            channel_name: m.channel?.name,
+            permalink: m.permalink,
+          };
+          // Match message to VIP by userId or username
+          for (const vip of batch) {
+            let isMatch = false;
+            if (vip.userId && m.user === vip.userId) isMatch = true;
+            else if (vip.username && (m.username || '').toLowerCase() === vip.username) isMatch = true;
+            if (isMatch) {
+              const result = resultsByName[vip.name];
+              if (result.messages.length < 10) result.messages.push(formatted);
+              break;
+            }
+          }
+        }
+      } catch {}
     }));
+
+    return Object.values(resultsByName);
   }
 
   // Listen for requests from content script
@@ -1027,6 +1117,7 @@
 
     if (msgType === `${FSLACK}:fetch`) {
       try {
+        resetApiCounter();
         const cached = {
           cachedUsers: event.data.cachedUsers || {},
           cachedUserMentionHints: event.data.cachedUserMentionHints || {},
@@ -1035,6 +1126,8 @@
           cachedEmoji: event.data.cachedEmoji || null,
         };
         const result = await fetchUnreads(cached);
+        const stats = resetApiCounter();
+        console.log(`[fslack] FULL FETCH: ${stats.count} Slack API calls`, stats.log);
         window.postMessage({ type: `${FSLACK}:result`, data: result }, '*');
       } catch (err) {
         window.postMessage(
@@ -1046,6 +1139,7 @@
 
     if (msgType === `${FSLACK}:fetchFast`) {
       try {
+        resetApiCounter();
         const cached = {
           cachedUsers: event.data.cachedUsers || {},
           cachedUserMentionHints: event.data.cachedUserMentionHints || {},
@@ -1054,6 +1148,8 @@
           cachedEmoji: event.data.cachedEmoji || null,
         };
         const result = await fetchFast(cached);
+        const stats = resetApiCounter();
+        console.log(`[fslack] FAST FETCH: ${stats.count} Slack API calls`, stats.log);
         window.postMessage({ type: `${FSLACK}:fastResult`, data: result }, '*');
       } catch (err) {
         window.postMessage(
@@ -1187,22 +1283,12 @@
       }
     }
 
+    // #5: Debounce/batch mark-read operations — collect requests over 200ms, then fire all at once
     if (msgType === `${FSLACK}:markRead`) {
-      const { channel, ts, thread_ts, has_mention, requestId } = event.data;
-      try {
-        if (thread_ts) {
-          await slackApi('subscriptions.thread.mark', { channel, thread_ts, ts });
-          // Also clear channel-level mention badge when thread had an @-mention
-          if (has_mention) {
-            await slackApi('conversations.mark', { channel, ts }).catch(() => {});
-          }
-        } else {
-          await slackApi('conversations.mark', { channel, ts });
-        }
-        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: true }, '*');
-      } catch {
-        window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: false }, '*');
-      }
+      const req = event.data;
+      _markReadQueue.push(req);
+      if (_markReadTimer) clearTimeout(_markReadTimer);
+      _markReadTimer = setTimeout(flushMarkReadQueue, 200);
     }
 
     if (msgType === `${FSLACK}:markUnread`) {

@@ -136,6 +136,23 @@ The summary must justify the category — if you can't describe someone waiting 
 Respond with ONLY a JSON object mapping each item's "id" to its [category, summary] pair, plus a "_noiseOrder" key (array of noise/drop IDs sorted by work-relevance). No explanation, no markdown fences, just the JSON object.`;
 }
 
+// ── Claude API call counter (per fetch cycle) ──
+let _claudeApiCallCount = 0;
+let _claudeApiCallLog = [];
+
+function logClaudeCall(type) {
+  _claudeApiCallCount++;
+  _claudeApiCallLog.push(type);
+}
+
+function resetClaudeCounter() {
+  const count = _claudeApiCallCount;
+  const log = _claudeApiCallLog;
+  _claudeApiCallCount = 0;
+  _claudeApiCallLog = [];
+  return { count, log };
+}
+
 // ── Retry wrapper for transient API errors (429/529) ──
 const MAX_RETRIES = 2;
 const RETRY_DELAYS = [1500, 3000]; // ms
