@@ -129,6 +129,23 @@ _flackBtnStyle.textContent = `
 document.head.appendChild(_flackBtnStyle);
 
 
+// ── Keyboard shortcut: Cmd+Shift+. to toggle Slack nav ──
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey && e.shiftKey && (e.key === '.' || e.key === '>' || e.code === 'Period')) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    chrome.storage.local.get('fslackHideNav', (r) => {
+      const newVal = r.fslackHideNav === false;
+      chrome.storage.local.set({ fslackHideNav: newVal });
+      const toggle = document.getElementById('fslack-nav-toggle');
+      if (toggle) {
+        toggle.textContent = newVal ? '☰ Show Nav' : '☰ Hide Nav';
+        toggle.classList.toggle('nav-hidden', newVal);
+      }
+    });
+  }
+}, true);
+
 // ── Relay: background.js / side panel → inject.js (page context) ──
 chrome.runtime.onMessage.addListener((msg) => {
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
