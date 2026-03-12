@@ -108,8 +108,8 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 }
 .item:hover .item-actions,
 .item:has(.kb-focused) .item-actions { visibility: visible; }
-.item-actions span { cursor: pointer; }
-.item-actions span:hover { color: #d1d2d3; }
+.item-actions span, .item-actions a { cursor: pointer; color: inherit; text-decoration: none; }
+.item-actions span:hover, .item-actions a:hover { color: #d1d2d3; }
 .item-actions .mark-all-read.done { color: #4a9c6d; }
 .item-actions .mark-all-read.done:hover { color: #e01e5a; }
 .item-mention {
@@ -405,10 +405,37 @@ ul.slack-list, ol.slack-list {
 .undo-mute { color: #e8912d !important; }
 .reply-form {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   margin-top: 8px;
   margin-bottom: 16px;
+}
+.reply-form-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.reply-image-preview {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.reply-image-preview.visible { display: flex; }
+.reply-image-thumb {
+  max-width: 120px;
+  max-height: 80px;
+  border-radius: 4px;
+  border: 1px solid #565856;
+}
+.reply-image-remove {
+  background: none;
+  border: none;
+  color: #e8912d;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
 }
 .reply-input {
   flex: 1;

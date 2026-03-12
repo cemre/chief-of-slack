@@ -125,9 +125,7 @@ document.getElementById('refresh-link').addEventListener('click', startFetch);
 
 
 // ── In-place Slack navigation (via relay to inject.js) ──
-function navigateSlack(channel, ts) {
-  sendToInject({ type: `${FSLACK}:navigate`, channel, ts });
-}
+// Navigation is handled by native <a> tags with href — no inject relay needed.
 
 // ── Debug (temporary) ──
 window._fslackDebug = function(channelId) {
@@ -810,7 +808,7 @@ function formatSlackHtml(text, users, { collapseNewlines = false } = {}) {
       const pipeIdx = inner.indexOf('|');
       const cid = inner.slice(1, pipeIdx !== -1 ? pipeIdx : undefined);
       const name = pipeIdx !== -1 ? inner.slice(pipeIdx + 1) : (channelNameMap?.[cid] || cid);
-      result += `<span class="item-channel inline-channel" data-channel="${escapeHtml(cid)}">#${escapeHtml(name)}</span>`;
+      result += `<a class="item-channel inline-channel" data-channel="${escapeHtml(cid)}" href="https://app.slack.com/archives/${escapeHtml(cid)}" target="_blank">#${escapeHtml(name)}</a>`;
     } else if (inner.includes('|')) {
       const pipe = inner.indexOf('|');
       const url = inner.slice(0, pipe);
@@ -1094,8 +1092,9 @@ function itemTime(ts, channel) {
 
 function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused = false, hasMention = false) {
   const openTs = threadTs || markTs;
+  const openHref = slackPermalink(channel, openTs) || `https://app.slack.com/archives/${channel}`;
   return `<div class="item-actions">
-    <span class="action-open" data-channel="${channel}" data-ts="${openTs}"><kbd>O</kbd> open</span>
+    <a class="action-open" href="${openHref}" target="_blank" data-channel="${channel}" data-ts="${openTs}"><kbd>O</kbd> open</a>
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}${hasMention ? ' data-has-mention="1"' : ''}><kbd>M</kbd> mark read</span>
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
@@ -1518,6 +1517,8 @@ function containsSelfMention(text, selfId) {
   // Slack encoded @-mention or raw @-mention
   if (text.includes(`<@${selfId}>`)) return true;
   if (text.includes(`@${selfId}`)) return true;
+  // @channel / @here (Slack encodes as <!channel> / <!here>)
+  if (text.includes('<!channel>') || text.includes('<!here>')) return true;
   // @gem / @cemre handle mentions (bare "gem" without @ is NOT a mention)
   return HANDLE_MENTION_REGEX.test(text);
 }
@@ -1828,7 +1829,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isMentioned = item._isMentioned || false;
     const mentionInRoot = item._mentionInRoot || false;
     const isImportantChannel = item._sidebarSection === 'top' || item._sidebarSection === 'daily';
-    const isQualified = isDm || isPrivate || isMentioned;
+    const isQualified = isDm || isPrivate || isMentioned || mentionInRoot;
     const userReplied = item._userReplied || false;
     const llmCat = cat; // original LLM classification before overrides
     const chLabel = data.channels?.[item.channel_id] || item.channel_id;
@@ -1856,7 +1857,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
       item._reason = reasons[item._llmId] || undefined;
       // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
       if (!item._reason && isMentioned) item._reason = item._mentionInReplies && !item._mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
-      // Fallback: truncate most substantive message text to ~10 words
+      // Fallback: truncate most substantive message text
       if (!item._reason) {
         let raw = '';
         if (item._type === 'thread') {
@@ -1866,10 +1867,17 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
           const msgs = item.messages || [];
           raw = msgs.reduce((best, m) => (m.text || '').length > best.length ? m.text : best, '') || '';
         }
-        // Strip Slack markup (<@U..>, <http...|label>, etc.) and trim to ~10 words
+        // Strip Slack markup (<@U..>, <http...|label>, etc.)
         raw = raw.replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
-        const words = raw.split(/\s+/).filter(Boolean);
-        item._reason = words.length > 10 ? words.slice(0, 10).join(' ') + '...' : words.join(' ') || 'new message';
+        if (isDm) {
+          // DMs: "Name: [100 char preview]"
+          const partner = dmPartnerName(item, data);
+          let preview = raw.length > 100 ? raw.slice(0, 100) + '...' : raw;
+          item._reason = preview ? `${partner}: ${preview}` : `${partner} DM'd you`;
+        } else {
+          const words = raw.split(/\s+/).filter(Boolean);
+          item._reason = words.length > 10 ? words.slice(0, 10).join(' ') + '...' : words.join(' ') || 'new message';
+        }
       }
     }
 
@@ -2130,7 +2138,10 @@ function insertNewDm(dm, data) {
   // Ensure a reason badge so the collapsed item isn't invisible
   if (!dm._reason) {
     const partner = dmPartnerName(dm, data);
-    dm._reason = `${partner} DM'd you`;
+    const latest = (dm.messages || [])[0];
+    let preview = (latest?.text || '').replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
+    if (preview.length > 100) preview = preview.slice(0, 100) + '...';
+    dm._reason = preview ? `${partner}: ${preview}` : `${partner} DM'd you`;
   }
 
   // All live DMs go into the Priority section at the top
@@ -2387,33 +2398,15 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Permalink: click username to navigate Slack in-place
-  const userEl = e.target.closest('.item-user[data-channel]');
-  if (userEl) {
-    e.preventDefault();
-    const { channel, ts } = userEl.dataset;
-    navigateSlack(channel, ts);
-    return;
-  }
-
-  // Permalink: click timestamp to navigate Slack in-place
-  const timeEl = e.target.closest('.msg-time[data-channel], .item-time[data-channel]');
-  if (timeEl) {
-    e.preventDefault();
-    const { channel, ts } = timeEl.dataset;
-    navigateSlack(channel, ts);
-    return;
-  }
-
   // Thread badge: expand replies inline (shift/meta-click opens in new tab)
   const threadBadgeEl = e.target.closest('.msg-thread-badge');
   if (threadBadgeEl) {
     const { channel, ts, truncId, containerId } = threadBadgeEl.dataset;
 
-    // Expand truncated text if this badge merged "See more"
-    // Modifier click → navigate Slack in-place
+    // Modifier click → open permalink in new tab
     if (e.shiftKey || e.metaKey || e.ctrlKey || e.button === 1) {
-      navigateSlack(channel, ts);
+      const href = slackPermalink(channel, ts) || `https://app.slack.com/archives/${channel}`;
+      window.open(href, '_blank');
       return;
     }
 
@@ -2458,14 +2451,6 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Channel name: navigate Slack in-place
-  const channelEl = e.target.closest('.item-channel[data-channel]');
-  if (channelEl) {
-    const { channel } = channelEl.dataset;
-    navigateSlack(channel, null);
-    return;
-  }
-
   // See more / See less toggle
   const seeMore = e.target.closest('.see-more');
   if (seeMore) {
@@ -2485,14 +2470,6 @@ bodyEl.addEventListener('click', (e) => {
     const filesEl = document.getElementById(`${id}-files`);
     if (shortEl && fullEl) { shortEl.style.display = ''; fullEl.style.display = 'none'; }
     if (filesEl) filesEl.style.display = 'none';
-    return;
-  }
-
-  // Open in Slack
-  const openBtn = e.target.closest('.action-open');
-  if (openBtn) {
-    const { channel, ts } = openBtn.dataset;
-    navigateSlack(channel, ts);
     return;
   }
 
@@ -2574,12 +2551,13 @@ bodyEl.addEventListener('click', (e) => {
     const { channel, ts } = msgReplyBtn.dataset;
     const form = document.createElement('div');
     form.className = 'reply-form';
-    form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="Reply in thread... (⌘Enter to send)"></textarea><button class="reply-send">Send</button>`;
+    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="Reply in thread... (⌘Enter to send)"></textarea><button class="reply-send">Send</button></div>`;
     msgRow.insertAdjacentElement('afterend', form);
     const input = form.querySelector('.reply-input');
-    for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
+    for (const evt of ['keydown', 'keyup', 'keypress', 'copy', 'cut', 'input']) {
       input.addEventListener(evt, (ev) => ev.stopPropagation());
     }
+    setupImagePaste(form, input);
     input.focus();
     function autoResize() {
       input.style.height = 'auto';
@@ -2587,14 +2565,14 @@ bodyEl.addEventListener('click', (e) => {
     }
     input.addEventListener('input', autoResize);
     input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && input.value.trim()) {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && (input.value.trim() || form._pastedImageData)) {
         ev.preventDefault();
         sendReply(form, channel, ts, input.value.trim());
       }
       if (ev.key === 'Escape') form.remove();
     });
     form.querySelector('.reply-send').addEventListener('click', () => {
-      if (input.value.trim()) sendReply(form, channel, ts, input.value.trim());
+      if (input.value.trim() || form._pastedImageData) sendReply(form, channel, ts, input.value.trim());
     });
     return;
   }
@@ -2609,12 +2587,13 @@ bodyEl.addEventListener('click', (e) => {
     const form = document.createElement('div');
     form.className = 'reply-form';
     const placeholder = isDm ? 'Send a DM... (⌘Enter to send)' : 'Reply... (⌘Enter to send)';
-    form.innerHTML = `<textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><button class="reply-send">Send</button>`;
+    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><button class="reply-send">Send</button></div>`;
     itemActions.insertAdjacentElement('beforebegin', form);
     const input = form.querySelector('.reply-input');
-    for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
+    for (const evt of ['keydown', 'keyup', 'keypress', 'copy', 'cut', 'input']) {
       input.addEventListener(evt, (ev) => ev.stopPropagation());
     }
+    setupImagePaste(form, input);
     input.focus();
     function autoResize() {
       input.style.height = 'auto';
@@ -2622,14 +2601,14 @@ bodyEl.addEventListener('click', (e) => {
     }
     input.addEventListener('input', autoResize);
     input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && input.value.trim()) {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && (input.value.trim() || form._pastedImageData)) {
         ev.preventDefault();
         sendReply(form, channel, isDm ? null : ts, input.value.trim());
       }
       if (ev.key === 'Escape') form.remove();
     });
     form.querySelector('.reply-send').addEventListener('click', () => {
-      if (input.value.trim()) sendReply(form, channel, isDm ? null : ts, input.value.trim());
+      if (input.value.trim() || form._pastedImageData) sendReply(form, channel, isDm ? null : ts, input.value.trim());
     });
     return;
   }
@@ -3067,17 +3046,55 @@ function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   sendToInject({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
 }
 
+function setupImagePaste(form, input) {
+  const preview = form.querySelector('.reply-image-preview');
+  const thumb = form.querySelector('.reply-image-thumb');
+  const removeBtn = form.querySelector('.reply-image-remove');
+  function clearImage() {
+    delete form._pastedImageData;
+    delete form._pastedImageMime;
+    preview.classList.remove('visible');
+    thumb.src = '';
+  }
+  removeBtn.addEventListener('click', () => { clearImage(); input.focus(); });
+  input.addEventListener('paste', (ev) => {
+    ev.stopPropagation();
+    const items = ev.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (!item.type.startsWith('image/')) continue;
+      ev.preventDefault();
+      const file = item.getAsFile();
+      if (file.size > 10 * 1024 * 1024) { alert('Image too large (10MB limit)'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        form._pastedImageData = reader.result;
+        form._pastedImageMime = item.type;
+        thumb.src = reader.result;
+        preview.classList.add('visible');
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+  });
+}
+
 function sendReply(form, channel, threadTs, text) {
   const input = form.querySelector('.reply-input');
   const btn = form.querySelector('.reply-send');
-  const finalText = convertUserMentions(text);
+  const finalText = text ? convertUserMentions(text) : '';
   input.value = finalText;
   input.disabled = true;
   btn.disabled = true;
-  btn.textContent = '...';
   const reqId = `post_${Date.now()}`;
   form.dataset.requestId = reqId;
-  sendToInject({ type: `${FSLACK}:postReply`, channel, thread_ts: threadTs, text: finalText, requestId: reqId });
+  if (form._pastedImageData) {
+    btn.textContent = 'Uploading...';
+    sendToInject({ type: `${FSLACK}:uploadAndPost`, channel, thread_ts: threadTs, text: finalText, imageData: form._pastedImageData, imageMime: form._pastedImageMime, requestId: reqId });
+  } else {
+    btn.textContent = '...';
+    sendToInject({ type: `${FSLACK}:postReply`, channel, thread_ts: threadTs, text: finalText, requestId: reqId });
+  }
 }
 
 // ── API key inline prompt ──
@@ -4437,6 +4454,39 @@ function handlePostReplyResult(msg) {
   }
 }
 
+function handleUploadAndPostResult(msg) {
+  const form = bodyEl.querySelector(`.reply-form[data-request-id="${msg.requestId}"]`);
+  if (!form) return;
+  if (msg.ok) {
+    const text = form.querySelector('.reply-input').value;
+    const item = form.closest('.item');
+    const isMsgLevel = form.previousElementSibling?.classList.contains('msg-row');
+    const label = text ? `${escapeHtml(text)} [image]` : '[image]';
+    const replyHtml = isMsgLevel
+      ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${label}</div></div>`
+      : `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${label}</div>`;
+    form.insertAdjacentHTML('beforebegin', replyHtml);
+    const inp = form.querySelector('.reply-input');
+    const btn = form.querySelector('.reply-send');
+    const preview = form.querySelector('.reply-image-preview');
+    inp.value = '';
+    inp.disabled = false;
+    inp.style.height = 'auto';
+    btn.disabled = false;
+    btn.textContent = 'Send';
+    delete form._pastedImageData;
+    delete form._pastedImageMime;
+    preview.classList.remove('visible');
+    preview.querySelector('.reply-image-thumb').src = '';
+    inp.focus();
+    autoMarkItemRead(item, { overrideTs: msg.ts });
+  } else {
+    const btn = form.querySelector('.reply-send');
+    btn.textContent = 'Upload failed';
+    setTimeout(() => { btn.textContent = 'Send'; btn.disabled = false; form.querySelector('.reply-input').disabled = false; }, 2000);
+  }
+}
+
 // ── Port message dispatch ──
 function handlePortMessage(msg) {
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
@@ -4579,6 +4629,7 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:muteThreadResult`) { handleMuteThreadResult(msg); return; }
   if (msg.type === `${FSLACK}:muteChannelResult`) { handleMuteChannelResult(msg); return; }
   if (msg.type === `${FSLACK}:postReplyResult`) { handlePostReplyResult(msg); return; }
+  if (msg.type === `${FSLACK}:uploadAndPostResult`) { handleUploadAndPostResult(msg); return; }
 }
 
 // ── Initialization ──

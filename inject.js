@@ -1223,7 +1223,7 @@
     if (msgType === `${FSLACK}:fetchSaved`) {
       const { requestId } = event.data;
       try {
-        const result = await slackApi('saved.list', { limit: 25, filter: 'saved', include_tombstones: true });
+        const result = await slackApi('saved.list', { limit: 25, include_completed: false, include_tombstones: true });
         const cutoff = Math.floor(Date.now() / 1000) - 72 * 60 * 60;
         const items = (result.saved_items || []).filter(
           (item) => item.state !== 'completed' && (item.date_created || 0) >= cutoff
@@ -1346,6 +1346,30 @@
       }
     }
 
+    if (msgType === `${FSLACK}:uploadAndPost`) {
+      const { channel, thread_ts, text, imageData, imageMime, requestId } = event.data;
+      try {
+        const token = getToken();
+        const ext = (imageMime || 'image/png').split('/')[1] || 'png';
+        const byteString = atob(imageData.split(',')[1]);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+        const blob = new Blob([ab], { type: imageMime || 'image/png' });
+        const fd = new FormData();
+        fd.append('token', token);
+        fd.append('channels', channel);
+        fd.append('file', blob, `pasted_image.${ext}`);
+        if (thread_ts) fd.append('thread_ts', thread_ts);
+        if (text) fd.append('initial_comment', text);
+        const resp = await fetch('https://slack.com/api/files.upload', { method: 'POST', body: fd });
+        const json = await resp.json();
+        window.postMessage({ type: `${FSLACK}:uploadAndPostResult`, requestId, ok: !!json.ok, ts: json.file?.shares?.public?.[channel]?.[0]?.ts || '' }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:uploadAndPostResult`, requestId, ok: false }, '*');
+      }
+    }
+
     if (msgType === `${FSLACK}:fetchPopular`) {
       try {
         const popular = await fetchPopularMessages();
@@ -1426,25 +1450,6 @@
       }
     }
 
-    if (msgType === `${FSLACK}:navigate`) {
-      const { channel, ts } = event.data;
-      if (channel) {
-        // Try clicking the sidebar element for SPA navigation (no reload)
-        if (!ts) {
-          const sidebarEl = document.getElementById(channel);
-          if (sidebarEl) {
-            const clickTarget = sidebarEl.querySelector('[data-qa-channel-sidebar-channel="true"]') || sidebarEl;
-            clickTarget.click();
-            return;
-          }
-        }
-        // Fallback: full page navigation via /archives/ permalink
-        const url = ts
-          ? `/archives/${channel}/p${ts.replace('.', '')}`
-          : `/archives/${channel}`;
-        window.location.assign(url);
-      }
-    }
   });
 
   // Signal ready — include workspace domain for iframe URL construction

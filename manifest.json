@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Flack",
+  "name": "Slack Attention Firewall",
   "version": "0.1.0",
-  "description": "Flack — see only what needs your attention",
+  "description": "Slack Attention Firewall — see only what needs your attention",
   "permissions": ["activeTab", "storage", "scripting", "declarativeNetRequest", "sidePanel"],
   "host_permissions": ["https://app.slack.com/*", "https://*.slack.com/*", "https://api.anthropic.com/*"],
   "background": {
@@ -24,7 +24,7 @@
         "default": "Ctrl+Shift+F",
         "mac": "Command+Shift+F"
       },
-      "description": "Toggle Flack sidebar"
+      "description": "Toggle Slack Attention Firewall sidebar"
     }
   },
   "web_accessible_resources": [
@@ -41,6 +41,6 @@
     }]
   },
   "action": {
-    "default_title": "Flack"
+    "default_title": "Slack Attention Firewall"
   }
 }
