@@ -38,9 +38,31 @@ function connectPort() {
   }, 5000);
 }
 
+let fetchTimeoutTimer = null;
+function clearFetchTimeout() { if (fetchTimeoutTimer) { clearTimeout(fetchTimeoutTimer); fetchTimeoutTimer = null; } }
+function startFetchTimeout(ms = 15000) {
+  clearFetchTimeout();
+  fetchTimeoutTimer = setTimeout(() => {
+    fetchTimeoutTimer = null;
+    console.warn('[fslack] fetch timeout — no response received');
+    fetchBtn.disabled = false;
+    fetchBtn.textContent = 'Fetch Unreads';
+    const statusEl = document.getElementById('status');
+    if (statusEl && (statusEl.textContent.includes('Starting') || statusEl.textContent.includes('Fetching'))) {
+      bodyEl.innerHTML = '<div id="status" class="error">Fetch timed out. Make sure a Slack tab is open and try again.</div>';
+    }
+    resetFetchState();
+  }, ms);
+}
+
 function sendToInject(msg) {
-  if (port) {
-    try { port.postMessage(msg); } catch {}
+  if (!port) {
+    console.warn('[fslack] sendToInject: port is null, message dropped:', msg.type);
+    return false;
+  }
+  try { port.postMessage(msg); return true; } catch (e) {
+    console.warn('[fslack] sendToInject failed:', e.message);
+    return false;
   }
 }
 
@@ -303,6 +325,13 @@ function startFetch() {
   resetFetchState();
   isFastFetch = true;
 
+  if (!port) {
+    fetchBtn.disabled = false;
+    fetchBtn.textContent = 'Fetch Unreads';
+    bodyEl.innerHTML = '<div id="status" class="error">Not connected. Make sure a Slack tab is open and try again.</div>';
+    return;
+  }
+
   // First-ever fetch or stale cache (>1h): auto-promote to full fetch
   if (!cachedView || (cachedView.ts && Date.now() - cachedView.ts > 60 * 60 * 1000)) {
     console.log(`[fslack] ${!cachedView ? 'No cached view' : 'Cache >1h old'} — auto-promoting to full fetch`);
@@ -311,6 +340,7 @@ function startFetch() {
     return;
   }
 
+  startFetchTimeout();
   loadCachedPrefs((cachePayload) => {
     sendToInject({ type: `${FSLACK}:fetchFast`, ...cachePayload });
   });
@@ -336,6 +366,13 @@ function startFullFetch() {
   bodyEl.innerHTML = '<div id="status">Starting full fetch...</div>';
   resetFetchState();
   isFastFetch = false;
+  if (!port) {
+    fetchBtn.disabled = false;
+    fetchBtn.textContent = 'Fetch Unreads';
+    bodyEl.innerHTML = '<div id="status" class="error">Not connected. Make sure a Slack tab is open and try again.</div>';
+    return;
+  }
+  startFetchTimeout();
   loadCachedPrefs((cachePayload) => {
     sendToInject({ type: `${FSLACK}:fetch`, ...cachePayload });
   });
@@ -4501,6 +4538,8 @@ function handlePortMessage(msg) {
   }
 
   if (msg.type === `${FSLACK}:progress`) {
+    clearFetchTimeout(); // got a response, fetch is alive — restart timeout
+    startFetchTimeout(30000); // allow more time for in-progress fetches
     bodyEl.innerHTML = `<div id="status">
       <div class="detail">${msg.detail || ''}</div>
     </div>`;
@@ -4508,6 +4547,7 @@ function handlePortMessage(msg) {
   }
 
   if (msg.type === `${FSLACK}:result`) {
+    clearFetchTimeout();
     pendingUnreads = msg.data;
     gotUnreads = true;
     if (msg.data) {
@@ -4540,6 +4580,7 @@ function handlePortMessage(msg) {
   }
 
   if (msg.type === `${FSLACK}:fastResult`) {
+    clearFetchTimeout();
     pendingUnreads = msg.data;
     gotUnreads = true;
     if (msg.data) {
@@ -4608,6 +4649,7 @@ function handlePortMessage(msg) {
   }
 
   if (msg.type === `${FSLACK}:error`) {
+    clearFetchTimeout();
     fetchBtn.disabled = false;
     fetchBtn.textContent = 'Fetch Unreads';
     bodyEl.innerHTML = `<div id="status" class="error">${msg.error}</div>`;

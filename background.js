@@ -20,7 +20,10 @@ chrome.runtime.onConnect.addListener((port) => {
     if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
     const tabId = await getSlackTabId();
     console.log(`[fslack bg] panel→content: ${msg.type}, tabId=${tabId}`);
-    if (!tabId) return;
+    if (!tabId) {
+      try { port.postMessage({ type: `${FSLACK}:error`, error: 'No Slack tab found. Open app.slack.com and try again.' }); } catch {}
+      return;
+    }
     chrome.tabs.sendMessage(tabId, msg).catch(() => injectAndRetry(tabId, msg));
   });
 
@@ -57,6 +60,7 @@ async function injectAndRetry(tabId, msg) {
     await chrome.tabs.sendMessage(tabId, msg);
   } catch (e) {
     console.warn(`[fslack bg] inject+retry failed: ${e.message}`);
+    try { panelPort?.postMessage({ type: `${FSLACK}:error`, error: 'Could not reach Slack tab. Try refreshing the Slack page.' }); } catch {}
   }
 }
 

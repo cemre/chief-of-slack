@@ -35,9 +35,13 @@ _navHideStyle.textContent = `
     overflow: hidden !important;
   }
   .p-client_workspace__tabpanel { grid-template-columns: 0px auto !important; }
-  .p-client_workspace__tabpanel:has(.p-view_contents--secondary) {
+  .p-client_workspace__tabpanel:has(.p-view_contents--secondary):has(.p-view_contents--primary) {
     grid-template-columns: 0px auto auto !important;
     grid-template-areas: "p-view_contents--sidebar p-view_contents--primary p-view_contents--secondary" !important;
+  }
+  /* Narrow window: Slack drops primary, only sidebar + secondary remain */
+  .p-client_workspace__tabpanel:has(.p-view_contents--secondary):not(:has(.p-view_contents--primary)) {
+    grid-template-columns: 0px auto !important;
   }
   /* Pull the compose button out of the hidden sidebar */
   button[data-qa="composer_button"] {
