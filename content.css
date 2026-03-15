@@ -29,6 +29,7 @@ header {
 .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
 .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
 .refresh-link:hover { text-decoration: underline; }
+.refresh-link.has-update { color: #e01e5a; font-weight: 600; }
 .last-updated.stale { color: #e01e5a; }
 .hide-nav-toggle { font-size: 11px; color: #616061; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; user-select: none; }
 .hide-nav-toggle input { margin: 0; }
