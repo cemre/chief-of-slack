@@ -29,6 +29,13 @@ function connectPort() {
   // Signal to content.js that we're connected
   port.postMessage({ type: `${FSLACK}:sidepanelConnected` });
 
+  // Retry sidepanelConnected after 1s in case content.js wasn't ready on first signal
+  setTimeout(() => {
+    if (port && !bodyEl.querySelector('.item')) {
+      port.postMessage({ type: `${FSLACK}:sidepanelConnected` });
+    }
+  }, 1000);
+
   // If no fslack:ready arrives within 5s, nudge the user
   setTimeout(() => {
     const status = document.getElementById('status');
@@ -607,7 +614,11 @@ document.addEventListener('keydown', (e) => {
       const items = focused.nextElementSibling;
       const isVip = focused.id === 'vip-toggle';
       const isExpanded = isVip ? (items && items.style.display !== 'none') : (items && items.classList.contains('expanded'));
-      if (key === 'ArrowRight' && !isExpanded) focused.click();
+      if (key === 'ArrowRight' && !isExpanded) {
+        focused.click();
+        // Move cursor to first item inside the expanded section
+        requestAnimationFrame(() => focusItem(focusedItemIndex + 1));
+      }
       if (key === 'ArrowLeft' && isExpanded) focused.click();
       return;
     }
@@ -619,7 +630,10 @@ document.addEventListener('keydown', (e) => {
     // Also check for summary-toggle on the item (noise items, when-free channel items)
     const summaryToggleEl = parentItem?.querySelector('.summary-toggle[data-target]');
     const summaryTarget = summaryToggleEl ? document.getElementById(summaryToggleEl.dataset.target) : null;
-    const isExpanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block') || (summaryTarget && summaryTarget.style.display === 'block');
+    const reasonToggle = parentItem?.querySelector('.item-reason-toggle');
+    const detailsEl = reasonToggle?.nextElementSibling;
+    const hasDetails = detailsEl?.classList.contains('item-details');
+    const isExpanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block') || (summaryTarget && summaryTarget.style.display === 'block') || (hasDetails && detailsEl.classList.contains('expanded'));
     if (key === 'ArrowRight' && !isExpanded) {
       e.preventDefault(); e.stopPropagation();
       const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
@@ -631,6 +645,19 @@ document.addEventListener('keydown', (e) => {
       }
       if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
       if (summaryToggleEl && summaryTarget && summaryTarget.style.display !== 'block') summaryToggleEl.click();
+      if (hasDetails && !detailsEl.classList.contains('expanded')) reasonToggle.click();
+      // After expand, move cursor into the first visible child
+      requestAnimationFrame(() => {
+        const els = getNavigableElements();
+        const firstRow = parentItem?.querySelector('.msg-row');
+        const rowIdx = firstRow ? els.indexOf(firstRow) : -1;
+        if (rowIdx >= 0) focusItem(rowIdx);
+        else {
+          // Fallback: re-resolve current position
+          const newIdx = els.indexOf(focused);
+          if (newIdx >= 0) focusedItemIndex = newIdx;
+        }
+      });
     } else if (key === 'ArrowLeft' && isExpanded) {
       e.preventDefault(); e.stopPropagation();
       const seeLess = scope?.querySelector('.see-less');
@@ -642,6 +669,7 @@ document.addEventListener('keydown', (e) => {
       }
       if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
       if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
+      if (hasDetails && detailsEl.classList.contains('expanded')) reasonToggle.click();
     } else if (key === 'ArrowLeft' && !isExpanded && isRow) {
       const threadContainer = focused.closest('.thread-replies-container');
       if (threadContainer) {
