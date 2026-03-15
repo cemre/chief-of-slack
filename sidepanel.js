@@ -151,6 +151,9 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 
 const closeBtn = document.getElementById('close-btn');
 const refreshLink = document.getElementById('refresh-link');
+document.getElementById('settings-btn').addEventListener('click', () => {
+  chrome.runtime.openOptionsPage();
+});
 refreshLink.addEventListener('click', () => {
   if (stagedRenderData) {
     // Render pre-fetched background data
@@ -3200,34 +3203,22 @@ function sendReply(form, channel, threadTs, text) {
   }
 }
 
-// ── API key inline prompt ──
+// ── API key prompt — directs user to options page ──
 function showApiKeyPrompt(rawData) {
   bodyEl.innerHTML = `
     <div class="api-key-form">
       <div style="color: #fff; font-size: 16px; margin-bottom: 12px;">Claude API Key Required</div>
       <div style="color: #ababad; font-size: 13px; margin-bottom: 16px;">
-        Enter your Anthropic API key to enable smart prioritization.<br>
-        Key is stored locally in your browser.
+        Set your Anthropic API key in the extension settings to enable smart prioritization.
       </div>
-      <input id="api-key-input" type="password" placeholder="sk-ant-..."><br>
       <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: center;">
-        <button id="save-key-btn">Save & Prioritize</button>
+        <button id="open-settings-btn">Open Settings</button>
         <button id="skip-key-btn" class="secondary">Skip</button>
       </div>
     </div>`;
 
-  // Stop Slack from hijacking keyboard events on the input
-  const keyInput = document.getElementById('api-key-input');
-  for (const evt of ['keydown', 'keyup', 'keypress', 'paste', 'copy', 'cut', 'input']) {
-    keyInput.addEventListener(evt, (e) => e.stopPropagation());
-  }
-
-  document.getElementById('save-key-btn').addEventListener('click', () => {
-    const key = document.getElementById('api-key-input').value.trim();
-    if (!key) return;
-    chrome.runtime.sendMessage({ type: `${FSLACK}:setApiKey`, key }, () => {
-      prioritizeAndRender(rawData);
-    });
+  document.getElementById('open-settings-btn').addEventListener('click', () => {
+    chrome.runtime.openOptionsPage();
   });
 
   document.getElementById('skip-key-btn').addEventListener('click', () => {

@@ -25,7 +25,20 @@ header {
   flex-shrink: 0;
 }
 #close-btn { display: none; }
-.last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.last-updated-wrap { display: inline-flex; align-items: center; gap: 6px; flex: 1; }
+.settings-btn {
+  background: none;
+  border: none;
+  color: #616061;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.settings-btn:hover { color: #d1d2d3; background: rgba(255,255,255,0.06); }
 .last-updated { font-size: 11px; color: #616061; font-weight: 400; }
 .refresh-link { font-size: 11px; color: #1d9bd1; font-weight: 400; cursor: pointer; }
 .refresh-link:hover { text-decoration: underline; }
