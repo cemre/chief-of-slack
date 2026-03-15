@@ -51,6 +51,8 @@ function startFetchTimeout(ms = 15000) {
       isBackgroundFetch = false;
       scheduleBackgroundPoll();
     } else {
+      refreshLink.textContent = 'refresh now';
+      refreshLink.style.display = '';
       const statusEl = document.getElementById('status');
       if (statusEl && (statusEl.textContent.includes('Starting') || statusEl.textContent.includes('Fetching'))) {
         bodyEl.innerHTML = '<div id="status" class="error">Fetch timed out. Make sure a Slack tab is open and try again.</div>';
@@ -349,7 +351,7 @@ function startFetch(background = false) {
     fetchBtn.textContent = 'Fetching...';
     bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
     stagedRenderData = null;
-    refreshLink.textContent = 'refresh now';
+    refreshLink.style.display = 'none';
     refreshLink.classList.remove('has-update');
   }
   resetFetchState();
@@ -360,6 +362,8 @@ function startFetch(background = false) {
     fetchBtn.textContent = 'Fetch Unreads';
     isBackgroundFetch = false;
     if (!background) {
+      refreshLink.textContent = 'refresh now';
+      refreshLink.style.display = '';
       bodyEl.innerHTML = '<div id="status" class="error">Not connected. Make sure a Slack tab is open and try again.</div>';
     }
     return;
@@ -404,12 +408,15 @@ function startFullFetch() {
   if (fetchBtn.disabled) return;
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
+  refreshLink.style.display = 'none';
   bodyEl.innerHTML = '<div id="status">Starting full fetch...</div>';
   resetFetchState();
   isFastFetch = false;
   if (!port) {
     fetchBtn.disabled = false;
     fetchBtn.textContent = 'Fetch Unreads';
+    refreshLink.textContent = 'refresh now';
+    refreshLink.style.display = '';
     bodyEl.innerHTML = '<div id="status" class="error">Not connected. Make sure a Slack tab is open and try again.</div>';
     return;
   }
@@ -1189,13 +1196,18 @@ function reasonBadge(item, cssClass) {
   return `<div class="item-reason item-reason-toggle ${cls}">${escapeHtml(item._reason)} ↓</div>`;
 }
 
-// Shared toggle structure: clickable header → bullet summary → hidden messages
-function summaryToggleHtml(targetId, countLabel, bulletsHtml, messagesHtml, extraContent) {
+// Shared toggle structure: bullet summary (clickable) → hidden messages
+function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
   return `<div class="summary-toggle-group summary-toggle" data-target="${targetId}">`
-    + `<div class="noise-toggle-row"><span class="summary-reply-count">${countLabel} ↓</span><span class="expand-hint">expand ↓</span></div>`
     + `<div class="deep-summary-wrap">${extraContent || ''}<ul class="deep-summary">${bulletsHtml}</ul></div>`
     + `</div>`
     + `<div class="deep-messages" id="${targetId}">${messagesHtml}</div>`;
+}
+
+// Header expand link for item-left: "N msgs ↓" (shows "expand" on hover)
+function headerExpandHtml(targetId, count, unit) {
+  if (!unit) unit = count === 1 ? 'msg' : 'msgs';
+  return `<span class="header-expand summary-toggle" data-target="${targetId}"><span class="summary-reply-count"><span class="expand-label">expand </span>${count} ${unit} ↓</span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -1223,12 +1235,23 @@ function renderThreadItem(t, data, cssClass) {
   let html = `<div class="item ${cssClass}">`;
   html += reasonBadge(t, cssClass);
   if (collapsible) html += '<div class="item-details">';
-  let leftInner = `<span class="item-channel">${channelLabel}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
-  if (!t._mentionInReplies && t.mention_count > 0) {
-    leftInner += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
-  }
   const threadOpenHref = slackPermalink(t.channel_id, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
-  html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}</div>`;
+  if (shouldSummarize) {
+    html += `<div class="item-left">`;
+    html += `<a class="item-channel-link" href="${threadOpenHref}" target="_blank"><span class="item-channel">${channelLabel}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+    html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
+    if (!t._mentionInReplies && t.mention_count > 0) {
+      html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
+    }
+    html += ` <span class="item-sep">·</span> ${headerExpandHtml(repliesMsgId, unread.length, unread.length === 1 ? 'new reply' : 'new replies')}`;
+    html += `</div>`;
+  } else {
+    let leftInner = `<span class="item-channel">${channelLabel}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
+    if (!t._mentionInReplies && t.mention_count > 0) {
+      leftInner += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
+    }
+    html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}</div>`;
+  }
 
   // When full-thread summary is active, replace root content with bullet summary
   let rootContentHtml;
@@ -1279,15 +1302,9 @@ function renderThreadItem(t, data, cssClass) {
   }
   const sumClass = shouldSummarize ? ' summarized' : '';
   html += `<div class="item-right">`;
-  if (shouldSummarize) {
-    html += `<div class="summary-toggle-group summary-toggle" data-target="${repliesMsgId}">`;
-    html += `<div class="noise-toggle-row"><span class="summary-reply-count">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'} ↓</span><span class="expand-hint">expand ↓</span></div>`;
-  }
-  const msgContentClass = `msg-content item-text${rootSeenClass}`;
-  html += `<div class="msg-row${sumClass}"><div class="${msgContentClass}">${rootContentHtml}</div>${origRootHtml}${msgActions(t.channel_id, t.ts)}</div>`;
-  if (shouldSummarize) {
-    html += `</div>`;
-  }
+  const msgContentClass = `msg-content item-text${rootSeenClass}${shouldSummarize ? ' summary-toggle' : ''}`;
+  const msgContentTarget = shouldSummarize ? ` data-target="${repliesMsgId}"` : '';
+  html += `<div class="msg-row${sumClass}"><div class="${msgContentClass}"${msgContentTarget}>${rootContentHtml}</div>${origRootHtml}${msgActions(t.channel_id, t.ts)}</div>`;
 
   html += '<div class="thread-replies-container">';
   if (seenCount > 0) {
@@ -1399,14 +1416,28 @@ function renderChannelItem(cp, data, cssClass) {
   let html = `<div class="item ${cssClass}"${csKeyAttr}>`;
   html += reasonBadge(cp, cssClass);
   if (collapsible) html += '<div class="item-details">';
-  let chLeftInner = `<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
-  if (cp._repliers?.length) {
-    const names = cp._repliers.map(escapeHtml).join(', ');
-    const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
-    chLeftInner += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
-  }
   const chOpenHref = slackPermalink(cp.channel_id, latest?.ts) || `https://app.slack.com/archives/${cp.channel_id}`;
-  html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
+  if (needsChannelSummary || cssClass === 'noise-item') {
+    // Split header: channel link + metadata + expand toggle
+    html += `<div class="item-left">`;
+    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+    html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
+    if (cp._repliers?.length) {
+      const names = cp._repliers.map(escapeHtml).join(', ');
+      const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
+      html += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
+    }
+    if (csMsgId) html += ` <span class="item-sep">·</span> ${headerExpandHtml(csMsgId, cp.messages.length)}`;
+    html += `</div>`;
+  } else {
+    let chLeftInner = `<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
+    if (cp._repliers?.length) {
+      const names = cp._repliers.map(escapeHtml).join(', ');
+      const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
+      chLeftInner += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
+    }
+    html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
+  }
   html += `<div class="item-right">`;
   if (cp._summary) {
     const zendesk = extractZendeskSummary(cp._summary);
@@ -1440,7 +1471,7 @@ function renderChannelItem(cp, data, cssClass) {
     }
     if (cp._channelSummary) {
       const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
-      html += summaryToggleHtml(csMsgId, `${cp.messages.length} msgs`, bullets, messagesHtml);
+      html += summaryToggleHtml(csMsgId, bullets, messagesHtml);
     } else {
       html += `<div class="msg-row"><div class="msg-content">
         <div id="${csKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Summarizing...</div>
@@ -1501,10 +1532,12 @@ function renderDeepSummarizedItem(cp, data) {
   const deepOpenHref = slackPermalink(cp.channel_id, newestTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>`, deepOpenHref)}
+      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
+      <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
+      <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
     </div>
     <div class="item-right">
-      ${summaryToggleHtml(deepMsgId, `${msgs.length} msgs`, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
+      ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
         <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
@@ -2799,19 +2832,30 @@ bodyEl.addEventListener('click', (e) => {
     const summaryWrap = itemRight?.querySelector('.deep-summary-wrap');
     const countSpan = item?.querySelector('.summary-reply-count');
 
-    const expandHint = summaryToggle.querySelector('.expand-hint');
     if (msgsDiv.style.display === 'block') {
       msgsDiv.style.display = 'none';
       if (msgRow) msgRow.classList.remove('expanded');
       if (summaryWrap) summaryWrap.style.display = '';
-      if (countSpan) countSpan.textContent = countSpan.textContent.replace('↑', '↓');
-      if (expandHint) expandHint.textContent = 'expand ↓';
+      if (countSpan) {
+        const expandLabel = countSpan.querySelector('.expand-label');
+        if (expandLabel) expandLabel.textContent = 'expand ';
+        const headerExp = countSpan.closest('.header-expand');
+        if (headerExp) headerExp.classList.remove('is-expanded');
+        const lastText = countSpan.lastChild;
+        if (lastText?.nodeType === 3) lastText.textContent = lastText.textContent.replace('↑', '↓');
+      }
     } else {
       msgsDiv.style.display = 'block';
       if (msgRow) msgRow.classList.add('expanded');
       if (summaryWrap) summaryWrap.style.display = 'none';
-      if (countSpan) countSpan.textContent = countSpan.textContent.replace('↓', '↑');
-      if (expandHint) expandHint.textContent = 'collapse ↑';
+      if (countSpan) {
+        const expandLabel = countSpan.querySelector('.expand-label');
+        if (expandLabel) expandLabel.textContent = 'collapse ';
+        const headerExp = countSpan.closest('.header-expand');
+        if (headerExp) headerExp.classList.add('is-expanded');
+        const lastText = countSpan.lastChild;
+        if (lastText?.nodeType === 3) lastText.textContent = lastText.textContent.replace('↓', '↑');
+      }
     }
     return;
   }
@@ -3326,10 +3370,12 @@ async function kickoffVipSection(data) {
     const vipHref = vip.messages[0]?.permalink || '#';
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
-        ${itemLeftLink(`<span class="item-channel">${escapeHtml(vip.name)}</span> <span class="item-time">${formatTime(latestTs)}</span>`, vipHref)}
+        <a class="item-channel-link" href="${vipHref}" target="_blank"><span class="item-channel">${escapeHtml(vip.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
+        <span class="item-sep">·</span> <span class="item-time">${formatTime(latestTs)}</span>
+        <span class="item-sep">·</span> ${headerExpandHtml(msgId, vip.messages.length, vip.messages.length === 1 ? 'message' : 'messages')}
       </div>
       <div class="item-right">
-        ${summaryToggleHtml(msgId, `${vip.messages.length} message${vip.messages.length === 1 ? '' : 's'}`, (result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join(''), messagesHtml)}
+        ${summaryToggleHtml(msgId, (result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join(''), messagesHtml)}
         <div style="display:flex;gap:12px;margin-top:6px;">
           <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
         </div>
@@ -3466,7 +3512,7 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       const actionsEl = itemEl.querySelector('.item-actions');
       const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
       const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
-      rightEl.innerHTML = summaryToggleHtml(csMsgId, `${cp.messages.length} msgs`, bullets, messagesHtml) + actionsHtml;
+      rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml) + actionsHtml;
     }
   })();
 }
@@ -4290,10 +4336,13 @@ function runPrioritize() {
     isBackgroundFetch = false;
     refreshLink.textContent = 'new update available';
     refreshLink.classList.add('has-update');
+    refreshLink.style.display = '';
     scheduleBackgroundPoll();
     return;
   }
 
+  refreshLink.textContent = 'refresh now';
+  refreshLink.style.display = '';
   fetchBtn.textContent = 'Fetch Unreads';
   lastFetchTime = Date.now();
   updateLastUpdated();
@@ -4710,6 +4759,8 @@ function handlePortMessage(msg) {
       isBackgroundFetch = false;
       scheduleBackgroundPoll();
     } else {
+      refreshLink.textContent = 'refresh now';
+      refreshLink.style.display = '';
       bodyEl.innerHTML = `<div id="status" class="error">${msg.error}</div>`;
     }
     resetFetchState();

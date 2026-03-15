@@ -129,6 +129,13 @@ _flackBtnStyle.textContent = `
     white-space: nowrap;
   }
   #fslack-nav-toggle:hover { background: rgba(0,0,0,0.06); }
+  @media (prefers-color-scheme: dark) {
+    #fslack-nav-toggle {
+      border-color: rgba(255,255,255,0.4);
+      color: rgba(255,255,255,0.6);
+    }
+    #fslack-nav-toggle:hover { background: rgba(255,255,255,0.1); }
+  }
 `;
 document.head.appendChild(_flackBtnStyle);
 
