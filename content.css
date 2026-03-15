@@ -377,7 +377,7 @@ ul.slack-list, ol.slack-list {
   position: relative;
 }
 .msg-row + .msg-row { margin-top: 1em; }
-.msg-content { flex: 1; min-width: 0; margin-right: 80px; }
+.msg-content { flex: 1; min-width: 0; }
 .msg-actions {
   position: absolute;
   right: 0;
