@@ -93,6 +93,11 @@ section h2 {
 .inline-channel { display: inline; }
 .item-time { font-size: 11px; color: #616061; display: inline; margin-top: 0; }
 a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; color: inherit; }
+.item-left-link { text-decoration: none; color: inherit; cursor: pointer; }
+.item-left-link:hover .item-channel { color: #d1d2d3; }
+.item-left-link:hover .item-time { color: #ababad; }
+.open-slack-label { font-size: 11px; color: #616061; margin-left: 8px; display: none; }
+.item-left-link:hover .open-slack-label { display: inline; color: #ababad; }
 .item-time[data-channel] { cursor: pointer; }
 .item-time[data-channel]:hover { color: #d1d2d3; text-decoration: underline; }
 .msg-time[data-channel] { cursor: pointer; }
@@ -491,7 +496,11 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .show-messages-link:hover { text-decoration: underline; }
 .deep-messages { display: none; margin-top: 8px; }
 .summary-toggle { cursor: pointer; }
+.summary-toggle-group { cursor: pointer; }
+.summary-toggle-group:hover .deep-summary { color: #d1d2d3; }
 .summary-reply-count { color: #1d9bd1; }
+.expand-hint { font-size: 11px; color: #616061; margin-left: 8px; display: none; }
+.summary-toggle-group:hover .expand-hint { display: inline; color: #ababad; }
 
 .noise-section-footer {
   padding: 20px 16px;

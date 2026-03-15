@@ -155,8 +155,12 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
   console.log(`[fslack content] received: ${msg.type}`);
 
-  // sidepanelConnected ping: re-emit fslack:ready if inject.js already loaded
+  // sidepanelConnected ping: hide Slack nav and re-emit fslack:ready if inject.js already loaded
   if (msg.type === `${FSLACK}:sidepanelConnected`) {
+    chrome.storage.local.set({ fslackHideNav: true });
+    hideSlackNav();
+    const toggle = document.getElementById('fslack-nav-toggle');
+    if (toggle) { toggle.textContent = '☰ Show Nav'; toggle.classList.add('nav-hidden'); }
     if (injectReady) {
       chrome.runtime.sendMessage({ type: `${FSLACK}:ready`, teamDomain }).catch(() => {});
     }
