@@ -33,7 +33,7 @@ function connectPort() {
   setTimeout(() => {
     const status = document.getElementById('status');
     if (status && status.textContent === 'Waiting for Slack tab...') {
-      status.innerHTML = 'No Slack tab found. Open <a href="https://app.slack.com" target="_blank" style="color:#1d9bd1">app.slack.com</a> then click refresh above.';
+      status.innerHTML = 'No Slack tab found. Open <a href="https://app.slack.com" target="_blank" style="color:#1d9bd1">app.slack.com</a> then <a class="inline-refresh" style="color:#1d9bd1;cursor:pointer">refresh</a>.';
     }
   }, 5000);
 }
@@ -184,7 +184,6 @@ window._fslackDebug = function(channelId) {
     channelName: (d.channels || {})[cid],
     channelMeta: (d.channelMeta || {})[cid],
     sidebarSection: sidebarSections[cid] || null,
-    inDigestChannels: !!digestChannels[cid],
     rawChannelPost: (d.channelPosts || []).find(cp => cp.channel_id === cid),
     rawThread: (d.threads || []).find(t => t.channel_id === cid),
     inActNow: (p.actNow || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId, _reason: i._reason })),
@@ -204,7 +203,6 @@ window._fslackDebug = function(channelId) {
 let cachedView = null; // { data, popular, prioritized, ts }
 let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
 let sidebarSections = {};    // { [channelId]: 'top'|'daily'|'firehoses'|'weekly'|'other' }
-let digestChannels = {};     // { [channelId]: channelName } — always force to digest section
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let myReactionsMap = {};     // { "channel:ts": ["+1", "yellow_heart", ...] }
 let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
@@ -320,8 +318,7 @@ function muteThreadLocally(channel, threadTs) {
   removeCachedItem(channel, threadTs);
 }
 function loadCachedPrefs(callback) {
-  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackDigestChannels', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
-    digestChannels = cached.fslackDigestChannels || {};
+  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     vipSeenTimestamps = cached.fslackVipSeen || {};
     mutedThreadKeys = new Set(cached.fslackMutedThreads || []);
@@ -1186,7 +1183,6 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused 
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
-    ${!threadTs && !isDm ? `<span class="action-mark-digest" data-channel="${channel}" data-channel-name="${escapeHtml(channelName)}">mark digest</span>` : ''}
   </div>`;
 }
 
@@ -1204,10 +1200,10 @@ function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
     + `<div class="deep-messages" id="${targetId}">${messagesHtml}</div>`;
 }
 
-// Header expand link for item-left: "N msgs ↓" (shows "expand" on hover)
+// Header expand link for item-left: "N msgs ↓"
 function headerExpandHtml(targetId, count, unit) {
   if (!unit) unit = count === 1 ? 'msg' : 'msgs';
-  return `<span class="header-expand summary-toggle" data-target="${targetId}"><span class="summary-reply-count"><span class="expand-label">expand </span>${count} ${unit} ↓</span></span>`;
+  return `<span class="header-expand summary-toggle" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">collapse </span>${count} ${unit} ↓</span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -1541,7 +1537,6 @@ function renderDeepSummarizedItem(cp, data) {
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
         <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
-        <span class="show-messages-link action-mark-digest" data-channel="${cp.channel_id}" data-channel-name="${escapeHtml(ch)}" style="margin-top:0">mark digest</span>
       </div>
     </div>
   </div>`;
@@ -1806,13 +1801,6 @@ function applyPreFilters(data) {
         noise.push({ ...cp, messages: coldMsgs, _type: 'channel' });
       }
       _dbgLog('diaChannelNames');
-      continue;
-    }
-
-    // User-marked digest channels
-    if (digestChannels[cp.channel_id]) {
-      _dbgLog('digestChannel');
-      routeToDigest(cp);
       continue;
     }
 
@@ -2446,6 +2434,9 @@ function countNewerThreadReplies(data, channelId, threadTs, afterTs) {
 let replyRequestId = 0;
 
 bodyEl.addEventListener('click', (e) => {
+  // Inline refresh link (e.g. "No Slack tab found" message)
+  if (e.target.closest('.inline-refresh')) { startFetch(); return; }
+
   // Lightbox: intercept clicks on media thumbnails
   const thumb = e.target.closest('.file-thumb[data-lb-url]');
   if (thumb) {
@@ -2788,21 +2779,6 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // "mark as digest"
-  const markDigestBtn = e.target.closest('.action-mark-digest');
-  if (markDigestBtn && !markDigestBtn.dataset.pending) {
-    const { channel, channelName } = markDigestBtn.dataset;
-    markDigestBtn.dataset.pending = 'true';
-    markDigestBtn.textContent = '...';
-    digestChannels[channel] = channelName || channel;
-    chrome.storage.local.set({ fslackDigestChannels: digestChannels }, () => {
-      markDigestBtn.closest('.item')?.remove();
-      cachedView = null;
-      chrome.storage.local.remove('fslackViewCache');
-    });
-    return;
-  }
-
   // Send reply via postMessage
   const sendBtn = e.target.closest('.reply-send');
   if (sendBtn) return; // handled by direct listener above
@@ -2837,8 +2813,6 @@ bodyEl.addEventListener('click', (e) => {
       if (msgRow) msgRow.classList.remove('expanded');
       if (summaryWrap) summaryWrap.style.display = '';
       if (countSpan) {
-        const expandLabel = countSpan.querySelector('.expand-label');
-        if (expandLabel) expandLabel.textContent = 'expand ';
         const headerExp = countSpan.closest('.header-expand');
         if (headerExp) headerExp.classList.remove('is-expanded');
         const lastText = countSpan.lastChild;
@@ -2849,8 +2823,6 @@ bodyEl.addEventListener('click', (e) => {
       if (msgRow) msgRow.classList.add('expanded');
       if (summaryWrap) summaryWrap.style.display = 'none';
       if (countSpan) {
-        const expandLabel = countSpan.querySelector('.expand-label');
-        if (expandLabel) expandLabel.textContent = 'collapse ';
         const headerExp = countSpan.closest('.header-expand');
         if (headerExp) headerExp.classList.add('is-expanded');
         const lastText = countSpan.lastChild;
