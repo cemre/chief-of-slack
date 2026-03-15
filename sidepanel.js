@@ -1657,7 +1657,8 @@ function renderAnyItem(item, data, cssClass) {
   return '';
 }
 
-const HANDLE_MENTION_REGEX = /(?:^|[\s"'([{<])@(?:gem|cemre)(?=$|[\s.,!?;:)\]\}>"'])/i;
+// Build mention regex from Slack handle (set when data arrives from inject.js)
+let _handleMentionRegex = null;
 
 function containsSelfMention(text, selfId) {
   if (!text || !selfId) return false;
@@ -1666,8 +1667,8 @@ function containsSelfMention(text, selfId) {
   if (text.includes(`@${selfId}`)) return true;
   // @channel / @here (Slack encodes as <!channel> / <!here>)
   if (text.includes('<!channel>') || text.includes('<!here>')) return true;
-  // @gem / @cemre handle mentions (bare "gem" without @ is NOT a mention)
-  return HANDLE_MENTION_REGEX.test(text);
+  // @handle mention (e.g. @gem_ray)
+  return _handleMentionRegex ? _handleMentionRegex.test(text) : false;
 }
 
 // ── Deterministic pre-filters ──
@@ -3765,6 +3766,12 @@ function buildMyReactionsMap(data) {
 }
 
 function prioritizeAndRender(data) {
+  // Build self-mention regex from Slack handle and cache handle for Claude prompts
+  if (data.selfHandle) {
+    const escaped = data.selfHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    _handleMentionRegex = new RegExp(`(?:^|[\\s"'([{<])@${escaped}(?=$|[\\s.,!?;:)\\]\\}>"'])`, 'i');
+    chrome.storage.local.set({ selfHandle: data.selfHandle });
+  }
   myReactionsMap = buildMyReactionsMap(data);
   const preFiltered = applyPreFilters(data);
   const { forLlm } = preFiltered;

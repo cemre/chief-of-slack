@@ -156,7 +156,7 @@
     for (const id of (boot.prefs?.muted_channels || '').split(',')) {
       if (id) muted.add(id);
     }
-    return { selfId: boot.self?.id, muted };
+    return { selfId: boot.self?.id, selfHandle: boot.self?.name, muted };
   }
 
   async function fetchEmojiList() {
@@ -385,7 +385,7 @@
   async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
-    const [counts, { selfId, muted }] = await Promise.all([
+    const [counts, { selfId, selfHandle, muted }] = await Promise.all([
       slackApi('client.counts'),
       getSelfIdAndMuted(),
     ]);
@@ -722,6 +722,7 @@
 
     return {
       selfId,
+      selfHandle,
       badges: counts.channel_badges,
       threadUnreads: counts.threads,
       threads,
@@ -749,7 +750,7 @@
       ? (console.log(`[${FSLACK}] Reusing cached counts (${Math.round((now - _countsCache.ts) / 1000)}s old)`), Promise.resolve(_countsCache.data))
       : slackApi('client.counts').then((d) => { _countsCache = { data: d, ts: Date.now() }; return d; });
 
-    const [counts, { selfId, muted }] = await Promise.all([
+    const [counts, { selfId, selfHandle, muted }] = await Promise.all([
       countsPromise,
       getSelfIdAndMuted(),
     ]);
@@ -1000,6 +1001,7 @@
 
     return {
       selfId,
+      selfHandle,
       badges: counts.channel_badges,
       threadUnreads: counts.threads,
       threads,

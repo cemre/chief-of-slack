@@ -3,6 +3,27 @@
 const FSLACK = 'fslack';
 const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
 
+// ── Load user identity settings ──
+async function getIdentity() {
+  const { selfHandle, userContext } = await chrome.storage.local.get(['selfHandle', 'userContext']);
+  const name = selfHandle ? `@${selfHandle}` : null;
+  return {
+    nameClause: name
+      ? `\nMY NAME: ${name}. If someone addresses me by this name, treat it as directed at me.\n`
+      : '',
+    contextClause: userContext
+      ? `You are summarizing Slack for ${name || 'the user'}. ${userContext}. Highlight things relevant to or mentioning them.`
+      : (name
+        ? `You are summarizing Slack for ${name}. Highlight things relevant to or mentioning them.`
+        : 'You are summarizing Slack messages. Highlight things that seem important.'),
+    threadContextClause: userContext
+      ? `You are summarizing a Slack thread for ${name || 'the user'}. ${userContext}.`
+      : (name
+        ? `You are summarizing a Slack thread for ${name}.`
+        : 'You are summarizing a Slack thread.'),
+  };
+}
+
 // ── Side panel behavior: open on icon click ──
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -96,15 +117,13 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 // ── Build the prioritization prompt ──
-function buildPrompt(items, selfName) {
+function buildPrompt(items, selfName, identity) {
   const vipList = VIPS.map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(', ');
 
   const serialized = JSON.stringify(items, null, 0);
 
-  const nameClause = `\nMY NAME: Gem / Cemre / @gem. If someone addresses me by any of these names, treat it as directed at me.\n`;
-
   return `You are a Slack message prioritizer for a busy engineer. Classify each item into exactly one category.
-${nameClause}
+${identity.nameClause}
 VIPs (messages from these people get higher priority): ${vipList}
 
 SIDEBAR SECTIONS: Items may include a "sidebarSection" field indicating channel importance in my Slack sidebar:
@@ -178,7 +197,8 @@ async function handlePrioritize(payload, selfName) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const prompt = buildPrompt(payload, selfName);
+  const identity = await getIdentity();
+  const prompt = buildPrompt(payload, selfName, identity);
 
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
@@ -231,9 +251,9 @@ async function handlePrioritize(payload, selfName) {
 }
 
 // ── Build single-channel summarization prompt ──
-function buildSummarizePrompt(item) {
+function buildSummarizePrompt(item, identity) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+  return `${identity.contextClause}
 
 Summarize what happened in this Slack channel as 1-3 bullet points.
 
@@ -263,7 +283,8 @@ async function handleSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const prompt = buildSummarizePrompt(item);
+  const identity = await getIdentity();
+  const prompt = buildSummarizePrompt(item, identity);
 
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
@@ -299,9 +320,9 @@ async function handleSummarize(item) {
 }
 
 // ── Build VIP summarization prompt ──
-function buildVipSummarizePrompt(item) {
+function buildVipSummarizePrompt(item, identity) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+  return `${identity.contextClause}
 
 Extract 3-5 specific bullet points about what ${item.name} has been saying or doing in Slack.
 Each bullet should capture a concrete thing: a specific decision, question, announcement, concern, or piece of work — not a vague category.
@@ -324,7 +345,8 @@ async function handleVipSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const prompt = buildVipSummarizePrompt(item);
+  const identity = await getIdentity();
+  const prompt = buildVipSummarizePrompt(item, identity);
 
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
@@ -360,9 +382,9 @@ async function handleVipSummarize(item) {
 }
 
 // ── Build thread reply summarization prompt ──
-function buildThreadReplySummarizePrompt(item) {
+function buildThreadReplySummarizePrompt(item, identity) {
   const serialized = JSON.stringify(item.replies, null, 0);
-  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+  return `${identity.contextClause}
 
 A thread in #${item.channel} has new unread replies. The original post is shown below for context only — the user can already see it, so do NOT repeat or restate it.
 
@@ -385,6 +407,7 @@ async function handleThreadReplySummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
+  const identity = await getIdentity();
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -396,7 +419,7 @@ async function handleThreadReplySummarize(item) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 300,
-        messages: [{ role: 'user', content: buildThreadReplySummarizePrompt(item) }],
+        messages: [{ role: 'user', content: buildThreadReplySummarizePrompt(item, identity) }],
       }),
     });
     if (!resp.ok) {
@@ -415,9 +438,9 @@ async function handleThreadReplySummarize(item) {
 }
 
 // ── Build full-thread bullet-point summarization prompt ──
-function buildFullThreadSummarizePrompt(item) {
+function buildFullThreadSummarizePrompt(item, identity) {
   const serialized = JSON.stringify(item.replies, null, 0);
-  return `You are summarizing a Slack thread for Cemre (also known as "gem"), a Head of Product Management & Insights.
+  return `${identity.threadContextClause}
 
 Summarize the ENTIRE thread (root message + replies) as terse bullet points.
 Each bullet: "- [FirstName] [verb] [specific thing]"
@@ -441,6 +464,7 @@ async function handleFullThreadSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
+  const identity = await getIdentity();
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -452,7 +476,7 @@ async function handleFullThreadSummarize(item) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 400,
-        messages: [{ role: 'user', content: buildFullThreadSummarizePrompt(item) }],
+        messages: [{ role: 'user', content: buildFullThreadSummarizePrompt(item, identity) }],
       }),
     });
     if (!resp.ok) {
@@ -471,9 +495,9 @@ async function handleFullThreadSummarize(item) {
 }
 
 // ── Build bot thread summarization prompt ──
-function buildBotThreadPrompt(item) {
+function buildBotThreadPrompt(item, identity) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+  return `${identity.contextClause}
 
 A bot posted an automated report in #${item.channel} and people replied in a thread.
 
@@ -494,6 +518,7 @@ async function handleBotThreadSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
+  const identity = await getIdentity();
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -505,7 +530,7 @@ async function handleBotThreadSummarize(item) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 300,
-        messages: [{ role: 'user', content: buildBotThreadPrompt(item) }],
+        messages: [{ role: 'user', content: buildBotThreadPrompt(item, identity) }],
       }),
     });
     if (!resp.ok) {
@@ -524,9 +549,9 @@ async function handleBotThreadSummarize(item) {
 }
 
 // ── Build channel post summarization prompt ──
-function buildChannelPostPrompt(item) {
+function buildChannelPostPrompt(item, identity) {
   const serialized = JSON.stringify(item.messages, null, 0);
-  return `You are summarizing Slack for Cemre (also known as "gem"), a Head of Product Management & Insights. Highlight things relevant to or mentioning them.
+  return `${identity.contextClause}
 
 Summarize what people are discussing in #${item.channel} as exactly 3 bullet points.
 Each bullet: "- [first name] [verb] [specific thing]"
@@ -546,6 +571,7 @@ async function handleChannelPostSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
+  const identity = await getIdentity();
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -557,7 +583,7 @@ async function handleChannelPostSummarize(item) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 300,
-        messages: [{ role: 'user', content: buildChannelPostPrompt(item) }],
+        messages: [{ role: 'user', content: buildChannelPostPrompt(item, identity) }],
       }),
     });
     if (!resp.ok) {
