@@ -211,7 +211,7 @@ window._fslackDebug = function(channelId) {
 // ── State ──
 let cachedView = null; // { data, popular, prioritized, ts }
 let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
-let sidebarSections = {};    // { [channelId]: 'top'|'daily'|'firehoses'|'weekly'|'other' }
+let sidebarSections = {};    // { [channelId]: 'floor_priority'|'floor_whenfree'|'hard_noise'|'skip'|'normal' }
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let myReactionsMap = {};     // { "channel:ts": ["+1", "yellow_heart", ...] }
 let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
@@ -1835,10 +1835,16 @@ function applyPreFilters(data) {
       continue;
     }
 
-    // Firehoses sidebar section → hard noise, bypass LLM
-    if (cp._sidebarSection === 'firehoses') {
-      _dbgLog('firehoses');
+    // Hard noise rule → bypass LLM, straight to noise
+    if (cp._sidebarSection === 'hard_noise') {
+      _dbgLog('hard_noise');
       noise.push(cp);
+      continue;
+    }
+
+    // Skip rule → don't process at all
+    if (cp._sidebarSection === 'skip') {
+      _dbgLog('skip');
       continue;
     }
 
@@ -1968,7 +1974,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isDm = item._type === 'dm' || item._isDmThread;
     const isMentioned = item._isMentioned || false;
     const mentionInRoot = item._mentionInRoot || false;
-    const isImportantChannel = item._sidebarSection === 'top' || item._sidebarSection === 'daily';
+    const isImportantChannel = item._sidebarSection === 'floor_priority' || item._sidebarSection === 'floor_whenfree';
     const isQualified = isDm || isPrivate || isMentioned || mentionInRoot;
     const userReplied = item._userReplied || false;
     const llmCat = cat; // original LLM classification before overrides
@@ -1986,11 +1992,12 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     // Floor: direct @mentions are at least priority (LLM can upgrade to act_now but not below priority)
     if (isMentioned && cat !== 'act_now') cat = 'priority';
 
-    // Hard gate: only DMs, private channels, @mentions, or Top/Daily sidebar channels can reach act_now/priority
+    // Hard gate: only DMs, private channels, @mentions, or important sidebar channels can reach act_now/priority
     if (!isQualified && !isImportantChannel && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
 
-    // Floor for Top/Daily: never demote below when_free
-    if (isImportantChannel && (cat === 'noise' || cat === 'drop')) cat = 'when_free';
+    // Floor rules from sidebar section config
+    if (item._sidebarSection === 'floor_priority' && cat !== 'act_now') cat = 'priority';
+    if (item._sidebarSection === 'floor_whenfree' && (cat === 'noise' || cat === 'drop')) cat = 'when_free';
 
     if (cat === 'act_now' || cat === 'priority') {
       item._reason = reasons[item._llmId] || undefined;
@@ -3774,6 +3781,10 @@ function prioritizeAndRender(data) {
   if (data.vipUserIds && data.users) {
     const vipNames = data.vipUserIds.map((uid) => data.users[uid]).filter(Boolean);
     chrome.storage.local.set({ vipNames });
+  }
+  // Cache sidebar section names for options page
+  if (data.sidebarSectionNames && data.sidebarSectionNames.length) {
+    chrome.storage.local.set({ sidebarSectionNames: data.sidebarSectionNames });
   }
   myReactionsMap = buildMyReactionsMap(data);
   const preFiltered = applyPreFilters(data);

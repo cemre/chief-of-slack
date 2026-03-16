@@ -160,6 +160,37 @@ textarea {
   font-style: italic;
 }
 
+.tier-map {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tier-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.tier-row .section-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tier-row select {
+  padding: 4px 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 12px;
+  background: #fff;
+}
+
+.tier-row select:focus {
+  outline: none;
+  border-color: #4a154b;
+}
+
 .advanced {
   margin-bottom: 24px;
 }

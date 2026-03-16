@@ -32,7 +32,15 @@ const TOKEN_LABELS = {
 };
 
 // ── Load saved settings ──
-chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'tokenLimits', 'tokenUsage', 'tokenLog'], (result) => {
+const RULE_OPTIONS = [
+  { value: 'normal', label: 'Normal — AI decides priority' },
+  { value: 'floor_priority', label: 'Floor: priority — never below priority' },
+  { value: 'floor_whenfree', label: 'Floor: when free — never drops to noise' },
+  { value: 'hard_noise', label: 'Always noise — skip AI, straight to noise' },
+  { value: 'skip', label: 'Skip — don\'t process at all' },
+];
+
+chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog'], (result) => {
   if (result.claudeApiKey) apiKeyInput.value = result.claudeApiKey;
   if (result.userContext) userContextInput.value = result.userContext;
   charCount.textContent = `${(result.userContext || '').length}/400`;
@@ -43,6 +51,42 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   const names = result.vipNames || [];
   if (names.length) {
     vipList.innerHTML = names.map((n) => `<span class="vip-chip">${n}</span>`).join('');
+  }
+
+  // Render sidebar section rules
+  const sectionNames = result.sidebarSectionNames || [];
+  const savedRules = result.sidebarTierMap || {};
+  // Default rules matching the original hardcoded behavior
+  const defaultRules = {
+    top: 'floor_whenfree',
+    daily: 'floor_whenfree',
+    firehoses: 'hard_noise',
+    weekly: 'normal',
+    other: 'normal',
+  };
+  if (sectionNames.length) {
+    const tierMapEl = document.getElementById('tier-map');
+    tierMapEl.innerHTML = '';
+    // Sort: sections with a non-normal rule first, then alphabetical
+    const sorted = [...sectionNames].sort((a, b) => {
+      const aRule = savedRules[a.toLowerCase()] || defaultRules[a.toLowerCase()] || 'normal';
+      const bRule = savedRules[b.toLowerCase()] || defaultRules[b.toLowerCase()] || 'normal';
+      const aHasRule = aRule !== 'normal' ? 0 : 1;
+      const bHasRule = bRule !== 'normal' ? 0 : 1;
+      if (aHasRule !== bHasRule) return aHasRule - bHasRule;
+      return a.localeCompare(b);
+    });
+    for (const name of sorted) {
+      const key = name.toLowerCase();
+      const currentRule = savedRules[key] || defaultRules[key] || 'normal';
+      const row = document.createElement('div');
+      row.className = 'tier-row';
+      const optionsHtml = RULE_OPTIONS.map((o) =>
+        `<option value="${o.value}"${o.value === currentRule ? ' selected' : ''}>${o.label}</option>`
+      ).join('');
+      row.innerHTML = `<span class="section-name">${name}</span><select data-section="${key}">${optionsHtml}</select>`;
+      tierMapEl.appendChild(row);
+    }
   }
 
   // Render token table
@@ -90,6 +134,12 @@ saveBtn.addEventListener('click', () => {
   const key = apiKeyInput.value.trim();
   const context = userContextInput.value.trim();
 
+  // Collect sidebar tier mapping
+  const sidebarTierMap = {};
+  for (const select of document.querySelectorAll('#tier-map select[data-section]')) {
+    if (select.value) sidebarTierMap[select.dataset.section] = select.value;
+  }
+
   // Collect token limits from inputs
   const tokenLimits = {};
   for (const input of document.querySelectorAll('#token-table input[data-key]')) {
@@ -101,6 +151,7 @@ saveBtn.addEventListener('click', () => {
     claudeApiKey: key,
     userContext: context,
     openInBrowser: openInBrowserCheckbox.checked,
+    sidebarTierMap,
     tokenLimits,
   }, () => {
     saveStatus.textContent = 'Saved!';

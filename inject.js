@@ -165,13 +165,13 @@
     return data.emoji || {};
   }
 
-  // Sidebar section name → tier mapping (case-insensitive)
-  const SECTION_TIER_MAP = {
-    top: 'top',
-    daily: 'daily',
-    firehoses: 'firehoses',
-    weekly: 'weekly',
-    other: 'other',
+  // Default sidebar section → behavior rule
+  const DEFAULT_SECTION_RULES = {
+    top: 'floor_whenfree',
+    daily: 'floor_whenfree',
+    firehoses: 'hard_noise',
+    weekly: 'normal',
+    other: 'normal',
   };
 
   async function fetchSidebarSections() {
@@ -181,18 +181,31 @@
     try {
       cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
     } catch {}
-    if (cached && cached.ts && Date.now() - cached.ts < CACHE_TTL) {
+    if (cached && cached.ts && Date.now() - cached.ts < CACHE_TTL && cached.sectionNames) {
+      // Restore section names from cache for the options page
+      try { localStorage.setItem('fslackSectionNames', JSON.stringify(cached.sectionNames)); } catch {}
       return cached.data;
     }
 
+    // Load user-configured rules (written by options page via chrome.storage → content script relay)
+    let customRules = null;
+    try {
+      const stored = localStorage.getItem('fslackTierMap');
+      if (stored) customRules = JSON.parse(stored);
+    } catch {}
+    const rules = customRules || DEFAULT_SECTION_RULES;
+
     const result = {};
+    const sectionNames = []; // store for options page
     try {
       const resp = await slackApi('users.channelSections.list');
       const sections = resp.channel_sections || [];
       for (const section of sections) {
-        const name = (section.name || '').toLowerCase().trim();
-        const tier = SECTION_TIER_MAP[name] || null;
-        if (!tier) continue;
+        const name = (section.name || '').trim();
+        const nameLower = name.toLowerCase();
+        if (!name) continue;
+        sectionNames.push(name);
+        const rule = rules[nameLower] || 'normal';
         // Collect channel IDs — handle pagination if needed
         let channelIds = section.channel_ids || [];
         if (section.channel_ids_page_cursor) {
@@ -207,17 +220,19 @@
             } catch { break; }
           }
         }
-        for (const cid of channelIds) result[cid] = tier;
+        for (const cid of channelIds) result[cid] = rule;
       }
+      // Store section names for the options page
+      try { localStorage.setItem('fslackSectionNames', JSON.stringify(sectionNames)); } catch {}
     } catch (err) {
       console.warn(`[${FSLACK}] fetchSidebarSections failed:`, err);
       if (cached?.data) return cached.data;
       return {};
     }
 
-    // Cache result in localStorage
+    // Cache result + section names in localStorage
     try {
-      localStorage.setItem('fslackSidebarSections', JSON.stringify({ data: result, ts: Date.now() }));
+      localStorage.setItem('fslackSidebarSections', JSON.stringify({ data: result, sectionNames, ts: Date.now() }));
     } catch {}
     return result;
   }
@@ -739,6 +754,7 @@
       emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
       sidebarSections,
+      sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
     };
   }
 
@@ -1019,6 +1035,7 @@
       emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
       sidebarSections,
+      sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
     };
   }
 

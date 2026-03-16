@@ -56,13 +56,25 @@ function hideSlackNav() { if (!_navHideStyle.parentNode) document.head.appendChi
 function showSlackNav() { _navHideStyle.remove(); }
 
 // Apply on load based on stored preference (default: true)
-chrome.storage.local.get('fslackHideNav', (r) => {
+chrome.storage.local.get(['fslackHideNav', 'sidebarTierMap'], (r) => {
   if (r.fslackHideNav !== false) hideSlackNav();
+  // Sync tier map to localStorage for inject.js
+  if (r.sidebarTierMap) {
+    try { localStorage.setItem('fslackTierMap', JSON.stringify(r.sidebarTierMap)); } catch {}
+  }
 });
 // Listen for live toggle changes from the side panel
 chrome.storage.onChanged.addListener((changes) => {
   if ('fslackHideNav' in changes) {
     changes.fslackHideNav.newValue === false ? showSlackNav() : hideSlackNav();
+  }
+  // Sync tier map from chrome.storage → localStorage for inject.js
+  if ('sidebarTierMap' in changes) {
+    try {
+      localStorage.setItem('fslackTierMap', JSON.stringify(changes.sidebarTierMap.newValue));
+      // Clear cached sections so next fetch uses new mapping
+      localStorage.removeItem('fslackSidebarSections');
+    } catch {}
   }
 });
 
