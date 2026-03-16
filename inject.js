@@ -565,7 +565,7 @@
           const hist = await slackApi('conversations.history', {
             channel: ch.id,
             oldest: ch.last_read,
-            limit: '20',
+            limit: '50',
           });
           const msgs = (hist.messages || [])
             .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))
@@ -907,7 +907,7 @@
             const hist = await slackApi('conversations.history', {
               channel: ch.id,
               oldest: ch.last_read,
-              limit: '20',
+              limit: '50',
             });
             const msgs = (hist.messages || [])
               .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))

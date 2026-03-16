@@ -544,7 +544,7 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .deep-replies { font-size: 12px; }
 .self-bullet { color: #717274; }
 .msg-row.summarized > .msg-actions { display: none !important; }
-.msg-row.summarized.expanded > .msg-actions { display: flex !important; }
+.msg-row.summarized.expanded > .msg-actions { display: grid !important; }
 .msg-row.summarized.expanded > .msg-content:not(.thread-orig-root) { display: none; }
 .msg-row.summarized.expanded > .thread-orig-root { display: block !important; }
 .deep-type-badge {
