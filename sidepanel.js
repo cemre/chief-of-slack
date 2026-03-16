@@ -160,6 +160,19 @@ const refreshLink = document.getElementById('refresh-link');
 document.getElementById('settings-btn').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
 });
+
+// ── Slack link click handler: navigate existing tab instead of opening new ones ──
+// Cmd/Ctrl-click or middle-click still opens in new tab (browser default)
+document.addEventListener('click', (e) => {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+  const link = e.target.closest('a[href]');
+  if (!link) return;
+  const href = link.href;
+  if (!href || !href.startsWith('https://app.slack.com/')) return;
+  e.preventDefault();
+  // Navigate the existing Slack tab
+  chrome.runtime.sendMessage({ type: `${FSLACK}:navigateSlackTab`, url: href });
+}, true);
 refreshLink.addEventListener('click', () => {
   if (stagedRenderData) {
     // Render pre-fetched background data

@@ -563,4 +563,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  // Navigate existing Slack tab (from sidepanel link clicks)
+  if (msg.type === `${FSLACK}:navigateSlackTab`) {
+    getSlackTabId().then((tabId) => {
+      if (tabId) {
+        chrome.tabs.update(tabId, { url: msg.url, active: true });
+      } else {
+        chrome.tabs.create({ url: msg.url });
+      }
+    });
+    return false;
+  }
 });
