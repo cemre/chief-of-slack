@@ -2145,29 +2145,8 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Noise (collapsed by default) — split into recent (last 24h) and older
   if (!loading && (noise.length > 0 || deepNoiseLoading)) {
     const noiseCutoff = Date.now() / 1000 - 86400;
-    // Split channel items' messages by 24h: recent msgs stay, older msgs become separate items
-    const noiseRecent = [];
-    const noiseOlder = [];
-    for (const item of noise) {
-      if (item._type === 'channel' && item.messages && item.messages.length > 1) {
-        const recentMsgs = item.messages.filter(m => parseFloat(m.ts) >= noiseCutoff);
-        const olderMsgs = item.messages.filter(m => parseFloat(m.ts) < noiseCutoff);
-        if (recentMsgs.length > 0 && olderMsgs.length > 0) {
-          // Clone: recent messages in recent noise
-          const recentItem = { ...item, messages: recentMsgs, sort_ts: recentMsgs[0]?.ts || item.sort_ts };
-          if (item.fullMessages) recentItem.fullMessages = { ...item.fullMessages, history: recentMsgs };
-          noiseRecent.push(recentItem);
-          // Clone: older messages in older noise
-          const olderItem = { ...item, messages: olderMsgs, sort_ts: olderMsgs[0]?.ts || item.sort_ts, _deepSummary: null, _channelSummary: null };
-          if (item.fullMessages) olderItem.fullMessages = { ...item.fullMessages, history: olderMsgs };
-          noiseOlder.push(olderItem);
-          continue;
-        }
-      }
-      // Non-channel items or items fully in one bucket
-      if (getItemSortTs(item) >= noiseCutoff) noiseRecent.push(item);
-      else noiseOlder.push(item);
-    }
+    const noiseRecent = noise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+    const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
     html += '<section class="priority-section">';
     if (noiseRecent.length > 0 || deepNoiseLoading) {
       html += `<div class="section-toggle" id="noise-recent-toggle">Recent Noise · ${noiseRecent.length} ↓</div>`;
@@ -3945,6 +3924,26 @@ function prioritizeAndRender(data) {
       }
 
       prioritized.noise = sortNoiseItems(prioritized.noise, mergedNoiseOrder);
+      // Split channel items by 24h at the data level so summarization only sees relevant messages
+      const noiseSplitCutoff = Date.now() / 1000 - 86400;
+      const splitNoise = [];
+      for (const item of prioritized.noise) {
+        if (item._type === 'channel' && item.messages && item.messages.length > 1) {
+          const rMsgs = item.messages.filter(m => parseFloat(m.ts) >= noiseSplitCutoff);
+          const oMsgs = item.messages.filter(m => parseFloat(m.ts) < noiseSplitCutoff);
+          if (rMsgs.length > 0 && oMsgs.length > 0) {
+            const rItem = { ...item, messages: rMsgs, sort_ts: rMsgs[0]?.ts || item.sort_ts };
+            if (item.fullMessages) rItem.fullMessages = { ...item.fullMessages, history: rMsgs };
+            splitNoise.push(rItem);
+            const oItem = { ...item, messages: oMsgs, sort_ts: oMsgs[0]?.ts || item.sort_ts, _deepSummary: null, _channelSummary: null };
+            if (item.fullMessages) oItem.fullMessages = { ...item.fullMessages, history: oMsgs };
+            splitNoise.push(oItem);
+            continue;
+          }
+        }
+        splitNoise.push(item);
+      }
+      prioritized.noise = splitNoise;
       let deepNoise = prioritized.noise.filter((item) =>
         (item.fullMessages?.history || item.messages || []).length >= 1
       );
@@ -4041,25 +4040,8 @@ function prioritizeAndRender(data) {
           // Re-render noise sections in-place
           const allNoise = sortNoiseItems(prioritized.noise, mergedNoiseOrder);
           const noiseCutoff = Date.now() / 1000 - 86400;
-          const allNoiseRecent = [];
-          const allNoiseOlder = [];
-          for (const item of allNoise) {
-            if (item._type === 'channel' && item.messages && item.messages.length > 1) {
-              const rMsgs = item.messages.filter(m => parseFloat(m.ts) >= noiseCutoff);
-              const oMsgs = item.messages.filter(m => parseFloat(m.ts) < noiseCutoff);
-              if (rMsgs.length > 0 && oMsgs.length > 0) {
-                const rItem = { ...item, messages: rMsgs, sort_ts: rMsgs[0]?.ts || item.sort_ts };
-                if (item.fullMessages) rItem.fullMessages = { ...item.fullMessages, history: rMsgs };
-                allNoiseRecent.push(rItem);
-                const oItem = { ...item, messages: oMsgs, sort_ts: oMsgs[0]?.ts || item.sort_ts, _deepSummary: null, _channelSummary: null };
-                if (item.fullMessages) oItem.fullMessages = { ...item.fullMessages, history: oMsgs };
-                allNoiseOlder.push(oItem);
-                continue;
-              }
-            }
-            if (getItemSortTs(item) >= noiseCutoff) allNoiseRecent.push(item);
-            else allNoiseOlder.push(item);
-          }
+          const allNoiseRecent = allNoise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+          const allNoiseOlder = allNoise.filter((item) => getItemSortTs(item) < noiseCutoff);
 
           if (noiseRecentEl) {
             let recentHtml = '';
@@ -4161,25 +4143,8 @@ function prioritizeAndRender(data) {
         // Sort ALL noise items by message count desc, then recency desc
         const allNoise = sortNoiseItems([...regularNoise, ...summarizedNoiseItems], mergedNoiseOrder);
         const noiseCutoff = Date.now() / 1000 - 86400;
-        const allNoiseRecent = [];
-        const allNoiseOlder = [];
-        for (const item of allNoise) {
-          if (item._type === 'channel' && item.messages && item.messages.length > 1) {
-            const rMsgs = item.messages.filter(m => parseFloat(m.ts) >= noiseCutoff);
-            const oMsgs = item.messages.filter(m => parseFloat(m.ts) < noiseCutoff);
-            if (rMsgs.length > 0 && oMsgs.length > 0) {
-              const rItem = { ...item, messages: rMsgs, sort_ts: rMsgs[0]?.ts || item.sort_ts };
-              if (item.fullMessages) rItem.fullMessages = { ...item.fullMessages, history: rMsgs };
-              allNoiseRecent.push(rItem);
-              const oItem = { ...item, messages: oMsgs, sort_ts: oMsgs[0]?.ts || item.sort_ts, _deepSummary: null, _channelSummary: null };
-              if (item.fullMessages) oItem.fullMessages = { ...item.fullMessages, history: oMsgs };
-              allNoiseOlder.push(oItem);
-              continue;
-            }
-          }
-          if (getItemSortTs(item) >= noiseCutoff) allNoiseRecent.push(item);
-          else allNoiseOlder.push(item);
-        }
+        const allNoiseRecent = allNoise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+        const allNoiseOlder = allNoise.filter((item) => getItemSortTs(item) < noiseCutoff);
 
         if (noiseRecentEl) {
           let recentHtml = '';
