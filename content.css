@@ -270,6 +270,8 @@ ul.slack-list, ol.slack-list {
 .thread-replies-container .msg-row + .msg-row { margin-top: 5px; }
 .thread-replies-container .file-thumb img { max-width: 160px; max-height: 80px; }
 .thread-replies-container .item-reply { margin-top: 0; }
+.thread-replies-container .msg-content { margin-right: 0; }
+.thread-replies-container .msg-actions { right: 0; }
 .item .thread-replies-container { margin-bottom: 0; }
 .item-reply {
   margin-top: 6px;
@@ -314,6 +316,13 @@ ul.slack-list, ol.slack-list {
 .saved-items-list.expanded { display: block; }
 .item.saved-item { border-left: 3px solid #27ae60; }
 .priority-section:has(.saved-items-list) { border-bottom: 1px solid #2c2d30; }
+/* VIP relevant bullet indicator */
+.vip-bullet-relevant { color: #e8912d; }
+.vip-bullet-relevant::marker { content: '\25C6  '; color: #e8912d; }
+/* VIP per-message open in Slack link */
+.vip-msg-slack-link { font-size: 11px; color: #1d9bd1; text-decoration: none; margin-left: 6px; display: none; }
+.vip-msg-row:hover .vip-msg-slack-link { display: inline; }
+.vip-msg-slack-link:hover { text-decoration: underline; }
 .section-toggle {
   height: 44px;
   box-sizing: border-box;

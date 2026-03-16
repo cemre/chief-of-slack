@@ -331,13 +331,13 @@ Do NOT start bullets with the person's name — just state the thing directly.
 Bad: "Announced the new onboarding flow is launching Thursday." (too vague) Good: "New onboarding flow launching Thursday."
 Bad: "Josh asked why the /auth endpoint is returning 403s in staging." (uses name) Good: "Asking why /auth returns 403s in staging."
 Use direct, terse language. No filler. No names.
-If there are fewer than 2 substantive messages, return {"relevant": false}.
+If a bullet seems particularly relevant to me (mentions my work, my team, something I should act on), prefix it with "*" — otherwise no prefix.
 
 MESSAGES:
 ${serialized}
 
 Respond with ONLY a JSON object:
-{"relevant": true, "bullets": ["...", "...", "..."]} or {"relevant": false}
+{"bullets": ["...", "*relevant bullet", "..."]}
 No explanation, no markdown fences, just the JSON object.`;
 }
 

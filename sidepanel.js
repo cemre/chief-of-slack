@@ -2534,7 +2534,8 @@ bodyEl.addEventListener('click', (e) => {
       vipToggle.textContent = 'Creep on VIPs ↑';
       if (!vipItems.dataset.loaded) {
         vipItems.innerHTML = '<div style="padding:8px 24px;font-size:12px;color:#3d3f42">Loading VIP activity...</div>';
-        sendToInject({ type: `${FSLACK}:fetchVips` });
+        pendingVips = null; // reset so kickoff waits for fresh data
+        sendToInject({ type: `${FSLACK}:fetchVips`, cachedUsers: { ...cachedUserMap, ...(lastRenderData?.users || {}) } });
         kickoffVipSection(lastRenderData);
       }
     }
@@ -3259,11 +3260,11 @@ function showApiKeyPrompt(rawData) {
 }
 // ── Async VIP section: wait for data, summarize, render ──
 async function kickoffVipSection(data) {
-  // Wait up to 3s for pendingVips to arrive from inject.js
+  // Wait up to 10s for pendingVips to arrive from inject.js (VIP fetch involves user resolution + search API calls)
   let vips = pendingVips;
   if (vips === null) {
     await new Promise((resolve) => {
-      const deadline = Date.now() + 3000;
+      const deadline = Date.now() + 10000;
       const poll = setInterval(() => {
         if (pendingVips !== null || Date.now() > deadline) {
           clearInterval(poll);
@@ -3274,7 +3275,6 @@ async function kickoffVipSection(data) {
     });
   }
   if (!vips) vips = [];
-  console.log(`[fslack] kickoffVipSection: ${vips.length} VIPs received:`, vips.map(v => `${v.name}: ${v.messages.length} msgs`));
 
   const vipArea = document.getElementById('vip-items');
   if (!vipArea) return;
@@ -3282,18 +3282,16 @@ async function kickoffVipSection(data) {
   // Filter out messages the user has manually dismissed (per-VIP seen timestamp)
   // Note: we intentionally do NOT filter by channel lastRead — the point of "Creep on VIPs"
   // is to see what they've been saying even in channels you've already read
-  const filteredVips = vips.map((v) => ({
-    ...v,
-    messages: v.messages.filter((m) => {
-      const seenTs = vipSeenTimestamps[v.name];
+  const filteredVips = vips.map((v) => {
+    const seenTs = vipSeenTimestamps[v.name];
+    const msgs = v.messages.filter((m) => {
       if (seenTs && parseFloat(m.ts) <= parseFloat(seenTs)) return false;
       return true;
-    }),
-  }));
+    });
+    return { ...v, messages: msgs };
+  });
 
-  console.log(`[fslack] kickoffVipSection: after filter:`, filteredVips.map(v => `${v.name}: ${v.messages.length} msgs`));
   const relevantVips = filteredVips.filter((v) => v.messages.length > 0);
-  console.log(`[fslack] kickoffVipSection: ${relevantVips.length} relevant VIPs`);
   if (relevantVips.length === 0) {
     vipArea.innerHTML = '';
     vipArea.dataset.loaded = '1';
@@ -3330,7 +3328,7 @@ async function kickoffVipSection(data) {
     } catch {
       response = { error: 'send failed' };
     }
-    if (response?.summary) {
+    if (response?.summary?.bullets) {
       _vipSummaryCache[cacheKey] = response.summary;
       chrome.storage.local.set({ fslackVipSummaryCache: _vipSummaryCache });
     }
@@ -3338,15 +3336,10 @@ async function kickoffVipSection(data) {
   }));
 
   let vipHtml = '';
-  let hasContent = false;
   for (let i = 0; i < summaries.length; i++) {
     const { vip, result } = summaries[i];
-    console.log(`[fslack] VIP ${vip.name}: ${vip.messages.length} msgs, relevant=${result?.relevant}, bullets=${result?.bullets?.length}`);
-    if (!result?.relevant) continue;
-    hasContent = true;
     const latestTs = vip.messages[0]?.ts;
     const msgId = `vip-msgs-${i}`;
-    // Group messages by channel
     const byChannel = new Map();
     for (const m of vip.messages) {
       const key = m.channel_id || m.channel_name || '?';
@@ -3359,11 +3352,21 @@ async function kickoffVipSection(data) {
       const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
       messagesHtml += `<div class="vip-channel-group">${channelLabel}<ul class="vip-msg-list">`;
       for (const m of ch.messages) {
-        messagesHtml += `<li class="item-text">${formatSlackHtml(m.text || '', data?.users)}${renderFiles(m.files)}</li>`;
+        const msgLink = m.permalink ? `<a class="vip-msg-slack-link" href="${escapeHtml(m.permalink)}" target="_blank">open in Slack ↗</a>` : '';
+        messagesHtml += `<li class="item-text vip-msg-row">${formatSlackHtml(m.text || '', data?.users)}${renderFiles(m.files)}${msgLink}</li>`;
       }
       messagesHtml += '</ul></div>';
     }
     const vipHref = vip.messages[0]?.permalink || '#';
+    // Bullets prefixed with * are marked relevant — render with an indicator
+    const bullets = result?.bullets || [];
+    const bulletsHtml = bullets.map((b) => {
+      const isRelevant = b.startsWith('*');
+      const text = isRelevant ? b.slice(1).trim() : b;
+      return isRelevant
+        ? `<li class="vip-bullet-relevant">${escapeHtml(text)}</li>`
+        : `<li>${escapeHtml(text)}</li>`;
+    }).join('');
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
         <a class="item-channel-link" href="${vipHref}" target="_blank"><span class="item-channel">${escapeHtml(vip.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
@@ -3371,7 +3374,7 @@ async function kickoffVipSection(data) {
         <span class="item-sep">·</span> ${headerExpandHtml(msgId, vip.messages.length, vip.messages.length === 1 ? 'message' : 'messages')}
       </div>
       <div class="item-right">
-        ${summaryToggleHtml(msgId, (result.bullets || []).map((b) => `<li>${escapeHtml(b)}</li>`).join(''), messagesHtml)}
+        ${bulletsHtml ? summaryToggleHtml(msgId, bulletsHtml, messagesHtml) : messagesHtml}
         <div style="display:flex;gap:12px;margin-top:6px;">
           <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
         </div>
@@ -3379,7 +3382,7 @@ async function kickoffVipSection(data) {
     </div>`;
   }
 
-  if (!hasContent) {
+  if (!vipHtml) {
     vipArea.innerHTML = '';
     vipArea.dataset.loaded = '1';
     return;
