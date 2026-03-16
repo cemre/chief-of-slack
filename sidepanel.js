@@ -1998,6 +1998,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 
     if (cat === 'act_now' || cat === 'priority') {
       item._reason = reasons[item._llmId] || undefined;
+      item._reasonWhy = reasons[item._llmId + '_why'] || undefined;
       // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
       if (!item._reason && isMentioned) item._reason = item._mentionInReplies && !item._mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
       // Fallback: truncate most substantive message text
@@ -2025,7 +2026,7 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     }
 
     if (cat !== llmCat || cat === 'act_now' || cat === 'priority') {
-      console.log(`[fslack] ${item._llmId} (${item._type}, #${chLabel}): LLM="${llmCat}" → final="${cat}" | isDm=${isDm} isPrivate=${isPrivate} isMentioned=${isMentioned} isImportant=${isImportantChannel} reason="${item._reason || ''}"`);
+      console.log(`[fslack] ${item._llmId} (${item._type}, #${chLabel}): LLM="${llmCat}" → final="${cat}" | isDm=${isDm} isPrivate=${isPrivate} isMentioned=${isMentioned} isImportant=${isImportantChannel} reason="${item._reason || ''}" why="${item._reasonWhy || ''}"`);
     }
 
     if (cat === 'act_now') { actNow.push(item); return; }
@@ -3943,7 +3944,7 @@ function prioritizeAndRender(data) {
         }
         splitNoise.push(item);
       }
-      prioritized.noise = splitNoise;
+      prioritized.noise = sortNoiseItems(splitNoise, mergedNoiseOrder);
       let deepNoise = prioritized.noise.filter((item) =>
         (item.fullMessages?.history || item.messages || []).length >= 1
       );

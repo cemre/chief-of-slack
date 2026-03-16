@@ -148,19 +148,20 @@ IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, cl
 ITEMS:
 ${serialized}
 
-For EVERY item, respond with a [category, summary] pair. The summary is a terse
+For EVERY item, respond with a [category, summary, reason] triple. The summary is a terse
 description (under 10 words, lowercase, no period) as "[person] [verb] [thing]" —
-e.g. ["act_now", "josh asked you to confirm the deploy"],
-["priority", "rosey asks you to come to bug bash"],
-["noise", "brahm shared windows alpha status update"].
+e.g. ["act_now", "josh asked you to confirm the deploy", "josh is blocked waiting for deploy confirmation"],
+["priority", "rosey asks you to come to bug bash", "direct invite to team event"],
+["noise", "brahm shared windows alpha status update", "status update, no action needed"].
+The reason should explain WHY you chose this category — what signal drove the decision.
 The summary must justify the category — if you can't describe someone waiting on me, it's not act_now.
 
-Respond with ONLY a JSON object mapping each item's "id" to its [category, summary] pair, plus a "_noiseOrder" key (array of noise/drop IDs sorted by work-relevance). No explanation, no markdown fences, just the JSON object.`;
+Respond with ONLY a JSON object mapping each item's "id" to its [category, summary, reason] triple, plus a "_noiseOrder" key (array of noise/drop IDs sorted from MOST work-relevant first to LEAST work-relevant last — e.g. engineering discussions before social chatter). No explanation, no markdown fences, just the JSON object.`;
 }
 
 // ── Token limit defaults ──
 const TOKEN_DEFAULTS = {
-  prioritize: 800,
+  prioritize: 2000,
   channelSummary: 150,
   vipSummary: 300,
   threadReply: 200,
@@ -260,7 +261,11 @@ async function handlePrioritize(payload, selfName) {
     const priorities = {};
     const reasons = {};
     for (const [key, val] of Object.entries(parsed)) {
-      if (Array.isArray(val) && val.length >= 2) {
+      if (Array.isArray(val) && val.length >= 3) {
+        priorities[key] = val[0];
+        reasons[key] = val[1];
+        reasons[key + '_why'] = val[2];
+      } else if (Array.isArray(val) && val.length >= 2) {
         priorities[key] = val[0];
         reasons[key] = val[1];
       } else {
