@@ -64,7 +64,6 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeChannelPost`,
   `${FSLACK}:summarizeThreadReplies`,
   `${FSLACK}:summarizeFullThread`,
-  `${FSLACK}:summarizeRoot`,
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
 ]);
@@ -161,14 +160,13 @@ Respond with ONLY a JSON object mapping each item's "id" to its [category, summa
 
 // ── Token limit defaults ──
 const TOKEN_DEFAULTS = {
-  prioritize: 1280,
-  channelSummary: 256,
-  vipSummary: 400,
-  threadReply: 300,
-  fullThread: 400,
-  botThread: 300,
-  channelPost: 300,
-  rootMessage: 100,
+  prioritize: 800,
+  channelSummary: 150,
+  vipSummary: 300,
+  threadReply: 200,
+  fullThread: 300,
+  botThread: 200,
+  channelPost: 200,
 };
 
 // ── Load token limits (user overrides or defaults) ──
@@ -483,30 +481,6 @@ async function handleChannelPostSummarize(item) {
   } catch (err) { return { error: err.message }; }
 }
 
-// ── Build root message summarization prompt ──
-function buildRootSummarizePrompt(item) {
-  return `Summarize this Slack message in 1 terse sentence (under 120 chars). Just the key point, no preamble.
-
-Author: ${item.user}
-Channel: #${item.channel}
-Message: ${item.text}
-
-Respond with ONLY a JSON object: {"summary": "..."}
-No markdown fences, no explanation.`;
-}
-
-// ── Call Claude API for root message summarization ──
-async function handleRootSummarize(item) {
-  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
-  if (!claudeApiKey) return { error: 'no_api_key' };
-  const limits = await getTokenLimits();
-  try {
-    const result = await callClaude(claudeApiKey, buildRootSummarizePrompt(item), 'rootMessage', limits);
-    if (result.error) return result;
-    return { summary: result.parsed };
-  } catch (err) { return { error: err.message }; }
-}
-
 // ── Intercept slack.com/app_redirect navigations ──
 chrome.webNavigation.onBeforeNavigate.addListener(
   async (details) => {
@@ -570,10 +544,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeFullThread`) {
     handleFullThreadSummarize(msg.data).then(sendResponse);
-    return true;
-  }
-  if (msg.type === `${FSLACK}:summarizeRoot`) {
-    handleRootSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {

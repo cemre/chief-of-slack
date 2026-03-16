@@ -3596,49 +3596,31 @@ function runThreadReplySummarization(allItems, data) {
     }
   })();
 }
-// ── Async root message summarization (long seen root messages) ──
+// ── Root message summarization (truncate long roots — no LLM call needed) ──
 function runRootSummarization(allItems, data) {
   const threads = allItems.filter((item) => {
     if (item._type !== 'thread') return false;
     if (item._rootSummary) return false;
-    if (threadNeedsSummary(item)) return false; // full-thread summary covers root
+    if (threadNeedsSummary(item)) return false;
     const seenCount = Math.max(0, (item.reply_count || 0) - (item.unread_replies || []).length);
     return seenCount > 0 && (item.root_text || '').length > 300;
   });
   if (threads.length === 0) return;
 
-  (async () => {
-    for (const t of threads) {
-      // #11: Check persistent cache
-      const cachedRoot = getCachedSummary('root', t.channel_id, t.ts);
-      if (cachedRoot) {
-        t._rootSummary = cachedRoot;
-        console.log(`[fslack] Root summary cache HIT: ${t.channel_id}:${t.ts}`);
-      } else {
-        const ch = data.channels[t.channel_id] || t.channel_id;
-        let response;
-        try {
-          response = await new Promise((resolve) =>
-            chrome.runtime.sendMessage({
-              type: `${FSLACK}:summarizeRoot`,
-              data: { channel: ch, user: fullName(t.root_user, data.fullNames), text: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 800, data.users) }
-            }, resolve)
-          );
-        } catch { continue; }
-        if (!response?.summary?.summary) continue;
-        t._rootSummary = response.summary.summary;
-        setCachedSummary('root', t.channel_id, t.ts, t._rootSummary);
-      }
-      const rootKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
-      const pendingEl = document.getElementById(rootKey);
-      if (!pendingEl) continue;
+  for (const t of threads) {
+    // Simple truncation instead of LLM call
+    const plain = plainTruncate(textWithFwd(t.root_text, t.root_fwd), 150, data.users);
+    t._rootSummary = plain;
 
-      const summarySpan = document.createElement('span');
-      summarySpan.className = 'root-summary';
-      summarySpan.textContent = t._rootSummary;
-      pendingEl.replaceWith(summarySpan);
-    }
-  })();
+    const rootKey = `root-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
+    const pendingEl = document.getElementById(rootKey);
+    if (!pendingEl) continue;
+
+    const summarySpan = document.createElement('span');
+    summarySpan.className = 'root-summary';
+    summarySpan.textContent = t._rootSummary;
+    pendingEl.replaceWith(summarySpan);
+  }
 }
 // ── Async channel-post thread summarization (fetch replies then summarize) ──
 function runChannelThreadSummarization(allItems, data) {
@@ -3855,9 +3837,9 @@ function prioritizeAndRender(data) {
     });
   }
 
-  // #9: Merge prioritization calls when total items ≤ 25
+  // #9: Merge prioritization calls when total items ≤ 50 (saves 1 API call)
   let prioritizePromise;
-  if (totalItems <= 25 && importantItems.length > 0 && publicItems.length > 0) {
+  if (totalItems <= 50 && importantItems.length > 0 && publicItems.length > 0) {
     const allItems = [...importantItems, ...publicItems];
     const allHash = djb2Hash(JSON.stringify(allItems));
     if (_prioritizationCache && _prioritizationCache.allHash === allHash) {

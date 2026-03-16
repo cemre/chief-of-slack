@@ -10,14 +10,13 @@ const saveStatus = document.getElementById('save-status');
 
 // ── Token limit defaults (must match background.js TOKEN_DEFAULTS) ──
 const TOKEN_DEFAULTS = {
-  prioritize: 1280,
-  channelSummary: 256,
-  vipSummary: 400,
-  threadReply: 300,
-  fullThread: 400,
-  botThread: 300,
-  channelPost: 300,
-  rootMessage: 100,
+  prioritize: 800,
+  channelSummary: 150,
+  vipSummary: 300,
+  threadReply: 200,
+  fullThread: 300,
+  botThread: 200,
+  channelPost: 200,
 };
 
 const TOKEN_LABELS = {
@@ -28,7 +27,6 @@ const TOKEN_LABELS = {
   fullThread: 'Full Thread',
   botThread: 'Bot Thread',
   channelPost: 'Channel Post',
-  rootMessage: 'Root Message',
 };
 
 // ── Load saved settings ──
