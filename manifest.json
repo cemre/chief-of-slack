@@ -3,7 +3,7 @@
   "name": "Slack Attention Firewall",
   "version": "0.1.0",
   "description": "Slack Attention Firewall — see only what needs your attention",
-  "permissions": ["activeTab", "storage", "scripting", "declarativeNetRequest", "sidePanel"],
+  "permissions": ["activeTab", "storage", "scripting", "declarativeNetRequest", "sidePanel", "webNavigation"],
   "host_permissions": ["https://app.slack.com/*", "https://*.slack.com/*", "https://api.anthropic.com/*"],
   "background": {
     "service_worker": "background.js"
@@ -13,6 +13,15 @@
       "matches": ["https://app.slack.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://app.slack.com/archives/*",
+        "https://*.slack.com/archives/*",
+        "https://*.slack.com/ssb/redirect*"
+      ],
+      "js": ["redirect.js"],
+      "run_at": "document_start"
     }
   ],
   "side_panel": {
@@ -31,6 +40,10 @@
     {
       "resources": ["inject.js", "standard-emoji.json", "content.css"],
       "matches": ["https://app.slack.com/*"]
+    },
+    {
+      "resources": ["block-slack-protocol.js"],
+      "matches": ["https://*.slack.com/*"]
     }
   ],
   "declarative_net_request": {

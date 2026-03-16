@@ -184,11 +184,21 @@ window.addEventListener('message', (event) => {
   const msg = event.data;
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
 
-  // Track inject.js ready state
+  // Track inject.js ready state + cache workspace→team mapping for redirect.js
   if (msg.type === `${FSLACK}:ready`) {
     console.log('[fslack content] inject.js ready, teamDomain:', msg.teamDomain);
     injectReady = true;
     if (msg.teamDomain) teamDomain = msg.teamDomain;
+
+    // Extract team ID from app.slack.com URL path: /client/T.../...
+    const teamMatch = window.location.pathname.match(/\/client\/(T[A-Z0-9]+)/);
+    if (teamMatch && msg.teamDomain) {
+      chrome.storage.local.get('workspaceTeamMap', (r) => {
+        const map = r.workspaceTeamMap || {};
+        map[msg.teamDomain] = teamMatch[1];
+        chrome.storage.local.set({ workspaceTeamMap: map });
+      });
+    }
   }
 
   // Forward to background.js (which relays to side panel)
