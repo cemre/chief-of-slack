@@ -2202,16 +2202,6 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   lastRenderData = data;
   mentionLookupDirty = true;
 
-  // Wire reason-badge toggle (delegated)
-  bodyEl.addEventListener('click', (e) => {
-    const toggle = e.target.closest('.item-reason-toggle');
-    if (!toggle) return;
-    const details = toggle.nextElementSibling;
-    if (!details?.classList.contains('item-details')) return;
-    const expanded = details.classList.toggle('expanded');
-    toggle.textContent = toggle.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
-  });
-
   // Schedule background poll to check for new data without disrupting UI
   if (!loading) scheduleBackgroundPoll();
 
@@ -2468,6 +2458,16 @@ function countNewerThreadReplies(data, channelId, threadTs, afterTs) {
 let replyRequestId = 0;
 
 bodyEl.addEventListener('click', (e) => {
+  // Reason-badge toggle for collapsible priority items
+  const reasonToggle = e.target.closest('.item-reason-toggle');
+  if (reasonToggle) {
+    const details = reasonToggle.nextElementSibling;
+    if (!details?.classList.contains('item-details')) return;
+    const expanded = details.classList.toggle('expanded');
+    reasonToggle.textContent = reasonToggle.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
+    return;
+  }
+
   // Inline refresh link (e.g. "No Slack tab found" message)
   if (e.target.closest('.inline-refresh')) { startFetch(); return; }
 
@@ -3273,6 +3273,7 @@ async function kickoffVipSection(data) {
     });
   }
   if (!vips) vips = [];
+  console.log(`[fslack] kickoffVipSection: ${vips.length} VIPs received:`, vips.map(v => `${v.name}: ${v.messages.length} msgs`));
 
   const vipArea = document.getElementById('vip-items');
   if (!vipArea) return;
@@ -3289,7 +3290,9 @@ async function kickoffVipSection(data) {
     }),
   }));
 
+  console.log(`[fslack] kickoffVipSection: after filter:`, filteredVips.map(v => `${v.name}: ${v.messages.length} msgs`));
   const relevantVips = filteredVips.filter((v) => v.messages.length > 0);
+  console.log(`[fslack] kickoffVipSection: ${relevantVips.length} relevant VIPs`);
   if (relevantVips.length === 0) {
     vipArea.innerHTML = '';
     vipArea.dataset.loaded = '1';
@@ -3337,6 +3340,7 @@ async function kickoffVipSection(data) {
   let hasContent = false;
   for (let i = 0; i < summaries.length; i++) {
     const { vip, result } = summaries[i];
+    console.log(`[fslack] VIP ${vip.name}: ${vip.messages.length} msgs, relevant=${result?.relevant}, bullets=${result?.bullets?.length}`);
     if (!result?.relevant) continue;
     hasContent = true;
     const latestTs = vip.messages[0]?.ts;
