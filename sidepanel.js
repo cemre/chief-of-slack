@@ -1175,15 +1175,12 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   const myReactions = myReactionsMap[`${channel}:${ts}`] || [];
   const likeClass = myReactions.includes('+1') ? ' reacted' : '';
   const heartClass = myReactions.includes('yellow_heart') ? ' reacted' : '';
+  const bookmarkSvg = `<svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" fill="${fill}" stroke="currentColor" stroke-width="1.5"><path d="M3.5 2.5h9v12l-4.5-3-4.5 3z"/></svg>`;
+  const replySvg = `<svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5L1.5 8.5L5 12"/><path d="M1.5 8.5h7c3 0 5 1.5 5 4.5"/></svg>`;
   const replyBtn = showReply
-    ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread"><kbd>R</kbd> reply</span>`
+    ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread">${replySvg}<kbd>R</kbd></span>`
     : '';
-  return `<div class="msg-actions">
-    <span class="action-btn action-react${likeClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1"><kbd>L</kbd> 👍</span>
-    <span class="action-btn action-react${heartClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="yellow_heart"><kbd>H</kbd> 💛</span>
-    <span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="${saved ? 'Saved' : 'Save'}"><kbd>S</kbd> save</span>
-    ${replyBtn}
-  </div>`;
+  return `<div class="msg-actions"><span class="action-btn action-react${likeClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍<kbd>L</kbd></span><span class="action-btn action-react${heartClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="Heart">💛<kbd>H</kbd></span><span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save">${bookmarkSvg}<kbd>S</kbd></span>${replyBtn}</div>`;
 }
 
 function slackPermalink(channel, ts) {

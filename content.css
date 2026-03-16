@@ -161,8 +161,26 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
   min-width: 0;
 }
 .item-user { font-weight: 700; color: #fff; display: inline; }
-.item-user[data-channel] { cursor: pointer; }
-.item-user[data-channel]:hover { text-decoration: underline; }
+a.item-user[data-channel] { cursor: pointer; position: relative; }
+a.item-user[data-channel]:hover { text-decoration: underline; }
+a.item-user[data-channel]::before {
+  content: 'open in Slack ↗';
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  background: #303340;
+  color: #d1d2d3;
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 8px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+  margin-bottom: 2px;
+}
+a.item-user[data-channel]:hover::before { opacity: 1; }
 .item-text { color: #d1d2d3; line-height: 1.46; word-break: break-word; margin-top: 2px; }
 .item-text a, .item-reply a { color: #1d9bd1; text-decoration: none; }
 .item-text a:hover, .item-reply a:hover { text-decoration: underline; }
@@ -404,18 +422,26 @@ ul.slack-list, ol.slack-list {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
+  position: relative;
 }
 .msg-row + .msg-row { margin-top: 1em; }
-.msg-content { flex: 1; min-width: 0; }
+.msg-content { flex: 1; min-width: 0; margin-right: 44px; }
 .msg-actions {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
+  position: absolute;
+  right: -16px;
+  top: -2px;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 1px;
+  font-size: 13px;
   opacity: 0;
-  transition: opacity 0.15s;
-  margin-left: 8px;
+  transition: opacity 0.12s;
+  background: #2b2d31;
+  padding: 3px;
+  border-radius: 6px 0 0 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-right: none;
+  z-index: 1;
 }
 .msg-row:hover > .msg-actions,
 .msg-row.kb-focused > .msg-actions { opacity: 1; }
@@ -423,14 +449,32 @@ ul.slack-list, ol.slack-list {
 .msg-row:hover > .msg-content .msg-time { opacity: 1; }
 .action-btn {
   cursor: pointer;
-  color: #565856;
+  color: #868786;
   display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
   border-radius: 4px;
   user-select: none;
+  padding: 3px 5px;
+  gap: 1px;
+  line-height: 1;
 }
-.action-btn:hover { color: #d1d2d3; }
+.action-btn:hover { color: #d1d2d3; background: rgba(255,255,255,0.08); }
+.action-icon { display: block; }
+.msg-actions kbd {
+  display: none;
+  background: none;
+  border: none;
+  padding: 0;
+  min-width: 0;
+  font-size: 8px;
+  font-weight: 800;
+  color: #888;
+  line-height: 1;
+  letter-spacing: 0.5px;
+}
+.msg-row.kb-focused > .msg-actions kbd { display: block; }
 .action-btn.reacted { opacity: 0.3; }
 .action-btn.saved { color: #ecb22e; }
 .item.read-done { opacity: 0.4; }
@@ -603,15 +647,12 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 }
 .item.kb-focused .item-actions { visibility: visible; }
 .msg-row.kb-focused .msg-time { opacity: 1; }
-/* Kbd labels — hidden by default, shown on keyboard focus */
-.msg-actions kbd,
+/* Kbd labels — item-actions: hidden by default, shown on keyboard focus */
 .item-actions kbd { display: none; }
-.kb-focused > .msg-actions kbd,
 .item.kb-focused .item-actions kbd,
 .item:has(.kb-focused) .item-actions kbd {
   display: inline-block;
 }
-.msg-actions kbd,
 .item-actions kbd {
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.08);
