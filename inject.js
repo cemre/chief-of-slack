@@ -165,15 +165,6 @@
     return data.emoji || {};
   }
 
-  // Default sidebar section → behavior rule
-  const DEFAULT_SECTION_RULES = {
-    top: 'floor_whenfree',
-    daily: 'floor_whenfree',
-    firehoses: 'hard_noise',
-    weekly: 'normal',
-    other: 'normal',
-  };
-
   async function fetchSidebarSections() {
     // Check 1-hour localStorage cache (chrome.storage not available in page context)
     const CACHE_TTL = 60 * 60 * 1000;
@@ -193,7 +184,7 @@
       const stored = localStorage.getItem('fslackTierMap');
       if (stored) customRules = JSON.parse(stored);
     } catch {}
-    const rules = customRules || DEFAULT_SECTION_RULES;
+    const rules = customRules || {};
 
     const result = {};
     const sectionNames = []; // store for options page

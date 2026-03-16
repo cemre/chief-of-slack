@@ -57,14 +57,7 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   // Render sidebar section rules
   const sectionNames = result.sidebarSectionNames || [];
   const savedRules = result.sidebarTierMap || {};
-  // Default rules matching the original hardcoded behavior
-  const defaultRules = {
-    top: 'floor_whenfree',
-    daily: 'floor_whenfree',
-    firehoses: 'hard_noise',
-    weekly: 'normal',
-    other: 'normal',
-  };
+  const defaultRules = {}; // all sections default to 'normal'
   if (sectionNames.length) {
     const tierMapEl = document.getElementById('tier-map');
     tierMapEl.innerHTML = '';
