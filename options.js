@@ -36,6 +36,7 @@ const RULE_OPTIONS = [
   { value: 'normal', label: 'Normal — AI decides priority' },
   { value: 'floor_priority', label: 'Floor: priority — never below priority' },
   { value: 'floor_whenfree', label: 'Floor: when free — never drops to noise' },
+  { value: 'high_volume', label: 'High-volume — only 10+ reply threads' },
   { value: 'hard_noise', label: 'Always noise — skip AI, straight to noise' },
   { value: 'skip', label: 'Skip — don\'t process at all' },
 ];

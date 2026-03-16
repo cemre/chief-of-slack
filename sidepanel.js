@@ -1722,7 +1722,6 @@ function applyPreFilters(data) {
   data.threads = filteredThreads;
 
   // Threads: annotate metadata for LLM
-  const diaChannelNames = new Set(['dia-dogfooding', 'help-dia']);
   for (const t of filteredThreads) {
     t._userReplied = (t.reply_users || []).includes(selfId);
     t._type = 'thread';
@@ -1737,10 +1736,9 @@ function applyPreFilters(data) {
     // so the LLM CAN classify it as priority/act_now if warranted
     t._mentionInRoot = containsSelfMention(t.root_text || '', selfId);
 
-    // dia-dogfooding / help-dia threads: only surface if 10+ replies, rest → noise
-    const tChName = channels[t.channel_id] || '';
+    // High-volume channels: only surface if 10+ replies, rest → noise
     const isOwnThread = t.root_user === selfId;
-    if (diaChannelNames.has(tChName) && !isOwnThread) {
+    if (t._sidebarSection === 'high_volume' && !isOwnThread) {
       if ((t.reply_count || 0) >= 10) {
         t._forceThreadSummary = true;
         whenFree.push(t);
@@ -1815,9 +1813,8 @@ function applyPreFilters(data) {
       continue;
     }
 
-    // dia-dogfooding / help-dia: split — individual posts with 10+ replies → whenFree, rest → noise
-    const chName = channels[cp.channel_id] || '';
-    if (diaChannelNames.has(chName)) {
+    // High-volume channels: split — individual posts with 10+ replies → whenFree, rest → noise
+    if (cp._sidebarSection === 'high_volume') {
       const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 10);
       const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 10);
       if (hotMsgs.length > 0) {
@@ -1831,7 +1828,7 @@ function applyPreFilters(data) {
       if (coldMsgs.length > 0) {
         noise.push({ ...cp, messages: coldMsgs, _type: 'channel' });
       }
-      _dbgLog('diaChannelNames');
+      _dbgLog('high_volume');
       continue;
     }
 
