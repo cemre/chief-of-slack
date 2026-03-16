@@ -159,3 +159,90 @@ textarea {
   color: #999;
   font-style: italic;
 }
+
+.advanced {
+  margin-bottom: 24px;
+}
+
+.advanced summary {
+  font-size: 13px;
+  font-weight: 600;
+  color: #616061;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.advanced summary:hover {
+  color: #1d1c1d;
+}
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.token-table th {
+  text-align: left;
+  font-weight: 600;
+  color: #616061;
+  padding: 4px 8px;
+  border-bottom: 1px solid #e8e8e8;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.token-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.token-table input[type="number"] {
+  width: 70px;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.token-table input[type="number"]:focus {
+  outline: none;
+  border-color: #4a154b;
+}
+
+.token-table .usage {
+  color: #999;
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.cost-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.cost-label {
+  font-size: 12px;
+  color: #616061;
+}
+
+.reset-btn {
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: #616061;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.reset-btn:hover {
+  background: #f0f0f0;
+}

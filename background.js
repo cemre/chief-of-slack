@@ -158,21 +158,81 @@ The summary must justify the category — if you can't describe someone waiting 
 Respond with ONLY a JSON object mapping each item's "id" to its [category, summary] pair, plus a "_noiseOrder" key (array of noise/drop IDs sorted by work-relevance). No explanation, no markdown fences, just the JSON object.`;
 }
 
-// ── Claude API call counter (per fetch cycle) ──
-let _claudeApiCallCount = 0;
-let _claudeApiCallLog = [];
+// ── Token limit defaults ──
+const TOKEN_DEFAULTS = {
+  prioritize: 1280,
+  channelSummary: 256,
+  vipSummary: 400,
+  threadReply: 300,
+  fullThread: 400,
+  botThread: 300,
+  channelPost: 300,
+  rootMessage: 100,
+};
 
-function logClaudeCall(type) {
-  _claudeApiCallCount++;
-  _claudeApiCallLog.push(type);
+// ── Load token limits (user overrides or defaults) ──
+async function getTokenLimits() {
+  const { tokenLimits } = await chrome.storage.local.get('tokenLimits');
+  return { ...TOKEN_DEFAULTS, ...(tokenLimits || {}) };
 }
 
-function resetClaudeCounter() {
-  const count = _claudeApiCallCount;
-  const log = _claudeApiCallLog;
-  _claudeApiCallCount = 0;
-  _claudeApiCallLog = [];
-  return { count, log };
+// ── Token usage tracking ──
+let _tokenUsage = {}; // { type: { calls, inputTokens, outputTokens } }
+let _tokenLog = [];   // [{ ts, type, inputTokens, outputTokens }]
+
+function trackUsage(type, usage) {
+  if (!_tokenUsage[type]) _tokenUsage[type] = { calls: 0, inputTokens: 0, outputTokens: 0 };
+  _tokenUsage[type].calls++;
+  _tokenUsage[type].inputTokens += usage?.input_tokens || 0;
+  _tokenUsage[type].outputTokens += usage?.output_tokens || 0;
+  // Append timestamped log entry
+  _tokenLog.push({
+    ts: Date.now(),
+    type,
+    inputTokens: usage?.input_tokens || 0,
+    outputTokens: usage?.output_tokens || 0,
+  });
+  // Prune entries older than 48h to prevent unbounded growth
+  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  _tokenLog = _tokenLog.filter((e) => e.ts > cutoff);
+  // Persist to storage for options page
+  chrome.storage.local.set({ tokenUsage: _tokenUsage, tokenLog: _tokenLog });
+}
+
+// Load persisted log on startup
+chrome.storage.local.get(['tokenUsage', 'tokenLog'], (result) => {
+  if (result.tokenUsage) _tokenUsage = result.tokenUsage;
+  if (result.tokenLog) _tokenLog = result.tokenLog;
+});
+
+// ── Shared Claude API caller with token tracking ──
+async function callClaude(apiKey, prompt, limitKey, limits) {
+  const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: limits[limitKey] || TOKEN_DEFAULTS[limitKey],
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!resp.ok) {
+    const errBody = await resp.text();
+    return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+  }
+
+  const data = await resp.json();
+  trackUsage(limitKey, data.usage);
+  const text = data.content?.[0]?.text || '';
+  const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return { error: 'parse_error', raw: text };
+  return { parsed: JSON.parse(jsonMatch[0]), text };
 }
 
 // ── Retry wrapper for transient API errors (429/529) ──
@@ -197,53 +257,28 @@ async function handlePrioritize(payload, selfName) {
   if (!claudeApiKey) return { error: 'no_api_key' };
 
   const identity = await getIdentity();
+  const limits = await getTokenLimits();
   const prompt = buildPrompt(payload, selfName, identity, vipNames);
 
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1280,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
+    const result = await callClaude(claudeApiKey, prompt, 'prioritize', limits);
+    if (result.error) return result;
 
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-
-    // Parse JSON from response (strip any accidental markdown fences)
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const noiseOrder = Array.isArray(parsed._noiseOrder) ? parsed._noiseOrder : [];
-      delete parsed._noiseOrder;
-      // Support both [category, summary] pairs and legacy flat format
-      const priorities = {};
-      const reasons = {};
-      for (const [key, val] of Object.entries(parsed)) {
-        if (Array.isArray(val) && val.length >= 2) {
-          priorities[key] = val[0];
-          reasons[key] = val[1];
-        } else {
-          priorities[key] = val; // legacy: plain category string
-        }
+    const parsed = result.parsed;
+    const noiseOrder = Array.isArray(parsed._noiseOrder) ? parsed._noiseOrder : [];
+    delete parsed._noiseOrder;
+    const priorities = {};
+    const reasons = {};
+    for (const [key, val] of Object.entries(parsed)) {
+      if (Array.isArray(val) && val.length >= 2) {
+        priorities[key] = val[0];
+        reasons[key] = val[1];
+      } else {
+        priorities[key] = val;
       }
-      console.log('[fslack bg] LLM response:', JSON.stringify({ priorities, reasons }, null, 2));
-      return { priorities, noiseOrder, reasons };
     }
-    return { error: 'parse_error', raw: text };
+    console.log('[fslack bg] LLM response:', JSON.stringify({ priorities, reasons }, null, 2));
+    return { priorities, noiseOrder, reasons };
   } catch (err) {
     return { error: err.message };
   }
@@ -281,41 +316,13 @@ No explanation, no markdown fences, just the JSON object.`;
 async function handleSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
   const identity = await getIdentity();
-  const prompt = buildSummarizePrompt(item, identity);
-
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 256,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return { summary: JSON.parse(jsonMatch[0]) };
-    }
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildSummarizePrompt(item, identity), 'channelSummary', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Build VIP summarization prompt ──
@@ -343,41 +350,13 @@ No explanation, no markdown fences, just the JSON object.`;
 async function handleVipSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
   const identity = await getIdentity();
-  const prompt = buildVipSummarizePrompt(item, identity);
-
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    });
-
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return { summary: JSON.parse(jsonMatch[0]) };
-    }
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildVipSummarizePrompt(item, identity), 'vipSummary', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Build thread reply summarization prompt ──
@@ -405,35 +384,13 @@ No markdown fences, no explanation.`;
 async function handleThreadReplySummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
   const identity = await getIdentity();
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        messages: [{ role: 'user', content: buildThreadReplySummarizePrompt(item, identity) }],
-      }),
-    });
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildThreadReplySummarizePrompt(item, identity), 'threadReply', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Build full-thread bullet-point summarization prompt ──
@@ -462,35 +419,13 @@ No markdown fences, no explanation.`;
 async function handleFullThreadSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
   const identity = await getIdentity();
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        messages: [{ role: 'user', content: buildFullThreadSummarizePrompt(item, identity) }],
-      }),
-    });
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildFullThreadSummarizePrompt(item, identity), 'fullThread', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Build bot thread summarization prompt ──
@@ -516,35 +451,13 @@ No markdown fences, no explanation.`;
 async function handleBotThreadSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
   const identity = await getIdentity();
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        messages: [{ role: 'user', content: buildBotThreadPrompt(item, identity) }],
-      }),
-    });
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildBotThreadPrompt(item, identity), 'botThread', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Build channel post summarization prompt ──
@@ -569,35 +482,13 @@ No markdown fences, no explanation.`;
 async function handleChannelPostSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
   const identity = await getIdentity();
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        messages: [{ role: 'user', content: buildChannelPostPrompt(item, identity) }],
-      }),
-    });
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildChannelPostPrompt(item, identity), 'channelPost', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Build root message summarization prompt ──
@@ -616,34 +507,12 @@ No markdown fences, no explanation.`;
 async function handleRootSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-
+  const limits = await getTokenLimits();
   try {
-    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': claudeApiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 100,
-        messages: [{ role: 'user', content: buildRootSummarizePrompt(item) }],
-      }),
-    });
-    if (!resp.ok) {
-      const errBody = await resp.text();
-      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
-    }
-    const data = await resp.json();
-    const text = data.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return { summary: JSON.parse(jsonMatch[0]) };
-    return { error: 'parse_error', raw: text };
-  } catch (err) {
-    return { error: err.message };
-  }
+    const result = await callClaude(claudeApiKey, buildRootSummarizePrompt(item), 'rootMessage', limits);
+    if (result.error) return result;
+    return { summary: result.parsed };
+  } catch (err) { return { error: err.message }; }
 }
 
 // ── Intercept slack.com/app_redirect navigations ──

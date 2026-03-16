@@ -40,6 +40,21 @@
       </label>
     </section>
 
+    <details class="advanced">
+      <summary>Advanced: Token Limits & Usage</summary>
+      <p class="hint" style="margin-top: 8px;">Max output tokens per Claude API call. Lower values = faster/cheaper, higher = more detailed responses.</p>
+      <table id="token-table" class="token-table">
+        <thead>
+          <tr><th>Call Type</th><th>Max Tokens</th><th>Calls</th><th>In</th><th>Out</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="cost-row">
+        <span id="cost-24h" class="cost-label">Last 24h: loading...</span>
+        <button id="reset-usage" class="reset-btn">Reset</button>
+      </div>
+    </details>
+
     <div class="actions">
       <button id="save-btn">Save</button>
       <span id="save-status" class="save-status"></span>
