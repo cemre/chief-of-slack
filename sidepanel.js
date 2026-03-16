@@ -3277,16 +3277,14 @@ async function kickoffVipSection(data) {
   const vipArea = document.getElementById('vip-items');
   if (!vipArea) return;
 
-  // Filter out messages the user has already read in that channel, or manually dismissed
+  // Filter out messages the user has manually dismissed (per-VIP seen timestamp)
+  // Note: we intentionally do NOT filter by channel lastRead — the point of "Creep on VIPs"
+  // is to see what they've been saying even in channels you've already read
   const filteredVips = vips.map((v) => ({
     ...v,
     messages: v.messages.filter((m) => {
       const seenTs = vipSeenTimestamps[v.name];
       if (seenTs && parseFloat(m.ts) <= parseFloat(seenTs)) return false;
-      if (!m.channel_id || !data?.lastRead) return true;
-      const lr = data.lastRead[m.channel_id];
-      if (!lr) return true;
-      if (parseFloat(m.ts) <= parseFloat(lr)) return false;
       return true;
     }),
   }));
