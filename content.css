@@ -312,6 +312,11 @@ ul.slack-list, ol.slack-list {
   margin: 0;
 }
 .section-toggle:hover { color: #fff; }
+/* VIP channel grouping */
+.vip-channel-group { margin-top: 6px; }
+.vip-channel-link { font-size: 11px; }
+.vip-msg-list { margin: 2px 0 0; padding-left: 18px; }
+.vip-msg-list li { margin: 1px 0; }
 .cache-divider {
   display: flex;
   align-items: center;

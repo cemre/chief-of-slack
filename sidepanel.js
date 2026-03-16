@@ -3349,13 +3349,12 @@ async function kickoffVipSection(data) {
       byChannel.get(key).messages.push(m);
     }
     let messagesHtml = '';
-    for (const [, ch] of byChannel) {
-      const channelLabel = ch.permalink
-        ? `<a href="${escapeHtml(ch.permalink.replace(/\/p\d+$/, ''))}" target="_blank" style="color:#616061">#${escapeHtml(ch.name)}</a>`
-        : `#${escapeHtml(ch.name)}`;
-      messagesHtml += `<div style="margin-top:4px"><span style="font-size:11px">${channelLabel}</span><ul style="margin:2px 0 0;padding-left:18px">`;
+    for (const [chId, ch] of byChannel) {
+      const chHref = ch.permalink ? escapeHtml(ch.permalink.replace(/\/p\d+$/, '')) : '#';
+      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+      messagesHtml += `<div class="vip-channel-group">${channelLabel}<ul class="vip-msg-list">`;
       for (const m of ch.messages) {
-        messagesHtml += `<li class="item-text" style="margin:1px 0">${formatSlackHtml(m.text || '', data?.users)}${renderFiles(m.files)}</li>`;
+        messagesHtml += `<li class="item-text">${formatSlackHtml(m.text || '', data?.users)}${renderFiles(m.files)}</li>`;
       }
       messagesHtml += '</ul></div>';
     }
