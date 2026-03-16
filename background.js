@@ -177,17 +177,15 @@ async function getTokenLimits() {
   return { ...TOKEN_DEFAULTS, ...(tokenLimits || {}) };
 }
 
-// ── Token usage tracking ──
-let _tokenUsage = {}; // { type: { calls, inputTokens, outputTokens } }
-let _tokenLog = [];   // [{ ts, type, inputTokens, outputTokens }]
-
-function trackUsage(type, usage) {
-  if (!_tokenUsage[type]) _tokenUsage[type] = { calls: 0, inputTokens: 0, outputTokens: 0 };
-  _tokenUsage[type].calls++;
-  _tokenUsage[type].inputTokens += usage?.input_tokens || 0;
-  _tokenUsage[type].outputTokens += usage?.output_tokens || 0;
+// ── Token usage tracking (read-modify-write to avoid race with service worker startup) ──
+async function trackUsage(type, usage) {
+  const { tokenUsage = {}, tokenLog = [] } = await chrome.storage.local.get(['tokenUsage', 'tokenLog']);
+  if (!tokenUsage[type]) tokenUsage[type] = { calls: 0, inputTokens: 0, outputTokens: 0 };
+  tokenUsage[type].calls++;
+  tokenUsage[type].inputTokens += usage?.input_tokens || 0;
+  tokenUsage[type].outputTokens += usage?.output_tokens || 0;
   // Append timestamped log entry
-  _tokenLog.push({
+  tokenLog.push({
     ts: Date.now(),
     type,
     inputTokens: usage?.input_tokens || 0,
@@ -195,16 +193,9 @@ function trackUsage(type, usage) {
   });
   // Prune entries older than 48h to prevent unbounded growth
   const cutoff = Date.now() - 48 * 60 * 60 * 1000;
-  _tokenLog = _tokenLog.filter((e) => e.ts > cutoff);
-  // Persist to storage for options page
-  chrome.storage.local.set({ tokenUsage: _tokenUsage, tokenLog: _tokenLog });
+  const pruned = tokenLog.filter((e) => e.ts > cutoff);
+  chrome.storage.local.set({ tokenUsage, tokenLog: pruned });
 }
-
-// Load persisted log on startup
-chrome.storage.local.get(['tokenUsage', 'tokenLog'], (result) => {
-  if (result.tokenUsage) _tokenUsage = result.tokenUsage;
-  if (result.tokenLog) _tokenLog = result.tokenLog;
-});
 
 // ── Shared Claude API caller with token tracking ──
 async function callClaude(apiKey, prompt, limitKey, limits) {
