@@ -1,7 +1,6 @@
 // background.js — service worker: side panel relay + Claude API prioritization
 
 const FSLACK = 'fslack';
-const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
 
 // ── Load user identity settings ──
 async function getIdentity() {
@@ -117,14 +116,14 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 // ── Build the prioritization prompt ──
-function buildPrompt(items, selfName, identity) {
-  const vipList = VIPS.map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(', ');
+function buildPrompt(items, selfName, identity, vipNames) {
+  const vipList = (vipNames || []).map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(', ');
 
   const serialized = JSON.stringify(items, null, 0);
 
   return `You are a Slack message prioritizer for a busy engineer. Classify each item into exactly one category.
 ${identity.nameClause}
-VIPs (messages from these people get higher priority): ${vipList}
+${vipList ? `VIPs (messages from these people get higher priority): ${vipList}` : ''}
 
 SIDEBAR SECTIONS: Items may include a "sidebarSection" field indicating channel importance in my Slack sidebar:
 - "top" or "daily" = high importance channels I actively monitor — treat activity here as more relevant
@@ -194,11 +193,11 @@ async function fetchWithRetry(url, options) {
 
 // ── Call Claude API ──
 async function handlePrioritize(payload, selfName) {
-  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  const { claudeApiKey, vipNames } = await chrome.storage.local.get(['claudeApiKey', 'vipNames']);
   if (!claudeApiKey) return { error: 'no_api_key' };
 
   const identity = await getIdentity();
-  const prompt = buildPrompt(payload, selfName, identity);
+  const prompt = buildPrompt(payload, selfName, identity, vipNames);
 
   try {
     const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
@@ -646,6 +645,25 @@ async function handleRootSummarize(item) {
     return { error: err.message };
   }
 }
+
+// ── Intercept slack.com/app_redirect navigations ──
+chrome.webNavigation.onBeforeNavigate.addListener(
+  async (details) => {
+    if (details.frameId !== 0) return; // top frame only
+    const { openInBrowser } = await chrome.storage.local.get('openInBrowser');
+    if (openInBrowser === false) return;
+
+    const url = new URL(details.url);
+    const channel = url.searchParams.get('channel');
+    const team = url.searchParams.get('team');
+    if (channel && team) {
+      const target = `https://app.slack.com/client/${team}/${channel}`;
+      console.log('[fslack bg] app_redirect →', target);
+      chrome.tabs.update(details.tabId, { url: target });
+    }
+  },
+  { url: [{ hostEquals: 'slack.com', pathPrefix: '/app_redirect' }] }
+);
 
 // ── Message handler (LLM calls + API key) ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

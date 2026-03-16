@@ -2,7 +2,6 @@
 console.log('[fslack] sidepanel.js loaded', new Date().toISOString());
 
 const FSLACK = 'fslack';
-const VIPS = ['josh', 'tara', 'dustin', 'brahm', 'rosey', 'samir', 'jane'];
 const SEEN_REPLIES_CHUNK = 10;
 const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
 
@@ -1977,10 +1976,9 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
 
     // DM overrides: VIP DMs → act_now, all other DMs → at least priority
     if (isDm) {
-      const senders = (item.messages || item.unread_replies || []).map((m) =>
-        uname(m.user, data.users).toLowerCase()
-      );
-      const isVipDm = senders.some((s) => VIPS.includes(s));
+      const vipSet = new Set(data.vipUserIds || []);
+      const senderIds = (item.messages || item.unread_replies || []).map((m) => m.user).filter(Boolean);
+      const isVipDm = senderIds.some((uid) => vipSet.has(uid));
       if (isVipDm) cat = 'act_now';
       else if (cat !== 'act_now') cat = 'priority';
     }
@@ -3771,6 +3769,11 @@ function prioritizeAndRender(data) {
     const escaped = data.selfHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     _handleMentionRegex = new RegExp(`(?:^|[\\s"'([{<])@${escaped}(?=$|[\\s.,!?;:)\\]\\}>"'])`, 'i');
     chrome.storage.local.set({ selfHandle: data.selfHandle });
+  }
+  // Cache VIP names for Claude prompts (resolve IDs → display names)
+  if (data.vipUserIds && data.users) {
+    const vipNames = data.vipUserIds.map((uid) => data.users[uid]).filter(Boolean);
+    chrome.storage.local.set({ vipNames });
   }
   myReactionsMap = buildMyReactionsMap(data);
   const preFiltered = applyPreFilters(data);

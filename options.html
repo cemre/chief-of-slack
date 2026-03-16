@@ -17,12 +17,27 @@
     </section>
 
     <section>
+      <h2>VIP People</h2>
+      <p class="hint">Synced from your Slack priority contacts. Messages from these people get higher priority. Manage them in Slack's sidebar settings.</p>
+      <div id="vip-list" class="vip-list"><span class="vip-empty">No VIPs synced yet — open Slack and refresh to sync.</span></div>
+    </section>
+
+    <section>
       <h2>Claude API Key</h2>
       <p class="hint">Your Anthropic API key for smart prioritization. Stored locally in your browser.</p>
       <div class="field">
         <input id="api-key" type="password" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
         <button id="toggle-key" class="icon-btn" title="Show/hide key">eye</button>
       </div>
+    </section>
+
+    <section>
+      <h2>Open Slack Links in Browser</h2>
+      <p class="hint">Redirect Slack links (from emails, other apps) to the web client instead of launching the desktop app.</p>
+      <label class="toggle-row">
+        <input type="checkbox" id="open-in-browser" checked>
+        <span>Intercept Slack links and open in browser</span>
+      </label>
     </section>
 
     <div class="actions">

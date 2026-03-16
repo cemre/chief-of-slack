@@ -156,7 +156,8 @@
     for (const id of (boot.prefs?.muted_channels || '').split(',')) {
       if (id) muted.add(id);
     }
-    return { selfId: boot.self?.id, selfHandle: boot.self?.name, muted };
+    const vipUserIds = (boot.prefs?.vip_users || '').split(',').filter(Boolean);
+    return { selfId: boot.self?.id, selfHandle: boot.self?.name, muted, vipUserIds };
   }
 
   async function fetchEmojiList() {
@@ -385,7 +386,7 @@
   async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
-    const [counts, { selfId, selfHandle, muted }] = await Promise.all([
+    const [counts, { selfId, selfHandle, muted, vipUserIds }] = await Promise.all([
       slackApi('client.counts'),
       getSelfIdAndMuted(),
     ]);
@@ -723,6 +724,7 @@
     return {
       selfId,
       selfHandle,
+      vipUserIds,
       badges: counts.channel_badges,
       threadUnreads: counts.threads,
       threads,
@@ -750,7 +752,7 @@
       ? (console.log(`[${FSLACK}] Reusing cached counts (${Math.round((now - _countsCache.ts) / 1000)}s old)`), Promise.resolve(_countsCache.data))
       : slackApi('client.counts').then((d) => { _countsCache = { data: d, ts: Date.now() }; return d; });
 
-    const [counts, { selfId, selfHandle, muted }] = await Promise.all([
+    const [counts, { selfId, selfHandle, muted, vipUserIds }] = await Promise.all([
       countsPromise,
       getSelfIdAndMuted(),
     ]);
@@ -1002,6 +1004,7 @@
     return {
       selfId,
       selfHandle,
+      vipUserIds,
       badges: counts.channel_badges,
       threadUnreads: counts.threads,
       threads,
@@ -1052,27 +1055,25 @@
     }
   }
 
-  const VIP_QUERIES = [
-    { name: 'JM',     query: 'from:<@U02KNNU0ZBN>', userId: 'U02KNNU0ZBN' },
-    { name: 'Josh',   query: 'from:@josh',          username: 'josh' },
-    { name: 'Samir',  query: 'from:@samir',         username: 'samir' },
-    { name: 'Ori',    query: 'from:<@U0ABNTRG4HJ>', userId: 'U0ABNTRG4HJ' },
-    { name: 'Leith',  query: 'from:@leith',         username: 'leith' },
-    { name: 'Jane',   query: 'from:@jane',          username: 'jane' },
-    { name: 'Dustin', query: 'from:@dustin',        username: 'dustin' },
-    { name: 'Tara',   query: 'from:@Tara',          username: 'tara' },
-  ];
+  // Batched VIP search: build queries from Slack's vip_users pref (user IDs)
+  async function fetchVipActivity(vipUserIds, usersMap) {
+    if (!vipUserIds || !vipUserIds.length) return [];
 
-  // Batched VIP search: combine queries with OR to reduce API calls (8→3)
-  async function fetchVipActivity() {
+    // Build VIP entries from user IDs, resolving names from the users map
+    const vipEntries = vipUserIds.map((uid) => ({
+      userId: uid,
+      name: usersMap[uid] || uid,
+      query: `from:<@${uid}>`,
+    }));
+
     const BATCH_SIZE = 3;
-    const resultsByName = {};
-    for (const vip of VIP_QUERIES) resultsByName[vip.name] = { name: vip.name, messages: [] };
+    const resultsByUserId = {};
+    for (const vip of vipEntries) resultsByUserId[vip.userId] = { name: vip.name, messages: [] };
 
     // Split into batches of 3
     const batches = [];
-    for (let i = 0; i < VIP_QUERIES.length; i += BATCH_SIZE) {
-      batches.push(VIP_QUERIES.slice(i, i + BATCH_SIZE));
+    for (let i = 0; i < vipEntries.length; i += BATCH_SIZE) {
+      batches.push(vipEntries.slice(i, i + BATCH_SIZE));
     }
 
     await Promise.all(batches.map(async (batch) => {
@@ -1094,13 +1095,10 @@
             channel_name: m.channel?.name,
             permalink: m.permalink,
           };
-          // Match message to VIP by userId or username
+          // Match message to VIP by userId
           for (const vip of batch) {
-            let isMatch = false;
-            if (vip.userId && m.user === vip.userId) isMatch = true;
-            else if (vip.username && (m.username || '').toLowerCase() === vip.username) isMatch = true;
-            if (isMatch) {
-              const result = resultsByName[vip.name];
+            if (m.user === vip.userId) {
+              const result = resultsByUserId[vip.userId];
               if (result.messages.length < 10) result.messages.push(formatted);
               break;
             }
@@ -1109,7 +1107,7 @@
       } catch {}
     }));
 
-    return Object.values(resultsByName);
+    return Object.values(resultsByUserId);
   }
 
   // Listen for requests from content script
@@ -1445,7 +1443,15 @@
 
     if (msgType === `${FSLACK}:fetchVips`) {
       try {
-        const vips = await fetchVipActivity();
+        const vipIds = (_cachedBootPrefs?.vip_users || '').split(',').filter(Boolean);
+        const usersMap = event.data.cachedUsers || {};
+        // Resolve any VIP names we don't have yet
+        const missingIds = vipIds.filter((uid) => !usersMap[uid]);
+        if (missingIds.length) {
+          const resolved = await resolveUsers(missingIds);
+          Object.assign(usersMap, resolved.users || {});
+        }
+        const vips = await fetchVipActivity(vipIds, usersMap);
         window.postMessage({ type: `${FSLACK}:vipResult`, data: vips }, '*');
       } catch {
         window.postMessage({ type: `${FSLACK}:vipResult`, data: [] }, '*');
