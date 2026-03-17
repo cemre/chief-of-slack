@@ -522,7 +522,8 @@ async function handleAnonymize(data) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
+        // ~10 tokens per replacement entry + 50 buffer for JSON overhead
+        max_tokens: Math.max(1000, ((data.names?.length || 0) + (data.channels?.length || 0) + (data.snippets?.length || 0)) * 10 + 50),
         messages: [{ role: 'user', content: `Generate a find-and-replace map to anonymize a workplace chat dashboard for demos.
 
 PERSON NAMES (replace with realistic fake first names):
@@ -540,6 +541,7 @@ Rules:
 - Replacements should be realistic but clearly different
 - Keep similar length/feel
 - Do NOT include generic words, timestamps, or UI labels
+- SKIP any entry where the original is 2 characters or shorter
 
 Return ONLY a flat JSON object mapping each original string to its replacement. No explanation, no markdown fences.
 Example: {"josh": "Marcus", "deploy-pipeline": "release-flow", "ProjectX": "Beacon"}` }],
@@ -555,10 +557,27 @@ Example: {"josh": "Marcus", "deploy-pipeline": "release-flow", "ProjectX": "Beac
     console.log(`[fslack bg] anonymize: output tokens = ${result.usage?.output_tokens}, stop = ${result.stop_reason}`);
     trackUsage('anonymize', result.usage);
     const text = result.content?.[0]?.text || '';
-    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    console.log('[fslack bg] anonymize: raw response length =', text.length, 'stop =', result.stop_reason);
+    let cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    // If truncated, try to salvage by removing the last incomplete entry and closing the object
+    if (result.stop_reason === 'end_turn' || result.stop_reason === 'max_tokens') {
+      if (!cleaned.endsWith('}')) {
+        // Remove trailing incomplete key-value pair and close
+        cleaned = cleaned.replace(/,?\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '') + '}';
+        console.log('[fslack bg] anonymize: truncated response, salvaged JSON');
+      }
+    }
     const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return { error: 'parse_error', raw: text };
-    return { map: JSON.parse(jsonMatch[0]) };
+    if (!jsonMatch) {
+      console.error('[fslack bg] anonymize: no JSON found in response:', cleaned.slice(0, 300));
+      return { error: 'parse_error', raw: text };
+    }
+    try {
+      return { map: JSON.parse(jsonMatch[0]) };
+    } catch (parseErr) {
+      console.error('[fslack bg] anonymize: JSON.parse failed:', parseErr.message, jsonMatch[0].slice(0, 300));
+      return { error: 'parse_error', raw: text };
+    }
   } catch (err) {
     console.error('[fslack bg] anonymize: exception', err);
     return { error: err.message };

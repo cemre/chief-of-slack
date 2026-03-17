@@ -342,7 +342,7 @@ ul.slack-list, ol.slack-list {
 .priority-section:has(.saved-items-list) { border-bottom: 1px solid #2c2d30; }
 /* VIP relevant bullet indicator */
 .vip-bullet-relevant { color: #e8912d; list-style: none; position: relative; }
-.vip-bullet-relevant::before { content: '\25C6'; color: #e8912d; position: absolute; left: -18px; }
+.vip-bullet-relevant::before { content: '\25C6'; color: #e8912d; position: absolute; left: -18px; font-size: 9px; top: 3px; }
 /* VIP per-message open in Slack link */
 .vip-msg-slack-link { font-size: 11px; color: #1d9bd1; text-decoration: none; margin-left: 6px; display: none; }
 .vip-msg-row:hover .vip-msg-slack-link { display: inline; }

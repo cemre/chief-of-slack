@@ -5,46 +5,67 @@ const FSLACK = 'fslack';
 const SEEN_REPLIES_CHUNK = 10;
 const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
 
-// ── Demo mode (anonymization — extract text, get replacement map, apply) ──
+// ── Demo mode (anonymization — extract text, batch LLM calls, apply) ──
+const DEMO_BATCH_SIZE = 20;
+
 function runDemoAnonymize() {
   const data = lastRenderData || cachedView?.data;
   if (!data) return;
 
-  // Collect unique names and channels from the data
-  const names = [...new Set(Object.values(data.users || {}).filter(Boolean))];
-  const channels = [...new Set(Object.values(data.channels || {}).filter(Boolean))];
+  // Collect unique names and channels (skip bot IDs and very short strings)
+  const names = [...new Set(Object.values(data.users || {}).filter(n => n && n.length > 2 && !/^[BUW][A-Z0-9]{8,}$/.test(n)))];
+  const channels = [...new Set(Object.values(data.channels || {}).filter(c => c && c.length > 2))];
 
-  // Collect visible text snippets (reason badges, summaries) for context
+  // Collect visible text snippets for product/project name detection
   const snippets = new Set();
   for (const el of bodyEl.querySelectorAll('.item-reason-toggle, .deep-summary, .item-text')) {
     const t = el.textContent.trim();
     if (t && t.length > 5 && t.length < 300) snippets.add(t);
   }
 
-  console.log(`[fslack] demo: ${names.length} names, ${channels.length} channels, ${snippets.size} snippets`);
-  if (names.length === 0 && channels.length === 0) return;
+  // Merge names + channels into one list of items to anonymize, then batch
+  const allItems = [...names.map(n => ({ type: 'name', value: n })), ...channels.map(c => ({ type: 'channel', value: c }))];
+  console.log(`[fslack] demo: ${names.length} names, ${channels.length} channels, ${snippets.size} snippets → ${Math.ceil(allItems.length / DEMO_BATCH_SIZE)} batches`);
+  if (allItems.length === 0) return;
 
-  // Show loading overlay
   const overlay = document.createElement('div');
   overlay.id = 'demo-loading';
   overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(26,29,33,0.85);display:flex;align-items:center;justify-content:center;color:#1d9bd1;font-size:14px;';
-  overlay.textContent = 'Anonymizing for demo...';
   document.body.appendChild(overlay);
 
-  chrome.runtime.sendMessage({
-    type: `${FSLACK}:anonymize`,
-    data: { names, channels, snippets: [...snippets].slice(0, 30) },
-  }, (resp) => {
-    overlay.remove();
-    if (resp?.map) {
-      console.log(`[fslack] demo: got ${Object.keys(resp.map).length} replacements`);
-      applyDemoReplacements(resp.map);
-    } else {
-      console.warn('[fslack] Demo anonymization failed:', resp?.error);
-      const cb = document.getElementById('demo-checkbox');
-      if (cb) cb.checked = false;
-    }
-  });
+  // Split into batches
+  const batches = [];
+  for (let i = 0; i < allItems.length; i += DEMO_BATCH_SIZE) {
+    const batch = allItems.slice(i, i + DEMO_BATCH_SIZE);
+    batches.push({
+      names: batch.filter(x => x.type === 'name').map(x => x.value),
+      channels: batch.filter(x => x.type === 'channel').map(x => x.value),
+    });
+  }
+  // Only first batch gets snippets (for product name detection)
+  const snippetArr = [...snippets].slice(0, 30);
+
+  let done = 0;
+  overlay.textContent = `Anonymizing for demo... 0/${batches.length}`;
+
+  // Fire all batches in parallel, apply each as it arrives
+  for (let idx = 0; idx < batches.length; idx++) {
+    const batch = batches[idx];
+    chrome.runtime.sendMessage({
+      type: `${FSLACK}:anonymize`,
+      data: { names: batch.names, channels: batch.channels, snippets: idx === 0 ? snippetArr : [] },
+    }, (resp) => {
+      done++;
+      overlay.textContent = `Anonymizing for demo... ${done}/${batches.length}`;
+      if (resp?.map) {
+        console.log(`[fslack] demo: batch ${idx} got ${Object.keys(resp.map).length} replacements`);
+        applyDemoReplacements(resp.map);
+      } else {
+        console.warn(`[fslack] demo: batch ${idx} failed:`, resp?.error);
+      }
+      if (done === batches.length) overlay.remove();
+    });
+  }
 }
 
 function applyDemoReplacements(map) {
