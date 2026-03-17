@@ -1,4 +1,28 @@
 body { margin: 0; padding: 0; height: 100vh; overflow: hidden; }
+
+/* Demo mode toggle */
+#demo-toggle {
+  position: fixed;
+  bottom: 8px;
+  right: 8px;
+  z-index: 9999;
+  background: #2c2f33;
+  border: 1px solid #363940;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #ababad;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+#demo-toggle:hover { opacity: 1; }
+#demo-toggle:has(input:checked) { opacity: 1; border-color: #1d9bd1; color: #1d9bd1; }
+#demo-checkbox { margin: 0; cursor: pointer; }
 #overlay {
   display: flex;
   flex-direction: column;
@@ -317,8 +341,8 @@ ul.slack-list, ol.slack-list {
 .item.saved-item { border-left: 3px solid #27ae60; }
 .priority-section:has(.saved-items-list) { border-bottom: 1px solid #2c2d30; }
 /* VIP relevant bullet indicator */
-.vip-bullet-relevant { color: #e8912d; }
-.vip-bullet-relevant::marker { content: '\25C6  '; color: #e8912d; }
+.vip-bullet-relevant { color: #e8912d; list-style: none; position: relative; }
+.vip-bullet-relevant::before { content: '\25C6'; color: #e8912d; position: absolute; left: -18px; }
 /* VIP per-message open in Slack link */
 .vip-msg-slack-link { font-size: 11px; color: #1d9bd1; text-decoration: none; margin-left: 6px; display: none; }
 .vip-msg-row:hover .vip-msg-slack-link { display: inline; }
@@ -344,22 +368,30 @@ ul.slack-list, ol.slack-list {
 .vip-channel-link { font-size: 11px; }
 .vip-msg-list { margin: 2px 0 0; padding-left: 18px; }
 .vip-msg-list li { margin: 1px 0; }
-.cache-divider {
+.channels-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 16px 4px;
+  padding: 14px 16px 4px;
 }
-.cache-divider-label {
+.channels-header-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #616061;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.channels-header-age {
   font-size: 11px;
   color: #616061;
 }
-.cache-divider-refresh {
+.channels-header-age::before { content: '·'; margin-right: 8px; }
+.channels-header-refresh {
   font-size: 11px;
   color: #1d9bd1;
   cursor: pointer;
 }
-.cache-divider-refresh:hover { text-decoration: underline; }
+.channels-header-refresh:hover { text-decoration: underline; }
 .priority-badge {
   display: inline-block;
   font-size: 10px;
