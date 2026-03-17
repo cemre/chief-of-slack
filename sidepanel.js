@@ -5,6 +5,77 @@ const FSLACK = 'fslack';
 const SEEN_REPLIES_CHUNK = 10;
 const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
 
+// ── Demo mode (anonymization — extract text, get replacement map, apply) ──
+function runDemoAnonymize() {
+  const data = lastRenderData || cachedView?.data;
+  if (!data) return;
+
+  // Collect unique names and channels from the data
+  const names = [...new Set(Object.values(data.users || {}).filter(Boolean))];
+  const channels = [...new Set(Object.values(data.channels || {}).filter(Boolean))];
+
+  // Collect visible text snippets (reason badges, summaries) for context
+  const snippets = new Set();
+  for (const el of bodyEl.querySelectorAll('.item-reason-toggle, .deep-summary, .item-text')) {
+    const t = el.textContent.trim();
+    if (t && t.length > 5 && t.length < 300) snippets.add(t);
+  }
+
+  console.log(`[fslack] demo: ${names.length} names, ${channels.length} channels, ${snippets.size} snippets`);
+  if (names.length === 0 && channels.length === 0) return;
+
+  // Show loading overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'demo-loading';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(26,29,33,0.85);display:flex;align-items:center;justify-content:center;color:#1d9bd1;font-size:14px;';
+  overlay.textContent = 'Anonymizing for demo...';
+  document.body.appendChild(overlay);
+
+  chrome.runtime.sendMessage({
+    type: `${FSLACK}:anonymize`,
+    data: { names, channels, snippets: [...snippets].slice(0, 30) },
+  }, (resp) => {
+    overlay.remove();
+    if (resp?.map) {
+      console.log(`[fslack] demo: got ${Object.keys(resp.map).length} replacements`);
+      applyDemoReplacements(resp.map);
+    } else {
+      console.warn('[fslack] Demo anonymization failed:', resp?.error);
+      const cb = document.getElementById('demo-checkbox');
+      if (cb) cb.checked = false;
+    }
+  });
+}
+
+function applyDemoReplacements(map) {
+  // Sort by length descending to avoid partial matches (e.g. "Josh" before "Jo")
+  const entries = Object.entries(map).sort((a, b) => b[0].length - a[0].length);
+
+  // Walk all text nodes in the body
+  const walker = document.createTreeWalker(bodyEl, NodeFilter.SHOW_TEXT);
+  const textNodes = [];
+  while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+  for (const node of textNodes) {
+    let text = node.nodeValue;
+    let changed = false;
+    for (const [real, fake] of entries) {
+      if (text.includes(real)) {
+        text = text.split(real).join(fake);
+        changed = true;
+      }
+      // Also try lowercase match
+      const realLower = real.toLowerCase();
+      if (realLower !== real && text.toLowerCase().includes(realLower)) {
+        const re = new RegExp(real.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        text = text.replace(re, fake);
+        changed = true;
+      }
+    }
+    if (changed) node.nodeValue = text;
+  }
+}
+
 // ── Port connection to background.js ──
 let port = null;
 const pendingOneShot = {}; // { requestId: callback } for one-off response handlers
@@ -454,7 +525,7 @@ function showFromCache() {
     updateLastUpdated();
     if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
-    renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
+    renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
     runWhenFreeChannelSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
     const allElevatedCache = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])];
@@ -1403,12 +1474,17 @@ function renderDmItem(dm, data, cssClass) {
       ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
     </div>
     <div class="item-right">`;
-  for (const m of [...dm.messages].reverse()) {
+  const dmReversed = [...dm.messages].reverse();
+  for (let i = 0; i < dmReversed.length; i++) {
+    const m = dmReversed[i];
+    const nextM = dmReversed[i + 1];
+    const isLastInRun = !nextM || nextM.user !== m.user;
     const sender = dm.isGroup ? `${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), dm.channel_id, m.ts)} ` : '';
     const _dtid = truncateId;
     const dmTextHtml = truncate(m.text, 1000, data.users);
     const dmExtras = wrapFilesIfTruncated(_dtid, renderFwd(m.fwd, data.users), renderFiles(m.files));
-    html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${msgTime(m.ts, dm.channel_id)}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
+    const timeHtml = isLastInRun ? msgTime(m.ts, dm.channel_id) : '';
+    html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${timeHtml}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
   html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
@@ -2083,12 +2159,6 @@ function sortNoiseItems(items, noiseOrder = []) {
   });
 }
 
-function cacheDivider(ts) {
-  if (!ts) return '';
-  const mins = Math.floor((Date.now() - ts) / 60000);
-  const label = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
-  return `<div class="cache-divider"><span class="cache-divider-label">channels · cached ${label}</span><span class="cache-divider-refresh" id="cache-divider-refresh">refresh</span></div>`;
-}
 
 function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], deepDigestsLoading = false, cachedTs = null) {
   const { actNow, priority, whenFree, noise } = prioritized;
@@ -2117,13 +2187,23 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '</section>';
   }
 
-  // Cache divider — shown once before the cached sections on fast fetch
-  html += cacheDivider(cachedTs);
+  // Channels header (combines cache-age + refresh into one line)
+  if (whenFree.length > 0 || (!loading && (noise.length > 0 || deepNoiseLoading || digests.length > 0 || deepDigestsLoading))) {
+    html += '<div class="channels-header">';
+    html += '<span class="channels-header-label">Channels</span>';
+    if (cachedTs) {
+      const mins = Math.floor((Date.now() - cachedTs) / 60000);
+      const agoLabel = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
+      html += `<span class="channels-header-age">cached ${agoLabel}</span>`;
+    }
+    html += '<span class="channels-header-refresh" id="cache-divider-refresh">refresh</span>';
+    html += '</div>';
+  }
 
-  // When You Have a Moment (collapsed by default)
+  // Relevant (collapsed by default)
   if (whenFree.length > 0) {
     html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="when-free-toggle">When Free · ${whenFree.length} ↓</div>`;
+    html += `<div class="section-toggle" id="when-free-toggle">Relevant · ${whenFree.length} ↓</div>`;
     html += '<div class="when-free-items" id="when-free-items">';
     for (const item of whenFree) html += renderAnyItem(item, data, 'when-free');
     html += `<div class="noise-section-footer"><button id="whenfree-mark-read-btn">Mark all as read</button></div>`;
@@ -2156,45 +2236,50 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '<div id="status"><div class="detail">Analyzing remaining messages with AI...</div></div>';
   }
 
-  // Noise (collapsed by default) — split into recent (last 24h) and older
-  if (!loading && (noise.length > 0 || deepNoiseLoading)) {
-    const noiseCutoff = Date.now() / 1000 - 86400;
-    const noiseRecent = noise.filter((item) => getItemSortTs(item) >= noiseCutoff);
-    const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
+  // Channel Messages — groups noise + digests
+  const hasChannelMessages = !loading && (noise.length > 0 || deepNoiseLoading || digests.length > 0 || deepDigestsLoading);
+  if (hasChannelMessages) {
     html += '<section class="priority-section">';
-    if (noiseRecent.length > 0 || deepNoiseLoading) {
-      html += `<div class="section-toggle" id="noise-recent-toggle">Recent Noise · ${noiseRecent.length} ↓</div>`;
-      html += '<div class="noise-items" id="noise-recent-items">';
-      for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
-      if (deepNoiseLoading) {
-        html += '<div id="deep-noise-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Analyzing busy channels...</div>';
-      }
-      html += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent noise as read</button></div>`;
-      html += '</div>';
-    }
-    // Always render older section when deepNoiseLoading so it's ready to receive items; hide if empty
-    if (noiseOlder.length > 0 || deepNoiseLoading) {
-      const olderHidden = noiseOlder.length === 0;
-      html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Older Noise · ${noiseOlder.length} ↓</div>`;
-      html += '<div class="noise-items" id="noise-older-items">';
-      for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
-      html += `<div class="noise-section-footer" id="noise-older-footer"${olderHidden ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
-      html += '</div>';
-    }
-    html += '</section>';
-  }
 
-  // Digests (collapsed by default)
-  if (!loading && (digests.length > 0 || deepDigestsLoading)) {
-    html += '<section class="priority-section">';
-    html += `<div class="section-toggle" id="digests-toggle">Digests · ${digests.length} ↓</div>`;
-    html += '<div class="noise-items" id="digest-items">';
-    for (const item of digests) html += renderAnyItem(item, data, 'noise-item');
-    if (deepDigestsLoading) {
-      html += '<div id="deep-digest-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Summarizing digests...</div>';
+    // Recent (last 24h)
+    if (noise.length > 0 || deepNoiseLoading) {
+      const noiseCutoff = Date.now() / 1000 - 86400;
+      const noiseRecent = noise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+      const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
+      if (noiseRecent.length > 0 || deepNoiseLoading) {
+        html += `<div class="section-toggle" id="noise-recent-toggle">Recent · ${noiseRecent.length} ↓</div>`;
+        html += '<div class="noise-items" id="noise-recent-items">';
+        for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
+        if (deepNoiseLoading) {
+          html += '<div id="deep-noise-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Analyzing busy channels...</div>';
+        }
+        html += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent as read</button></div>`;
+        html += '</div>';
+      }
+      // Older
+      if (noiseOlder.length > 0 || deepNoiseLoading) {
+        const olderHidden = noiseOlder.length === 0;
+        html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Older · ${noiseOlder.length} ↓</div>`;
+        html += '<div class="noise-items" id="noise-older-items">';
+        for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
+        html += `<div class="noise-section-footer" id="noise-older-footer"${olderHidden ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older as read</button></div>`;
+        html += '</div>';
+      }
     }
-    html += `<div class="noise-section-footer"><button id="digests-mark-read-btn">Mark all digests as read</button></div>`;
-    html += '</div></section>';
+
+    // Digests
+    if (digests.length > 0 || deepDigestsLoading) {
+      html += `<div class="section-toggle" id="digests-toggle">Digests · ${digests.length} ↓</div>`;
+      html += '<div class="noise-items" id="digest-items">';
+      for (const item of digests) html += renderAnyItem(item, data, 'noise-item');
+      if (deepDigestsLoading) {
+        html += '<div id="deep-digest-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Summarizing digests...</div>';
+      }
+      html += `<div class="noise-section-footer"><button id="digests-mark-read-btn">Mark all digests as read</button></div>`;
+      html += '</div>';
+    }
+
+    html += '</section>';
   }
 
   // All clear
@@ -2231,9 +2316,9 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       });
     }
   }
-  wireNoiseToggle('when-free-toggle', 'when-free-items', 'When Free');
-  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'Recent Noise');
-  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older Noise');
+  wireNoiseToggle('when-free-toggle', 'when-free-items', 'Relevant');
+  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'Recent');
+  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older');
   wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'Saved');
   wireNoiseToggle('digests-toggle', 'digest-items', 'Digests');
 
@@ -3047,29 +3132,6 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Bankruptcy: mark everything older than 7 days as read
-  const bankruptcyBtn = e.target.closest('#bankruptcy-btn');
-  if (bankruptcyBtn && !bankruptcyBtn.disabled) {
-    const sevenDaysAgo = (Date.now() / 1000) - 7 * 24 * 60 * 60;
-    const items = bodyEl.querySelectorAll('.item:not(.read-done)');
-    let count = 0;
-    for (const item of items) {
-      const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
-      if (!markAll) continue;
-      const ts = parseFloat(markAll.dataset.ts);
-      if (!ts || ts >= sevenDaysAgo) continue;
-      const { channel, ts: markTs, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
-      markAll.dataset.pending = 'true';
-      sendToInject({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
-      count++;
-    }
-    bankruptcyBtn.textContent = count > 0
-      ? `Declared bankruptcy on ${count} item${count === 1 ? '' : 's'}`
-      : 'Nothing older than 7 days to clear';
-    bankruptcyBtn.disabled = true;
-    return;
-  }
 
   // Seen replies lazy load / chunked expansion
   const toggle = e.target.closest('.seen-replies-toggle');
@@ -3901,7 +3963,7 @@ function prioritizeAndRender(data) {
         console.warn('FSlack prioritization error:', firstError);
         // Fall back to cached priorities if available
         if (cachedView?.prioritized) {
-          renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || []);
+          renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
           const banner = document.createElement('div');
           banner.className = 'warning-banner';
           banner.textContent = 'Showing cached results (API temporarily unavailable)';
@@ -4063,22 +4125,22 @@ function prioritizeAndRender(data) {
           if (noiseRecentEl) {
             let recentHtml = '';
             for (const item of allNoiseRecent) recentHtml += renderAnyItem(item, data, 'noise-item');
-            recentHtml += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent noise as read</button></div>`;
+            recentHtml += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent as read</button></div>`;
             noiseRecentEl.innerHTML = recentHtml;
             if (noiseRecentToggleEl) {
               const expanded = noiseRecentEl.classList.contains('expanded');
-              noiseRecentToggleEl.textContent = `Recent Noise · ${allNoiseRecent.length} ${expanded ? '↑' : '↓'}`;
+              noiseRecentToggleEl.textContent = `Recent · ${allNoiseRecent.length} ${expanded ? '↑' : '↓'}`;
             }
           }
           if (noiseOlderEl) {
             let olderHtml = '';
             for (const item of allNoiseOlder) olderHtml += renderAnyItem(item, data, 'noise-item');
-            olderHtml += `<div class="noise-section-footer" id="noise-older-footer"${allNoiseOlder.length === 0 ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
+            olderHtml += `<div class="noise-section-footer" id="noise-older-footer"${allNoiseOlder.length === 0 ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older as read</button></div>`;
             noiseOlderEl.innerHTML = olderHtml;
             if (allNoiseOlder.length > 0 && noiseOlderToggleEl) noiseOlderToggleEl.style.display = '';
             if (noiseOlderToggleEl) {
               const expanded = noiseOlderEl.classList.contains('expanded');
-              noiseOlderToggleEl.textContent = `Older Noise · ${allNoiseOlder.length} ${expanded ? '↑' : '↓'}`;
+              noiseOlderToggleEl.textContent = `Older · ${allNoiseOlder.length} ${expanded ? '↑' : '↓'}`;
             }
           }
 
@@ -4166,18 +4228,18 @@ function prioritizeAndRender(data) {
         if (noiseRecentEl) {
           let recentHtml = '';
           for (const item of allNoiseRecent) recentHtml += renderAnyItem(item, data, 'noise-item');
-          recentHtml += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent noise as read</button></div>`;
+          recentHtml += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent as read</button></div>`;
           noiseRecentEl.innerHTML = recentHtml;
           if (noiseRecentToggleEl) {
             const count = allNoiseRecent.length;
             const expanded = noiseRecentEl.classList.contains('expanded');
-            noiseRecentToggleEl.textContent = `${count} recent noise item${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
+            noiseRecentToggleEl.textContent = `Recent · ${count} ${expanded ? '↑' : '↓'}`;
           }
         }
         if (noiseOlderEl) {
           let olderHtml = '';
           for (const item of allNoiseOlder) olderHtml += renderAnyItem(item, data, 'noise-item');
-          olderHtml += `<div class="noise-section-footer" id="noise-older-footer"${allNoiseOlder.length === 0 ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older noise as read</button><button id="bankruptcy-btn">☠ Bankruptcy — mark everything older than 7 days as read</button></div>`;
+          olderHtml += `<div class="noise-section-footer" id="noise-older-footer"${allNoiseOlder.length === 0 ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older as read</button></div>`;
           noiseOlderEl.innerHTML = olderHtml;
           if (allNoiseOlder.length > 0) {
             if (noiseOlderToggleEl) noiseOlderToggleEl.style.display = '';
@@ -4185,7 +4247,7 @@ function prioritizeAndRender(data) {
           if (noiseOlderToggleEl) {
             const count = allNoiseOlder.length;
             const expanded = noiseOlderEl.classList.contains('expanded');
-            noiseOlderToggleEl.textContent = `${count} older noise item${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
+            noiseOlderToggleEl.textContent = `Older · ${count} ${expanded ? '↑' : '↓'}`;
           }
         }
 
@@ -4526,9 +4588,9 @@ function handleCompleteSavedResult(msg) {
 function updateSectionToggleCount(itemEl) {
   if (!itemEl) return;
   const sections = [
-    ['when-free-items', 'when-free-toggle', 'When Free'],
-    ['noise-recent-items', 'noise-recent-toggle', 'Recent Noise'],
-    ['noise-older-items', 'noise-older-toggle', 'Older Noise'],
+    ['when-free-items', 'when-free-toggle', 'Relevant'],
+    ['noise-recent-items', 'noise-recent-toggle', 'Recent'],
+    ['noise-older-items', 'noise-older-toggle', 'Older'],
     ['saved-items-list', 'saved-items-toggle', 'Saved'],
     ['digest-items', 'digests-toggle', 'Digests'],
   ];
@@ -4832,4 +4894,19 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
 
   // Connect port to background.js (which relays to content.js → inject.js)
   connectPort();
+
+  // ── Demo mode checkbox ──
+  const demoCheckbox = document.getElementById('demo-checkbox');
+  if (demoCheckbox) {
+    demoCheckbox.addEventListener('change', () => {
+      if (demoCheckbox.checked) {
+        runDemoAnonymize();
+      } else {
+        // Re-render with real data
+        if (cachedView) {
+          renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
+        }
+      }
+    });
+  }
 });

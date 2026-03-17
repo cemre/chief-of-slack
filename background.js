@@ -64,6 +64,7 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeChannelPost`,
   `${FSLACK}:summarizeThreadReplies`,
   `${FSLACK}:summarizeFullThread`,
+  `${FSLACK}:anonymize`,
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
 ]);
@@ -505,6 +506,65 @@ chrome.webNavigation.onBeforeNavigate.addListener(
   { url: [{ hostEquals: 'slack.com', pathPrefix: '/app_redirect' }] }
 );
 
+// ── Call Claude API to build anonymization replacement map ──
+async function handleAnonymize(data) {
+  console.log(`[fslack bg] anonymize: ${data.names?.length} names, ${data.channels?.length} channels, ${data.snippets?.length} snippets`);
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) { console.warn('[fslack bg] anonymize: no API key'); return { error: 'no_api_key' }; }
+  try {
+    const startTime = Date.now();
+    const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': claudeApiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: `Generate a find-and-replace map to anonymize a workplace chat dashboard for demos.
+
+PERSON NAMES (replace with realistic fake first names):
+${JSON.stringify(data.names)}
+
+CHANNEL NAMES (replace with plausible generic alternatives):
+${JSON.stringify(data.channels)}
+
+SAMPLE TEXT SNIPPETS (scan for any product names, project names, internal tools, or company-specific terms that also need replacing — add those to the map too):
+${JSON.stringify(data.snippets)}
+
+Rules:
+- Every name/channel above MUST have a replacement
+- Add extra entries for any product/project/tool names you spot in the snippets
+- Replacements should be realistic but clearly different
+- Keep similar length/feel
+- Do NOT include generic words, timestamps, or UI labels
+
+Return ONLY a flat JSON object mapping each original string to its replacement. No explanation, no markdown fences.
+Example: {"josh": "Marcus", "deploy-pipeline": "release-flow", "ProjectX": "Beacon"}` }],
+      }),
+    });
+    console.log(`[fslack bg] anonymize: API responded ${resp.status} in ${Date.now() - startTime}ms`);
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      console.error('[fslack bg] anonymize: API error', resp.status, errBody.slice(0, 300));
+      return { error: `API ${resp.status}: ${errBody.slice(0, 200)}` };
+    }
+    const result = await resp.json();
+    console.log(`[fslack bg] anonymize: output tokens = ${result.usage?.output_tokens}, stop = ${result.stop_reason}`);
+    trackUsage('anonymize', result.usage);
+    const text = result.content?.[0]?.text || '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return { error: 'parse_error', raw: text };
+    return { map: JSON.parse(jsonMatch[0]) };
+  } catch (err) {
+    console.error('[fslack bg] anonymize: exception', err);
+    return { error: err.message };
+  }
+}
+
 // ── Message handler (LLM calls + API key) ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Track active Slack tab from content script messages
@@ -549,6 +609,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === `${FSLACK}:summarizeFullThread`) {
     handleFullThreadSummarize(msg.data).then(sendResponse);
+    return true;
+  }
+  if (msg.type === `${FSLACK}:anonymize`) {
+    handleAnonymize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:setApiKey`) {
