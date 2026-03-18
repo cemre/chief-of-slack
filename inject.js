@@ -234,6 +234,136 @@
     'pinned_item', 'unpinned_item', 'group_join', 'group_leave',
   ]);
 
+  // ── Activity feed: catch @mentions and threads not covered by client.counts / subscriptions.thread.getView ──
+  const ACTIVITY_FEED_TYPES = 'thread_v2,at_user,at_user_group,at_channel,at_everyone';
+
+  async function fetchActivityMentions({ selfId, threads, channelPosts, muted }) {
+    try {
+      const data = await slackApi('activity.feed', {
+        limit: '30',
+        types: ACTIVITY_FEED_TYPES,
+        mode: 'priority_reads_and_unreads_v1',
+        unread_only: 'true',
+      });
+      if (!data.ok || !data.items?.length) return { extraThreads: [], extraChannelPosts: [], activityMentionCount: 0 };
+
+      // Build sets of what we already have
+      const coveredThreads = new Set(threads.map(t => `${t.channel_id}:${t.ts}`));
+      const coveredChannels = new Set(channelPosts.map(cp => cp.channel_id));
+
+      const missedMentions = []; // { channel, ts } — at_user etc.
+      const missedThreads = [];  // { channel_id, thread_ts, unread_msg_count, min_unread_ts }
+
+      for (const entry of data.items) {
+        const item = entry.item;
+        if (!item) continue;
+
+        if (item.type === 'thread_v2') {
+          const te = item.bundle_info?.payload?.thread_entry;
+          if (!te?.channel_id || !te?.thread_ts) continue;
+          if (muted.has(te.channel_id)) continue;
+          if (coveredThreads.has(`${te.channel_id}:${te.thread_ts}`)) continue;
+          missedThreads.push(te);
+        } else {
+          // at_user, at_user_group, at_channel, at_everyone
+          const msg = item.message;
+          if (!msg?.channel || !msg?.ts) continue;
+          if (muted.has(msg.channel)) continue;
+          if (coveredChannels.has(msg.channel)) continue;
+          missedMentions.push({ channel: msg.channel, ts: msg.ts });
+        }
+      }
+
+      const totalMissed = missedMentions.length + missedThreads.length;
+      if (totalMissed === 0) return { extraThreads: [], extraChannelPosts: [], activityMentionCount: data.items.length };
+
+      console.log(`[${FSLACK}] activity.feed: ${data.items.length} unread items, ${missedThreads.length} missed threads, ${missedMentions.length} missed mentions`);
+
+      // ── Fetch missed threads ──
+      const extraThreads = [];
+      await Promise.all(missedThreads.map(async (te) => {
+        try {
+          const r = await slackApi('conversations.replies', { channel: te.channel_id, ts: te.thread_ts, limit: '12' });
+          const allMsgs = r.messages || [];
+          const root = allMsgs[0];
+          if (!root) return;
+          const replies = allMsgs.slice(1);
+          // Only take unread replies (from min_unread_ts onward)
+          const unreadReplies = te.min_unread_ts
+            ? replies.filter(m => parseFloat(m.ts) >= parseFloat(te.min_unread_ts))
+            : replies.slice(-te.unread_msg_count || -1);
+          const othersUnread = unreadReplies
+            .filter(m => m.user !== selfId)
+            .map(m => ({ user: m.user, text: extractText(m), fwd: extractFwd(m), ts: m.ts, bot_id: m.bot_id, subtype: m.subtype, files: extractFiles(m) }));
+          if (othersUnread.length === 0) return;
+          const lastUnread = othersUnread[othersUnread.length - 1];
+          const thread = {
+            channel_id: te.channel_id,
+            ts: te.thread_ts,
+            root_text: extractText(root),
+            root_fwd: extractFwd(root),
+            root_files: extractFiles(root),
+            root_user: root.user,
+            reply_count: root.reply_count || 0,
+            reply_users: root.reply_users || [],
+            unread_replies: othersUnread,
+            sort_ts: lastUnread?.ts || root.ts || '0',
+            _fromActivity: true,
+          };
+          // Add full context if user replied in this thread
+          if ((root.reply_users || []).includes(selfId)) {
+            const contextReplies = replies.slice(-10);
+            const firstUnreadTs = othersUnread[0]?.ts;
+            thread.full_replies = contextReplies.map(m => ({
+              user: m.user, text: extractText(m), ts: m.ts,
+              is_unread: firstUnreadTs ? parseFloat(m.ts) >= parseFloat(firstUnreadTs) : false,
+            }));
+          }
+          extraThreads.push(thread);
+        } catch { /* skip failed threads */ }
+      }));
+
+      // ── Fetch missed mention messages ──
+      const byChannel = {};
+      for (const m of missedMentions) {
+        if (!byChannel[m.channel]) byChannel[m.channel] = [];
+        byChannel[m.channel].push(m);
+      }
+      const extraChannelPosts = [];
+      await Promise.all(Object.entries(byChannel).map(async ([channelId, mentions]) => {
+        try {
+          const msgs = [];
+          for (const mention of mentions) {
+            try {
+              const hist = await slackApi('conversations.history', {
+                channel: channelId, latest: mention.ts, inclusive: 'true', limit: '1',
+              });
+              const m = (hist.messages || [])[0];
+              if (m && m.user !== selfId) {
+                msgs.push({
+                  user: m.user, text: extractText(m), fwd: extractFwd(m), ts: m.ts,
+                  thread_ts: m.thread_ts || null, subtype: m.subtype, bot_id: m.bot_id,
+                  reply_count: m.reply_count || 0, reply_users: m.reply_users || [], files: extractFiles(m),
+                });
+              }
+            } catch { /* skip individual message failures */ }
+          }
+          if (msgs.length > 0) {
+            extraChannelPosts.push({
+              channel_id: channelId, mention_count: msgs.length, messages: msgs,
+              sort_ts: msgs[0]?.ts || '0', _fromActivity: true,
+            });
+          }
+        } catch { /* skip channel failures */ }
+      }));
+
+      return { extraThreads, extraChannelPosts, activityMentionCount: data.items.length };
+    } catch (err) {
+      console.warn(`[${FSLACK}] activity.feed failed:`, err);
+      return { extraThreads: [], extraChannelPosts: [], activityMentionCount: 0 };
+    }
+  }
+
   // Extract text from message, falling back to attachments/blocks
   // Extract forwarded/shared message info as a separate object
   function extractFwd(m) {
@@ -626,6 +756,21 @@
 
     progress(4, `Done. ${channelPosts.length} channels with new posts.`);
 
+    // 4b. Activity feed — catch @mentions and threads missed by client.counts / subscriptions.thread.getView
+    progress(4, 'Checking activity feed for missed mentions...');
+    const { extraThreads, extraChannelPosts, activityMentionCount } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
+    if (extraThreads.length > 0) {
+      threads.push(...extraThreads);
+      threads.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+    if (extraChannelPosts.length > 0) {
+      channelPosts.push(...extraChannelPosts);
+      channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+    if (extraThreads.length > 0 || extraChannelPosts.length > 0) {
+      progress(4, `Activity feed: ${extraThreads.length} threads + ${extraChannelPosts.length} channels added (${activityMentionCount} total activity items).`);
+    }
+
     // 5. Collect all user IDs and channel mentions, then resolve names
     const allUserIds = [];
     const mentionedChannelIds = [];
@@ -937,6 +1082,21 @@
       );
       channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
       progress(4, `Done. ${channelPosts.length} channels with mentions fetched.`);
+    }
+
+    // 4b. Activity feed — catch @mentions and threads missed by client.counts / subscriptions.thread.getView
+    progress(4, 'Checking activity feed for missed mentions...');
+    const { extraThreads, extraChannelPosts, activityMentionCount } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
+    if (extraThreads.length > 0) {
+      threads.push(...extraThreads);
+      threads.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+    if (extraChannelPosts.length > 0) {
+      channelPosts.push(...extraChannelPosts);
+      channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+    if (extraThreads.length > 0 || extraChannelPosts.length > 0) {
+      progress(4, `Activity feed: ${extraThreads.length} threads + ${extraChannelPosts.length} channels added (${activityMentionCount} total activity items).`);
     }
 
     // 5. Resolve users for threads + DMs + mention channels

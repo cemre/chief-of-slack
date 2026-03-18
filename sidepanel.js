@@ -1435,14 +1435,13 @@ function renderThreadItem(t, data, cssClass) {
   html += `<div class="msg-row${sumClass}"><div class="${msgContentClass}"${msgContentTarget}>${rootContentHtml}</div>${origRootHtml}${msgActions(t.channel_id, t.ts)}</div>`;
 
   html += '<div class="thread-replies-container">';
+  if (shouldSummarize) {
+    html += `<div class="deep-messages" id="${repliesMsgId}">`;
+  }
   if (seenCount > 0) {
     const unreadTs = unread.map((r) => r.ts).join(',');
     html += `<div class="seen-replies-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-unread-ts="${unreadTs}">${seenCount} earlier ${seenCount === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
-  }
-
-  if (shouldSummarize) {
-    html += `<div class="deep-messages" id="${repliesMsgId}">`;
   }
 
   for (const r of unread) {
