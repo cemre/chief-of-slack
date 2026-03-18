@@ -304,7 +304,6 @@ window._fslackDebug = function(channelId) {
     inPriority: (p.priority || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId, _reason: i._reason })),
     inWhenFree: (p.whenFree || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId })),
     inNoise: (p.noise || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId })),
-    inDigests: (p.digests || []).filter(i => i.channel_id === cid).map(i => ({ _type: i._type, _isMentioned: i._isMentioned, _llmId: i._llmId })),
     preFilterLog: window._preFilterLog?.[cid] || 'no log',
   };
   const json = JSON.stringify(info, null, 2);
@@ -409,7 +408,6 @@ function removeCachedItem(channel, threadTs) {
     priority: p.priority.filter(keep),
     whenFree: p.whenFree.filter(keep),
     noise: p.noise.filter(keep),
-    digests: (p.digests || []).filter(keep),
   };
   chrome.storage.local.set({ fslackViewCache: cachedView });
 }
@@ -1555,7 +1553,7 @@ function buildThreadUiMeta(data, channelId, message) {
 }
 
 function renderChannelItem(cp, data, cssClass) {
-  const ch = data.channels[cp.channel_id] || cp.channel_id;
+  const ch = (cp._isAllBot ? '🤖 ' : '') + (data.channels[cp.channel_id] || cp.channel_id);
   const latest = cp.messages[0];
   const collapsible = cssClass === 'act-now' || cssClass === 'priority-item';
   const needsChannelSummary = cssClass === 'when-free' && cp.messages.length >= 1 && !cp._isBotThread;
@@ -1598,7 +1596,7 @@ function renderChannelItem(cp, data, cssClass) {
     let messagesHtml = '';
     for (const m of cp.messages.slice(0, 10).reverse()) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-      if (cp._summarizeThreads && (m.reply_count || 0) >= 10) {
+      if (cp._summarizeThreads && (m.reply_count || 0) >= 5) {
         const threadTs = threadUi?.threadTs || m.ts;
         const containerId = threadUi?.containerId || `thread-${cp.channel_id}-${(threadTs || '').replace(/\./g, '_')}-${(m.ts || '').replace(/\./g, '_')}`;
         const modeAttr = threadUi?.mode ? ` data-mode="${threadUi.mode}"` : '';
@@ -1634,7 +1632,7 @@ function renderChannelItem(cp, data, cssClass) {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-      if (cp._summarizeThreads && (m.reply_count || 0) >= 10) {
+      if (cp._summarizeThreads && (m.reply_count || 0) >= 5) {
         // Render message without thread badge; badge moves below summary
         const threadTs = threadUi?.threadTs || m.ts;
         const containerId = threadUi?.containerId || `thread-${cp.channel_id}-${(threadTs || '').replace(/\./g, '_')}-${(m.ts || '').replace(/\./g, '_')}`;
@@ -1865,7 +1863,7 @@ function applyPreFilters(data) {
     // High-volume channels: only surface if 10+ replies, rest → noise
     const isOwnThread = t.root_user === selfId;
     if (t._sidebarSection === 'high_volume' && !isOwnThread) {
-      if ((t.reply_count || 0) >= 10) {
+      if ((t.reply_count || 0) >= 5) {
         t._forceThreadSummary = true;
         whenFree.push(t);
       } else {
@@ -1881,24 +1879,6 @@ function applyPreFilters(data) {
     }
 
     forLlm.threads.push(t);
-  }
-
-  // Unified digest routing helper
-  function routeToDigest(cp) {
-    if (cp._isMentioned) {
-      forLlm.channelPosts.push(cp);
-      return;
-    }
-    const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 4);
-    const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 4);
-    if (hotMsgs.length > 0) {
-      const hotCp = { ...cp, messages: hotMsgs };
-      const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
-      hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-      hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
-      whenFree.push(hotCp);
-    }
-    if (coldMsgs.length > 0) digests.push({ ...cp, messages: coldMsgs, _isDigestChannel: true });
   }
 
   // Build set of thread roots so we can dedup channel posts that are already shown as threads
@@ -1941,8 +1921,8 @@ function applyPreFilters(data) {
 
     // High-volume channels: split — individual posts with 10+ replies → whenFree, rest → noise
     if (cp._sidebarSection === 'high_volume') {
-      const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 10);
-      const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 10);
+      const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 5);
+      const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 5);
       if (hotMsgs.length > 0) {
         const hotCp = { ...cp, messages: hotMsgs, _type: 'channel' };
         const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
@@ -1971,11 +1951,31 @@ function applyPreFilters(data) {
       continue;
     }
 
-    // All-bot messages → digest (deep analysis only for 4+)
-    if (cp.messages.every(isBot)) {
+    // All-bot messages — apply configurable bot-only rule (default: high_volume)
+    // @mentions always go to LLM regardless of bot rule
+    if (cp.messages.every(isBot) && !cp._isMentioned) {
+      cp._isAllBot = true;
+      const botRule = sidebarSections['__bot_only'] || 'high_volume';
+      if (botRule === 'skip') { _dbgLog('allBot-skip'); continue; }
+      if (botRule === 'hard_noise') { _dbgLog('allBot-noise'); noise.push(cp); continue; }
+      if (botRule === 'high_volume') {
+        const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 5);
+        const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 5);
+        if (hotMsgs.length > 0) {
+          const hotCp = { ...cp, messages: hotMsgs, _isAllBot: true };
+          const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
+          hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
+          hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
+          whenFree.push(hotCp);
+        }
+        if (coldMsgs.length > 0) noise.push({ ...cp, messages: coldMsgs, _isAllBot: true });
+        _dbgLog('allBot-highvol');
+        continue;
+      }
+      // floor_priority, floor_whenfree, normal → send to LLM
       if (cp.messages.length >= 4) cp._deepAnalysis = true;
-      _dbgLog('allBot');
-      routeToDigest(cp);
+      _dbgLog('allBot-llm');
+      forLlm.channelPosts.push(cp);
       continue;
     }
 
@@ -2197,9 +2197,9 @@ function sortNoiseItems(items, noiseOrder = []) {
 }
 
 
-function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], deepDigestsLoading = false, cachedTs = null) {
+function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], _unused = false, cachedTs = null) {
   const { actNow, priority, whenFree, noise } = prioritized;
-  const digests = prioritized.digests || [];
+
   let html = '';
 
   // Saved items (collapsed by default) — pinned to top
@@ -2225,7 +2225,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   // Channels header (combines cache-age + refresh into one line)
-  if (whenFree.length > 0 || (!loading && (noise.length > 0 || deepNoiseLoading || digests.length > 0 || deepDigestsLoading))) {
+  if (whenFree.length > 0 || (!loading && (noise.length > 0 || deepNoiseLoading))) {
     html += '<div class="channels-header">';
     html += '<span class="channels-header-label">Channels</span>';
     if (cachedTs) {
@@ -2273,8 +2273,8 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '<div id="status"><div class="detail">Analyzing remaining messages with AI...</div></div>';
   }
 
-  // Channel Messages — groups noise + digests
-  const hasChannelMessages = !loading && (noise.length > 0 || deepNoiseLoading || digests.length > 0 || deepDigestsLoading);
+  // Channel Messages (noise)
+  const hasChannelMessages = !loading && (noise.length > 0 || deepNoiseLoading);
   if (hasChannelMessages) {
     html += '<section class="priority-section">';
 
@@ -2284,7 +2284,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       const noiseRecent = noise.filter((item) => getItemSortTs(item) >= noiseCutoff);
       const noiseOlder = noise.filter((item) => getItemSortTs(item) < noiseCutoff);
       if (noiseRecent.length > 0 || deepNoiseLoading) {
-        html += `<div class="section-toggle" id="noise-recent-toggle">Recent · ${noiseRecent.length} ↓</div>`;
+        html += `<div class="section-toggle" id="noise-recent-toggle">Recent noise · ${noiseRecent.length} ↓</div>`;
         html += '<div class="noise-items" id="noise-recent-items">';
         for (const item of noiseRecent) html += renderAnyItem(item, data, 'noise-item');
         if (deepNoiseLoading) {
@@ -2296,7 +2296,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       // Older
       if (noiseOlder.length > 0 || deepNoiseLoading) {
         const olderHidden = noiseOlder.length === 0;
-        html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Older · ${noiseOlder.length} ↓</div>`;
+        html += `<div class="section-toggle" id="noise-older-toggle"${olderHidden ? ' style="display:none"' : ''}>Older noise · ${noiseOlder.length} ↓</div>`;
         html += '<div class="noise-items" id="noise-older-items">';
         for (const item of noiseOlder) html += renderAnyItem(item, data, 'noise-item');
         html += `<div class="noise-section-footer" id="noise-older-footer"${olderHidden ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older as read</button></div>`;
@@ -2304,23 +2304,11 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       }
     }
 
-    // Digests
-    if (digests.length > 0 || deepDigestsLoading) {
-      html += `<div class="section-toggle" id="digests-toggle">Digests · ${digests.length} ↓</div>`;
-      html += '<div class="noise-items" id="digest-items">';
-      for (const item of digests) html += renderAnyItem(item, data, 'noise-item');
-      if (deepDigestsLoading) {
-        html += '<div id="deep-digest-area" style="padding:8px 24px;font-size:12px;color:#3d3f42">Summarizing digests...</div>';
-      }
-      html += `<div class="noise-section-footer"><button id="digests-mark-read-btn">Mark all digests as read</button></div>`;
-      html += '</div>';
-    }
-
     html += '</section>';
   }
 
   // All clear
-  if (!loading && !deepNoiseLoading && !deepDigestsLoading && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0 && digests.length === 0) {
+  if (!loading && !deepNoiseLoading && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
     html += '<div id="status">All clear — nothing needs your attention.</div>';
   }
 
@@ -2354,10 +2342,9 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     }
   }
   wireNoiseToggle('when-free-toggle', 'when-free-items', 'Relevant');
-  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'Recent');
-  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older');
+  wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'Recent noise');
+  wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older noise');
   wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'Saved');
-  wireNoiseToggle('digests-toggle', 'digest-items', 'Digests');
 
   // Wire cache divider refresh button
   const cacheDivRefresh = document.getElementById('cache-divider-refresh');
@@ -3097,29 +3084,7 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Mark all digests as read
-  const digestsMarkRead = e.target.closest('#digests-mark-read-btn');
-  if (digestsMarkRead && !digestsMarkRead.disabled) {
-    const section = document.getElementById('digest-items');
-    const digestItemEls = section ? section.querySelectorAll('.item.noise-item:not(.read-done)') : [];
-    let count = 0;
-    for (const item of digestItemEls) {
-      const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
-      if (!markAll) continue;
-      const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
-      markAll.dataset.pending = 'true';
-      sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
-      count++;
-    }
-    digestsMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
-    digestsMarkRead.disabled = true;
-    if (section?.classList.contains('expanded')) {
-      const toggle = section.previousElementSibling;
-      if (toggle?.classList.contains('section-toggle')) toggle.click();
-    }
-    return;
-  }
+
 
   // Mark recent noise as read
   const noiseMarkRecent = e.target.closest('#noise-mark-recent-btn');
@@ -3773,7 +3738,7 @@ function runChannelThreadSummarization(allItems, data) {
   for (const cp of items) {
     const ch = data.channels[cp.channel_id] || cp.channel_id;
     for (const m of cp.messages) {
-      if ((m.reply_count || 0) < 10) continue;
+      if ((m.reply_count || 0) < 5) continue;
       if (m._chThreadSummary) continue; // already summarized (from cache)
       const key = `ch-thread-summary-${cp.channel_id}-${(m.ts || '').replace('.', '_')}`;
       tasks.push({ cp, ch, m, key });
@@ -4067,8 +4032,6 @@ function prioritizeAndRender(data) {
       let regularNoise = prioritized.noise.filter((item) =>
         (item.fullMessages?.history || item.messages || []).length < 1
       );
-      const digestItems = prioritized.digests || [];
-
       const allElevated = [...prioritized.actNow, ...prioritized.priority, ...prioritized.whenFree];
 
       const MAX_PAYLOAD_BYTES = 3000;
@@ -4168,7 +4131,7 @@ function prioritizeAndRender(data) {
             noiseRecentEl.innerHTML = recentHtml;
             if (noiseRecentToggleEl) {
               const expanded = noiseRecentEl.classList.contains('expanded');
-              noiseRecentToggleEl.textContent = `Recent · ${allNoiseRecent.length} ${expanded ? '↑' : '↓'}`;
+              noiseRecentToggleEl.textContent = `Recent noise · ${allNoiseRecent.length} ${expanded ? '↑' : '↓'}`;
             }
           }
           if (noiseOlderEl) {
@@ -4179,7 +4142,7 @@ function prioritizeAndRender(data) {
             if (allNoiseOlder.length > 0 && noiseOlderToggleEl) noiseOlderToggleEl.style.display = '';
             if (noiseOlderToggleEl) {
               const expanded = noiseOlderEl.classList.contains('expanded');
-              noiseOlderToggleEl.textContent = `Older · ${allNoiseOlder.length} ${expanded ? '↑' : '↓'}`;
+              noiseOlderToggleEl.textContent = `Older noise · ${allNoiseOlder.length} ${expanded ? '↑' : '↓'}`;
             }
           }
 
@@ -4188,7 +4151,7 @@ function prioritizeAndRender(data) {
         return;
       }
 
-      if (deepNoise.length === 0 && digestItems.length === 0) {
+      if (deepNoise.length === 0) {
         renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || []);
         runBotThreadSummarization(prioritized.whenFree, data);
         runWhenFreeChannelSummarization(prioritized.whenFree, data);
@@ -4200,13 +4163,13 @@ function prioritizeAndRender(data) {
       }
 
       // Render main sections; loading indicators show for each type
-      renderPrioritized({ ...prioritized, noise: regularNoise, digests: digestItems }, data, pendingPopular, false, deepNoise.length > 0, pendingSaved || [], digestItems.length > 0);
+      renderPrioritized({ ...prioritized, noise: regularNoise }, data, pendingPopular, false, deepNoise.length > 0, pendingSaved || [], false);
       runBotThreadSummarization(prioritized.whenFree, data);
       runWhenFreeChannelSummarization(prioritized.whenFree, data);
       runThreadReplySummarization(allElevated, data);
       runChannelThreadSummarization(allElevated, data);
       runRootSummarization(allElevated, data);
-      saveViewCache(data, pendingPopular, { ...prioritized, noise: regularNoise, digests: digestItems }, pendingSaved || []);
+      saveViewCache(data, pendingPopular, { ...prioritized, noise: regularNoise }, pendingSaved || []);
 
       // Summarize each deep-noise and digest channel individually
       (async () => {
@@ -4215,27 +4178,18 @@ function prioritizeAndRender(data) {
         const noiseOlderEl = document.getElementById('noise-older-items');
         const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
         const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
-        const digestItemsEl = document.getElementById('digest-items');
-        const deepDigestArea = document.getElementById('deep-digest-area');
-        const digestsToggleEl = document.getElementById('digests-toggle');
-
         let noiseDone = 0;
         if (deepNoiseArea && deepNoise.length > 0) deepNoiseArea.textContent = `Summarizing channels... 0/${deepNoise.length}`;
 
-        const allDeepItems = [...deepNoise, ...digestItems];
-        const results = await Promise.all(allDeepItems.map(async (cp) => {
+        const results = await Promise.all(deepNoise.map(async (cp) => {
           const { result } = await cachedSummarize(cp);
-          if (!cp._isDigestChannel) {
-            noiseDone++;
-            if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${noiseDone}/${deepNoise.length}`;
-          }
+          noiseDone++;
+          if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${noiseDone}/${deepNoise.length}`;
           return { cp, result };
         }));
 
         if (deepNoiseArea) deepNoiseArea.textContent = '';
 
-        const summarizedNoiseItems = [];
-        const summarizedDigestItems = [];
         for (const { cp, result } of results) {
           if (result?.bullets?.length) {
             cp._deepSummary = result.bullets.join('\n');
@@ -4251,15 +4205,10 @@ function prioritizeAndRender(data) {
               cp._deepSummary = `${name}: ${plainTruncate(first.text || '', 200, data.users)}`;
             }
           }
-          if (cp._isDigestChannel) {
-            summarizedDigestItems.push(cp);
-          } else {
-            summarizedNoiseItems.push(cp);
-          }
         }
 
         // Sort ALL noise items by message count desc, then recency desc
-        const allNoise = sortNoiseItems([...regularNoise, ...summarizedNoiseItems], mergedNoiseOrder);
+        const allNoise = sortNoiseItems([...regularNoise, ...deepNoise], mergedNoiseOrder);
         const noiseCutoff = Date.now() / 1000 - 86400;
         const allNoiseRecent = allNoise.filter((item) => getItemSortTs(item) >= noiseCutoff);
         const allNoiseOlder = allNoise.filter((item) => getItemSortTs(item) < noiseCutoff);
@@ -4272,7 +4221,7 @@ function prioritizeAndRender(data) {
           if (noiseRecentToggleEl) {
             const count = allNoiseRecent.length;
             const expanded = noiseRecentEl.classList.contains('expanded');
-            noiseRecentToggleEl.textContent = `Recent · ${count} ${expanded ? '↑' : '↓'}`;
+            noiseRecentToggleEl.textContent = `Recent noise · ${count} ${expanded ? '↑' : '↓'}`;
           }
         }
         if (noiseOlderEl) {
@@ -4286,25 +4235,11 @@ function prioritizeAndRender(data) {
           if (noiseOlderToggleEl) {
             const count = allNoiseOlder.length;
             const expanded = noiseOlderEl.classList.contains('expanded');
-            noiseOlderToggleEl.textContent = `Older · ${count} ${expanded ? '↑' : '↓'}`;
+            noiseOlderToggleEl.textContent = `Older noise · ${count} ${expanded ? '↑' : '↓'}`;
           }
         }
 
-        // Update digest section with summarized items
-        if (digestItemsEl) {
-          let digestHtml = '';
-          for (const item of summarizedDigestItems) digestHtml += renderAnyItem(item, data, 'noise-item');
-          digestHtml += `<div class="noise-section-footer"><button id="digests-mark-read-btn">Mark all digests as read</button></div>`;
-          digestItemsEl.innerHTML = digestHtml;
-          if (deepDigestArea) deepDigestArea.remove();
-          if (digestsToggleEl) {
-            const count = summarizedDigestItems.length;
-            const expanded = digestItemsEl.classList.contains('expanded');
-            digestsToggleEl.textContent = `${count} digest${count === 1 ? '' : 's'} ${expanded ? '↑' : '↓'}`;
-          }
-        }
-
-        saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise, digests: summarizedDigestItems }, pendingSaved || []);
+        saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
       })();
   });
 }
@@ -4628,10 +4563,9 @@ function updateSectionToggleCount(itemEl) {
   if (!itemEl) return;
   const sections = [
     ['when-free-items', 'when-free-toggle', 'Relevant'],
-    ['noise-recent-items', 'noise-recent-toggle', 'Recent'],
-    ['noise-older-items', 'noise-older-toggle', 'Older'],
+    ['noise-recent-items', 'noise-recent-toggle', 'Recent noise'],
+    ['noise-older-items', 'noise-older-toggle', 'Older noise'],
     ['saved-items-list', 'saved-items-toggle', 'Saved'],
-    ['digest-items', 'digests-toggle', 'Digests'],
   ];
   for (const [itemsId, toggleId, label] of sections) {
     const container = document.getElementById(itemsId);

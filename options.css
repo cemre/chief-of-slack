@@ -194,6 +194,15 @@ textarea {
   border-color: #4a154b;
 }
 
+.tier-divider {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #8d8b90;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* ── Advanced / token table ── */
 .advanced {
   background: #fff;

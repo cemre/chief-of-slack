@@ -197,24 +197,26 @@
         if (!name) continue;
         sectionNames.push(name);
         const rule = rules[nameLower] || 'normal';
-        // Collect channel IDs — handle pagination if needed
-        let channelIds = section.channel_ids || [];
-        if (section.channel_ids_page_cursor) {
-          let cursor = section.channel_ids_page_cursor;
-          while (cursor) {
-            try {
-              const page = await slackApi('users.channelSections.list', { cursor });
-              const pageSections = page.channel_sections || [];
-              const matching = pageSections.find((s) => s.channel_section_id === section.channel_section_id);
-              if (matching?.channel_ids?.length) channelIds = [...channelIds, ...matching.channel_ids];
-              cursor = matching?.channel_ids_page_cursor || null;
-            } catch { break; }
-          }
+        // Collect channel IDs — API nests them under channel_ids_page
+        const page = section.channel_ids_page || {};
+        let channelIds = page.channel_ids || section.channel_ids || [];
+        let cursor = page.cursor || null;
+        while (cursor) {
+          try {
+            const resp2 = await slackApi('users.channelSections.list', { cursor, channel_section_id: section.channel_section_id });
+            const pageSections = resp2.channel_sections || [];
+            const matching = pageSections.find((s) => s.channel_section_id === section.channel_section_id);
+            const nextPage = matching?.channel_ids_page || {};
+            if (nextPage.channel_ids?.length) channelIds = [...channelIds, ...nextPage.channel_ids];
+            cursor = nextPage.cursor || null;
+          } catch { break; }
         }
         for (const cid of channelIds) result[cid] = rule;
       }
       // Store section names for the options page
       try { localStorage.setItem('fslackSectionNames', JSON.stringify(sectionNames)); } catch {}
+      // Pass through virtual section rules
+      if (rules['__bot_only']) result['__bot_only'] = rules['__bot_only'];
     } catch (err) {
       console.warn(`[${FSLACK}] fetchSidebarSections failed:`, err);
       if (cached?.data) return cached.data;

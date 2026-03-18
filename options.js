@@ -30,13 +30,17 @@ const TOKEN_LABELS = {
 };
 
 // ── Load saved settings ──
-const RULE_OPTIONS = [
-  { value: 'normal', label: 'Normal — AI decides priority' },
-  { value: 'floor_priority', label: 'Floor: priority — never below priority' },
-  { value: 'floor_whenfree', label: 'Floor: when free — never drops to noise' },
-  { value: 'high_volume', label: 'High-volume — only 10+ reply threads' },
-  { value: 'hard_noise', label: 'Always noise — skip AI, straight to noise' },
-  { value: 'skip', label: 'Skip — don\'t process at all' },
+const RULE_GROUPS = [
+  { group: 'AI decides, with a floor', options: [
+    { value: 'floor_priority', label: 'Priority' },
+    { value: 'floor_whenfree', label: 'Floor: Relevant' },
+    { value: 'normal', label: 'Floor: Noise' },
+  ]},
+  { group: 'Fixed rule', options: [
+    { value: 'high_volume', label: 'High-volume (5+ replies → Relevant)' },
+    { value: 'hard_noise', label: 'Noise' },
+    { value: 'skip', label: 'Exclude' },
+  ]},
 ];
 
 chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog'], (result) => {
@@ -68,17 +72,27 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
       if (aHasRule !== bHasRule) return aHasRule - bHasRule;
       return a.localeCompare(b);
     });
+    function buildRuleSelect(key, currentRule) {
+      return RULE_GROUPS.map((g) =>
+        `<optgroup label="${g.group}">${g.options.map((o) =>
+          `<option value="${o.value}"${o.value === currentRule ? ' selected' : ''}>${o.label}</option>`
+        ).join('')}</optgroup>`
+      ).join('');
+    }
     for (const name of sorted) {
       const key = name.toLowerCase();
       const currentRule = savedRules[key] || defaultRules[key] || 'normal';
       const row = document.createElement('div');
       row.className = 'tier-row';
-      const optionsHtml = RULE_OPTIONS.map((o) =>
-        `<option value="${o.value}"${o.value === currentRule ? ' selected' : ''}>${o.label}</option>`
-      ).join('');
-      row.innerHTML = `<span class="section-name">${name}</span><select data-section="${key}">${optionsHtml}</select>`;
+      row.innerHTML = `<span class="section-name">${name}</span><select data-section="${key}">${buildRuleSelect(key, currentRule)}</select>`;
       tierMapEl.appendChild(row);
     }
+
+    const botRule = savedRules['__bot_only'] || 'high_volume';
+    const botRow = document.createElement('div');
+    botRow.className = 'tier-row';
+    botRow.innerHTML = `<span class="section-name">\u{1F916} Bot-only channels</span><select data-section="__bot_only">${buildRuleSelect('__bot_only', botRule)}</select>`;
+    tierMapEl.appendChild(botRow);
   }
 
   // Render token table
