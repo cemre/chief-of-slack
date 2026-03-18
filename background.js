@@ -57,6 +57,7 @@ chrome.runtime.onConnect.addListener((port) => {
 // fslack:* messages from content script get forwarded to side panel port
 // LLM messages (prioritize, summarize, etc.) are handled directly below
 const LLM_TYPES = new Set([
+  `${FSLACK}:batchSummarize`,
   `${FSLACK}:prioritize`,
   `${FSLACK}:summarize`,
   `${FSLACK}:summarizeVip`,
@@ -121,7 +122,7 @@ function buildPrompt(items, selfName, identity, vipNames) {
 
   const serialized = JSON.stringify(items, null, 0);
 
-  return `You are a Slack message prioritizer for a busy engineer. Classify each item into exactly one category.
+  return `You are a Slack message prioritizer for a busy engineer. Each item has a pre-generated summary. Classify each into exactly one category.
 ${identity.nameClause}
 ${vipList ? `VIPs (messages from these people get higher priority): ${vipList}` : ''}
 
@@ -131,16 +132,14 @@ SIDEBAR RULES: Items may include a "sidebarSection" field indicating the channel
 - "normal" = no special rule — use your judgment
 
 CONTEXT:
-- If I posted or replied in a thread (userReplied=true) and someone then asks a question — even without @mentioning me — treat it as a question directed at me.
-- If I asked a question in my reply (userReplied=true) and someone answers it or gives a status update in response, classify as at least when_free — I want to see the answer to my question.
-- A bare @mention with no question or explicit request (e.g. "thanks @gem" or a signature "@gem") should NOT become act_now. Only treat a mention as act_now when it includes a question mark or clear ask ("@gem can you...", "@gem do you know...?").
-- "recentContext" contains earlier messages I already read — use them to understand the conversation flow. "newReplies" are the unread messages I haven't seen yet.
-- When writing reasons, describe what the NEW unread messages say, not what I already said. If someone completed something I asked for, say "[person] completed [thing]" not "[person] needs you to [thing]".
+- If I posted or replied in a thread (userReplied=true) and someone asks a question or needs something — treat it as directed at me.
+- If userReplied=true and someone answers a question I asked, classify as at least when_free.
+- A bare @mention with no question or request should NOT become act_now. Only treat a mention as act_now when it includes a clear ask.
 
 CATEGORIES:
-- "drop": I already replied in this thread (userReplied=true) AND the new messages are just acknowledgments, +1s, emoji reactions, or the conversation continuing without needing me. Do NOT drop if someone asks a question, needs me to unblock something, or is answering a question I asked.
-- "act_now": Someone is BLOCKED on me or explicitly waiting — direct question, review/approval request, can't proceed without my input. Also use act_now when someone @mentions me AND asks me to confirm, verify, check, or weigh in on something — they're waiting for my response, not just tagging me for visibility.
-- "priority": Needs my attention soon — warrants a response but nobody is stuck right now. Use for @mentions that are purely informational (e.g. FYI, CC, looping me in) where nobody is waiting on me.
+- "drop": I already replied (userReplied=true) AND the new messages are just acknowledgments or chatter not needing me. Do NOT drop if someone asks a question, needs me to unblock something, or answers my question.
+- "act_now": Someone is BLOCKED on me or explicitly waiting — direct question, review/approval request, can't proceed without my input.
+- "priority": Needs my attention soon — warrants a response but nobody is stuck right now. Use for informational @mentions (FYI, CC).
 - "when_free": Something I could usefully respond to or should be aware of, but not urgent.
 - "noise": Chatter not directed at me, announcements, automated posts, things that don't need a response.
 
@@ -162,7 +161,8 @@ Respond with ONLY a JSON object mapping each item's "id" to its [category, summa
 
 // ── Token limit defaults ──
 const TOKEN_DEFAULTS = {
-  prioritize: 2000,
+  batchSummarize: 2048,
+  prioritize: 4096,
   channelSummary: 150,
   vipSummary: 300,
   threadReply: 200,
@@ -220,11 +220,38 @@ async function callClaude(apiKey, prompt, limitKey, limits) {
 
   const data = await resp.json();
   trackUsage(limitKey, data.usage);
+
+  if (data.stop_reason === 'max_tokens') {
+    console.warn(`[fslack bg] max_tokens truncation (${limitKey}): ${data.usage?.output_tokens} tokens used`);
+    // Try to salvage partial JSON by closing the truncated object
+    const text = (data.content?.[0]?.text || '').trim();
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    // Remove trailing incomplete entry (after last complete comma-separated value)
+    const lastGoodComma = cleaned.lastIndexOf('],');
+    if (lastGoodComma > 0) {
+      const salvaged = cleaned.slice(0, lastGoodComma + 1) + '}';
+      try {
+        const parsed = JSON.parse(salvaged);
+        console.log(`[fslack bg] salvaged ${Object.keys(parsed).length} items from truncated response`);
+        return { parsed, text, truncated: true };
+      } catch {}
+    }
+    return { error: 'max_tokens', raw: text };
+  }
+
   const text = data.content?.[0]?.text || '';
   const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
   const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return { error: 'parse_error', raw: text };
-  return { parsed: JSON.parse(jsonMatch[0]), text };
+  if (!jsonMatch) {
+    console.warn('[fslack bg] parse_error — raw LLM response:', text.slice(0, 500));
+    return { error: 'parse_error', raw: text };
+  }
+  try {
+    return { parsed: JSON.parse(jsonMatch[0]), text };
+  } catch (e) {
+    console.warn('[fslack bg] JSON.parse failed:', e.message, '— raw:', jsonMatch[0].slice(0, 500));
+    return { error: 'parse_error', raw: text };
+  }
 }
 
 // ── Retry wrapper for transient API errors (429/529) ──
@@ -243,7 +270,46 @@ async function fetchWithRetry(url, options) {
   }
 }
 
-// ── Call Claude API ──
+// ── Batch summarize: distill raw items into terse summaries for prioritization ──
+function buildBatchSummarizePrompt(items, identity) {
+  const serialized = JSON.stringify(items, null, 0);
+  return `${identity.nameClause}
+You are summarizing Slack items so they can be prioritized. For each item, write a single terse summary (under 25 words) that preserves signals needed for prioritization:
+
+- WHO is talking and who they're addressing
+- Whether someone is BLOCKED on me, asking me a question, or requesting action
+- Whether I'm @mentioned and what the mention asks for
+- Whether someone answered a question I asked (if userReplied=true)
+- The topic/subject
+
+"recentContext" = messages I already read (for conversation flow). "newReplies" / "messages" = the unread messages.
+Focus the summary on the UNREAD messages, referencing context only to explain what they're responding to.
+
+ITEMS:
+${serialized}
+
+Respond with ONLY a JSON object mapping each item's "id" to its summary string.
+No explanation, no markdown fences, just the JSON object.`;
+}
+
+async function handleBatchSummarize(items) {
+  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
+  if (!claudeApiKey) return { error: 'no_api_key' };
+
+  const identity = await getIdentity();
+  const limits = await getTokenLimits();
+  const prompt = buildBatchSummarizePrompt(items, identity);
+
+  try {
+    const result = await callClaude(claudeApiKey, prompt, 'batchSummarize', limits);
+    if (result.error) return result;
+    return { summaries: result.parsed };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+// ── Call Claude API for prioritization ──
 async function handlePrioritize(payload, selfName) {
   const { claudeApiKey, vipNames } = await chrome.storage.local.get(['claudeApiKey', 'vipNames']);
   if (!claudeApiKey) return { error: 'no_api_key' };
@@ -336,11 +402,14 @@ Bad: "Josh asked why the /auth endpoint is returning 403s in staging." (uses nam
 Use direct, terse language. No filler. No names.
 If a bullet seems particularly relevant to me (mentions my work, my team, something I should act on), prefix it with "*" — otherwise no prefix.
 
+Each message has "channel" and "ts" fields. For each bullet, prefix it with the channel and ts of the most relevant message in square brackets, like: "[general:1773771342.788049] Asking why /auth returns 403s in staging"
+Use the exact channel and ts values from the messages array.
+
 MESSAGES:
 ${serialized}
 
 Respond with ONLY a JSON object:
-{"bullets": ["...", "*relevant bullet", "..."]}
+{"bullets": ["[channel:ts] ...", "*[channel:ts] relevant bullet", "..."]}
 No explanation, no markdown fences, just the JSON object.`;
 }
 
@@ -606,6 +675,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   // LLM handlers (from side panel or content script)
+  if (msg.type === `${FSLACK}:batchSummarize`) {
+    handleBatchSummarize(msg.data).then(sendResponse);
+    return true;
+  }
   if (msg.type === `${FSLACK}:prioritize`) {
     handlePrioritize(msg.data, msg.selfName).then(sendResponse);
     return true; // async response

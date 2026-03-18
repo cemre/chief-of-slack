@@ -345,6 +345,8 @@ let _summaryCache = {};
 let _vipSummaryCache = {};
 // All summary types: keyed by "type:channelId:ts"
 let _allSummaryCache = {};
+// Per-item batch summaries: keyed by djb2 hash of serialized item → summary string
+let _itemSummaryCache = {};
 
 // Simple string hash (djb2)
 function djb2Hash(str) {
@@ -356,11 +358,12 @@ function djb2Hash(str) {
 }
 
 // Load LLM caches from chrome.storage.local
-chrome.storage.local.get(['fslackPrioritizationCache', 'fslackSummaryCache', 'fslackVipSummaryCache', 'fslackAllSummaryCache'], (cached) => {
+chrome.storage.local.get(['fslackPrioritizationCache', 'fslackSummaryCache', 'fslackVipSummaryCache', 'fslackAllSummaryCache', 'fslackItemSummaryCache'], (cached) => {
   if (cached.fslackPrioritizationCache) _prioritizationCache = cached.fslackPrioritizationCache;
   if (cached.fslackSummaryCache) _summaryCache = cached.fslackSummaryCache;
   if (cached.fslackVipSummaryCache) _vipSummaryCache = cached.fslackVipSummaryCache;
   if (cached.fslackAllSummaryCache) _allSummaryCache = cached.fslackAllSummaryCache;
+  if (cached.fslackItemSummaryCache) _itemSummaryCache = cached.fslackItemSummaryCache;
 });
 
 // Preload custom emoji + channel names from cache for instant render on showFromCache()
@@ -917,6 +920,11 @@ function cleanSlackText(text, users) {
 }
 
 function applyMrkdwn(html) {
+  // Inline code: `text` (extract first so content is protected from bold/italic/strike)
+  html = html.replace(/(<[^>]*>)|`([^`\n]+)`/g, (match, tag, code) => {
+    if (tag) return tag;
+    return `<code>${code}</code>`;
+  });
   // Bold: *text* (skip inside HTML tags)
   html = html.replace(/(<[^>]*>)|\*([^*\n]+)\*/g, (match, tag, text) => {
     if (tag) return tag;
@@ -1157,9 +1165,9 @@ function uname(uid, users) {
   return users[uid] || uid;
 }
 
-function userLink(name, channel, ts) {
+function userLink(name, channel, ts, threadTs) {
   if (!channel || !ts) return `<span class="item-user">${name}:</span>`;
-  const href = slackPermalink(channel, ts);
+  const href = slackPermalink(channel, ts, threadTs);
   return `<a class="item-user" data-channel="${channel}" data-ts="${ts}" href="${href}" target="_blank">${name}:</a>`;
 }
 
@@ -1286,16 +1294,18 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   return `<div class="msg-actions"><span class="action-btn action-react${likeClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍<kbd>L</kbd></span><span class="action-btn action-react${heartClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="Heart">💛<kbd>H</kbd></span><span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save">${bookmarkSvg}<kbd>S</kbd></span>${replyBtn}</div>`;
 }
 
-function slackPermalink(channel, ts) {
+function slackPermalink(channel, ts, threadTs) {
   if (!channel || !ts) return '';
-  return `https://app.slack.com/archives/${channel}/p${ts.replace('.', '')}`;
+  let url = `https://app.slack.com/archives/${channel}/p${ts.replace('.', '')}`;
+  if (threadTs && threadTs !== ts) url += `?thread_ts=${threadTs}&cid=${channel}`;
+  return url;
 }
 
-function msgTime(ts, channel) {
+function msgTime(ts, channel, threadTs) {
   const t = formatTimeTooltip(ts);
   if (!t) return '';
   const attrs = channel && ts ? ` data-channel="${channel}" data-ts="${ts}"` : '';
-  const href = slackPermalink(channel, ts);
+  const href = slackPermalink(channel, ts, threadTs);
   if (href) return `<a class="msg-time"${attrs} href="${href}" target="_blank">${t}</a>`;
   return `<span class="msg-time"${attrs}>${t}</span>`;
 }
@@ -1463,7 +1473,7 @@ function renderThreadItem(t, data, cssClass) {
     const _urtid = truncateId;
     const rTextHtml = truncate(r.text, 1000, data.users);
     const rExtras = wrapFilesIfTruncated(_urtid, renderFwd(r.fwd, data.users), renderFiles(r.files));
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts)} ${rTextHtml}${rExtras}${msgTime(r.ts, t.channel_id)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data.users), t.channel_id, r.ts, t.ts)} ${rTextHtml}${rExtras}${msgTime(r.ts, t.channel_id, t.ts)}</div>${msgActions(t.channel_id, r.ts)}</div>`;
   }
 
   if (shouldSummarize) {
@@ -3014,7 +3024,7 @@ bodyEl.addEventListener('click', (e) => {
             const _lrtid = truncateId;
             const lrTextHtml = truncate(r.text, 400, rd?.users);
             const lrExtras = wrapFilesIfTruncated(_lrtid, renderFwd(r.fwd, rd?.users), renderFiles(r.files));
-            html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${lrTextHtml}${lrExtras}${msgTime(r.ts, channel)}</div>${msgActions(channel, r.ts)}</div>`;
+            html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts, ts)} ${lrTextHtml}${lrExtras}${msgTime(r.ts, channel, ts)}</div>${msgActions(channel, r.ts)}</div>`;
           }
           msgsDiv.innerHTML = html;
           msgsDiv.style.display = 'block';
@@ -3179,7 +3189,7 @@ function renderNextSeenRepliesChunk(toggle, container) {
     const _srtid = truncateId;
     const srTextHtml = truncate(r.text, 400, data?.users);
     const srExtras = wrapFilesIfTruncated(_srtid, renderFwd(r.fwd, data?.users), renderFiles(r.files));
-    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, toggle.dataset.channel, r.ts)} ${srTextHtml}${srExtras}${msgTime(r.ts, toggle.dataset.channel)}</div>${msgActions(toggle.dataset.channel, r.ts)}</div>`;
+    html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, toggle.dataset.channel, r.ts, toggle.dataset.ts)} ${srTextHtml}${srExtras}${msgTime(r.ts, toggle.dataset.channel, toggle.dataset.ts)}</div>${msgActions(toggle.dataset.channel, r.ts)}</div>`;
   }
   container.insertAdjacentHTML('beforeend', html);
   container.style.display = '';
@@ -3436,13 +3446,23 @@ async function kickoffVipSection(data) {
     }
     const vipHref = vip.messages[0]?.permalink || '#';
     // Bullets prefixed with * are marked relevant — render with an indicator
+    // Bullets may have [channel:ts] prefix for linking to specific messages
     const bullets = result?.bullets || [];
     const bulletsHtml = bullets.map((b) => {
       const isRelevant = b.startsWith('*');
-      const text = isRelevant ? b.slice(1).trim() : b;
-      return isRelevant
-        ? `<li class="vip-bullet-relevant">${escapeHtml(text)}</li>`
-        : `<li>${escapeHtml(text)}</li>`;
+      let text = isRelevant ? b.slice(1).trim() : b;
+      const refMatch = text.match(/^\[([^:\]]+):(\d+\.\d+)\]\s*/);
+      const liClass = isRelevant ? ' class="vip-bullet-relevant"' : '';
+      if (refMatch) {
+        const channel = refMatch[1];
+        const ts = refMatch[2];
+        text = text.slice(refMatch[0].length);
+        // Resolve channel name to ID if needed (messages use name, permalink needs ID)
+        const channelId = vip.messages.find(m => (m.channel_name === channel || m.channel_id === channel))?.channel_id || channel;
+        const href = slackPermalink(channelId, ts);
+        return `<li${liClass}><a class="summary-bullet-link" href="${href}" target="_blank" data-channel="${channelId}" data-ts="${ts}">${escapeHtml(text)}</a></li>`;
+      }
+      return `<li${liClass}>${escapeHtml(text)}</li>`;
     }).join('');
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
@@ -3851,15 +3871,6 @@ function prioritizeAndRender(data) {
   myReactionsMap = buildMyReactionsMap(data);
   const preFiltered = applyPreFilters(data);
   const { forLlm } = preFiltered;
-  const meta = data.channelMeta || {};
-
-  // Split channel posts: private go in call 1 (with threads/DMs), public go in call 2
-  const privateChannelPosts = forLlm.channelPosts.filter((cp) => meta[cp.channel_id]?.isPrivate);
-  const publicChannelPosts = forLlm.channelPosts.filter((cp) => !meta[cp.channel_id]?.isPrivate);
-  // Reorder so private come first — mapPriorities uses array index for IDs
-  forLlm.channelPosts = [...privateChannelPosts, ...publicChannelPosts];
-  const privateCount = privateChannelPosts.length;
-
   const totalItems = forLlm.threads.length + forLlm.dms.length + forLlm.channelPosts.length;
 
   if (totalItems === 0) {
@@ -3891,24 +3902,28 @@ function prioritizeAndRender(data) {
   }
 
   // Show loading while LLM works
-  bodyEl.innerHTML = '<div id="status"><div class="detail">Analyzing messages with AI...</div></div>';
+  bodyEl.innerHTML = '<div id="status"><div class="detail">Summarizing messages...</div></div>';
 
   const selfName = data.users?.[data.selfId] || '';
 
-  // Call 1: threads, DMs, private channels (act_now/priority/when_free/noise)
-  const importantItems = serializeForLlm(
-    { threads: forLlm.threads, dms: forLlm.dms, channelPosts: privateChannelPosts },
-    data, 0
-  );
-  // Call 2: public channels only (when_free vs noise — noise ones get deep summarization)
-  const publicItems = serializeForLlm(
-    { threads: [], dms: [], channelPosts: publicChannelPosts },
-    data, privateCount
-  );
+  // Serialize all items for batch summarization
+  const allItems = serializeForLlm(forLlm, data, 0);
 
-  // #7: Content-hash dedup — skip Claude calls if payload unchanged
-  const importantHash = djb2Hash(JSON.stringify(importantItems));
-  const publicHash = djb2Hash(JSON.stringify(publicItems));
+  // #7: Content-hash dedup — skip calls if payload unchanged
+  const allHash = djb2Hash(JSON.stringify(allItems));
+
+  // ── Batch summarize → lean prioritize pipeline ──
+  const ITEMS_PER_BATCH = 50; // ~30 tokens output per summary, 50 * 30 = 1500 < 2048 limit
+
+  function sendBatchSummarize(batch) {
+    return new Promise((resolve) => {
+      if (batch.length === 0) { resolve({ summaries: {} }); return; }
+      chrome.runtime.sendMessage({ type: `${FSLACK}:batchSummarize`, data: batch }, (resp) => {
+        if (chrome.runtime.lastError) { resolve({ error: 'extension_error' }); return; }
+        resolve(resp);
+      });
+    });
+  }
 
   function sendPrioritize(items) {
     return new Promise((resolve) => {
@@ -3920,70 +3935,127 @@ function prioritizeAndRender(data) {
     });
   }
 
-  // #9: Merge prioritization calls when total items ≤ 50 (saves 1 API call)
-  let prioritizePromise;
-  if (totalItems <= 50 && importantItems.length > 0 && publicItems.length > 0) {
-    const allItems = [...importantItems, ...publicItems];
-    const allHash = djb2Hash(JSON.stringify(allItems));
-    if (_prioritizationCache && _prioritizationCache.allHash === allHash) {
-      console.log('[fslack] Prioritization cache HIT (merged) — skipping Claude call');
-      prioritizePromise = Promise.resolve([_prioritizationCache.result, { priorities: {}, noiseOrder: [] }]);
-    } else {
-      prioritizePromise = sendPrioritize(allItems).then((resp) => {
-        if (!resp?.error) {
-          _prioritizationCache = { allHash, importantHash: null, publicHash: null, result: resp };
-          chrome.storage.local.set({ fslackPrioritizationCache: _prioritizationCache });
-        }
-        return [resp, { priorities: {}, noiseOrder: [] }];
-      });
-    }
-  } else if (_prioritizationCache && _prioritizationCache.importantHash === importantHash && _prioritizationCache.publicHash === publicHash) {
-    console.log('[fslack] Prioritization cache HIT — skipping 2 Claude calls');
-    prioritizePromise = Promise.resolve([_prioritizationCache.importantResult, _prioritizationCache.publicResult]);
-  } else {
-    prioritizePromise = Promise.all([sendPrioritize(importantItems), sendPrioritize(publicItems)]).then(([iResp, pResp]) => {
-      if (!iResp?.error && !pResp?.error) {
-        _prioritizationCache = { importantHash, publicHash, allHash: null, importantResult: iResp, publicResult: pResp };
-        chrome.storage.local.set({ fslackPrioritizationCache: _prioritizationCache });
-      }
-      return [iResp, pResp];
+  // Build lean items for prioritization (metadata + summary, no raw text)
+  function buildLeanItems(items, summaries) {
+    return items.map((item) => {
+      const lean = {
+        id: item.id,
+        type: item.type,
+        summary: summaries[item.id] || '(no summary)',
+      };
+      if (item.channel) lean.channel = item.channel;
+      if (item.isPrivate) lean.isPrivate = true;
+      if (item.isMentioned) lean.isMentioned = true;
+      if (item.sidebarSection && item.sidebarSection !== 'normal') lean.sidebarSection = item.sidebarSection;
+      if (item.userReplied) lean.userReplied = true;
+      if (item.isGroup) lean.isGroup = true;
+      if (item.participants) lean.participants = item.participants;
+      if (item.mentionCount) lean.mentionCount = item.mentionCount;
+      return lean;
     });
   }
 
-  prioritizePromise.then(([importantResp, publicResp]) => {
-      if (importantResp?.error === 'extension_error' || publicResp?.error === 'extension_error') {
-        render(data);
-        return;
-      }
+  function handleLlmError(error, stage) {
+    if (error === 'extension_error') { render(data); return; }
+    if (error === 'no_api_key') { showApiKeyPrompt(data); return; }
+    console.warn(`FSlack ${stage} error:`, error);
+    if (cachedView?.prioritized) {
+      renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
+      const banner = document.createElement('div');
+      banner.className = 'warning-banner';
+      banner.textContent = 'Showing cached results (API temporarily unavailable)';
+      bodyEl.insertBefore(banner, bodyEl.firstChild);
+    } else {
+      render(data);
+      const banner = document.createElement('div');
+      banner.className = 'warning-banner';
+      banner.textContent = `${stage} unavailable: ${error}`;
+      bodyEl.insertBefore(banner, bodyEl.firstChild);
+    }
+  }
 
-      if (importantResp?.error === 'no_api_key' || publicResp?.error === 'no_api_key') {
-        showApiKeyPrompt(data);
-        return;
-      }
+  // Check full pipeline cache
+  if (_prioritizationCache && _prioritizationCache.allHash === allHash) {
+    console.log('[fslack] Pipeline cache HIT — skipping summarize + prioritize');
+    handlePrioritizeResult(_prioritizationCache.result);
+    return;
+  }
 
-      const firstError = importantResp?.error || publicResp?.error;
-      if (firstError) {
-        console.warn('FSlack prioritization error:', firstError);
-        // Fall back to cached priorities if available
-        if (cachedView?.prioritized) {
-          renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
-          const banner = document.createElement('div');
-          banner.className = 'warning-banner';
-          banner.textContent = 'Showing cached results (API temporarily unavailable)';
-          bodyEl.insertBefore(banner, bodyEl.firstChild);
-        } else {
-          render(data);
-          const banner = document.createElement('div');
-          banner.className = 'warning-banner';
-          banner.textContent = `Prioritization unavailable: ${firstError}`;
-          bodyEl.insertBefore(banner, bodyEl.firstChild);
-        }
-        return;
-      }
+  // Per-item summary cache: hash each item, reuse cached summaries, only send uncached items
+  // Cache entries: { hash: { s: summary, t: timestamp } }
+  const cachedSummaries = {};
+  const uncachedItems = [];
+  const now = Date.now();
+  for (const item of allItems) {
+    const itemHash = djb2Hash(JSON.stringify(item));
+    item._hash = itemHash; // store for later cache update
+    const cached = _itemSummaryCache[itemHash];
+    if (cached?.s) {
+      cachedSummaries[item.id] = cached.s;
+      cached.t = now; // touch for LRU
+    } else {
+      uncachedItems.push(item);
+    }
+  }
+  console.log(`[fslack] Item summary cache: ${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} need summarization`);
 
-      const mergedPriorities = { ...importantResp.priorities, ...publicResp.priorities };
-      const mergedNoiseOrder = [...(importantResp.noiseOrder || []), ...(publicResp.noiseOrder || [])];
-      const mergedReasons = { ...(importantResp.reasons || {}), ...(publicResp.reasons || {}) };
+  // Split uncached items into batches for parallel summarization
+  const batches = [];
+  for (let i = 0; i < uncachedItems.length; i += ITEMS_PER_BATCH) {
+    batches.push(uncachedItems.slice(i, i + ITEMS_PER_BATCH));
+  }
+
+  // Step 1: Parallel batch summarize (only uncached items)
+  const summarizePromise = batches.length > 0
+    ? Promise.all(batches.map(sendBatchSummarize))
+    : Promise.resolve([]);
+
+  summarizePromise.then((batchResults) => {
+    const firstError = batchResults.find((r) => r?.error);
+    if (firstError) { handleLlmError(firstError.error, 'Summarization'); return; }
+
+    // Merge cached + fresh summaries
+    const summaries = { ...cachedSummaries };
+    for (const r of batchResults) Object.assign(summaries, r.summaries || {});
+
+    // Update per-item cache with fresh summaries
+    const MAX_ITEM_SUMMARY_CACHE = 500;
+    let cacheUpdated = false;
+    for (const item of uncachedItems) {
+      if (summaries[item.id] && item._hash) {
+        _itemSummaryCache[item._hash] = { s: summaries[item.id], t: now };
+        cacheUpdated = true;
+      }
+    }
+    // Evict oldest entries if cache exceeds max size
+    const keys = Object.keys(_itemSummaryCache);
+    if (keys.length > MAX_ITEM_SUMMARY_CACHE) {
+      keys.sort((a, b) => (_itemSummaryCache[a].t || 0) - (_itemSummaryCache[b].t || 0));
+      const toRemove = keys.length - MAX_ITEM_SUMMARY_CACHE;
+      for (let i = 0; i < toRemove; i++) delete _itemSummaryCache[keys[i]];
+      cacheUpdated = true;
+    }
+    if (cacheUpdated) chrome.storage.local.set({ fslackItemSummaryCache: _itemSummaryCache });
+
+    console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
+
+    // Step 2: Single lean prioritize call
+    bodyEl.innerHTML = '<div id="status"><div class="detail">Prioritizing...</div></div>';
+    const leanItems = buildLeanItems(allItems, summaries);
+    return sendPrioritize(leanItems).then((resp) => {
+      if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
+
+      // Cache the full pipeline result
+      _prioritizationCache = { allHash, result: resp };
+      chrome.storage.local.set({ fslackPrioritizationCache: _prioritizationCache });
+      handlePrioritizeResult(resp);
+    });
+  });
+
+  function handlePrioritizeResult(resp) {
+      const mergedPriorities = resp.priorities || {};
+      const mergedNoiseOrder = resp.noiseOrder || [];
+      const mergedReasons = resp.reasons || {};
 
       const prioritized = mapPriorities(mergedPriorities, forLlm, preFiltered.noise, preFiltered.whenFree, data, mergedReasons);
       prioritized.digests = preFiltered.digests;
@@ -4241,7 +4313,7 @@ function prioritizeAndRender(data) {
 
         saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
       })();
-  });
+  }
 }
 
 // ── Fallback: unprioritized render (original 3-section layout) ──
@@ -4277,7 +4349,7 @@ function render(data) {
         const _frtid = truncateId;
         const frTextHtml = truncate(r.text, 1000, users);
         const frExtras = wrapFilesIfTruncated(_frtid, renderFwd(r.fwd, users), renderFiles(r.files));
-        html += `<div class="item-reply">${userLink(uname(r.user, users), t.channel_id, r.ts)} ${frTextHtml}${frExtras}</div>`;
+        html += `<div class="item-reply">${userLink(uname(r.user, users), t.channel_id, r.ts, t.ts)} ${frTextHtml}${frExtras}</div>`;
       }
       html += '</div></div>';
     }
@@ -4488,7 +4560,7 @@ function handleRepliesResult(msg) {
       const _trtid = truncateId;
       const trTextHtml = truncate(r.text, 400, data?.users);
       const trExtras = wrapFilesIfTruncated(_trtid, renderFwd(r.fwd, data?.users), renderFiles(r.files));
-      html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts)} ${trTextHtml}${trExtras}${msgTime(r.ts, channel)}</div>${msgActions(channel, r.ts)}</div>`;
+      html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(userName, channel, r.ts, ts)} ${trTextHtml}${trExtras}${msgTime(r.ts, channel, ts)}</div>${msgActions(channel, r.ts)}</div>`;
     }
     container.innerHTML = html;
     container.style.display = '';
