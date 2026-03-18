@@ -300,11 +300,13 @@ Good: "cory shipped an org-admin CLI for provisioning and flagged that golden-tr
 For automated channels, name the specific repos, tickets, or people involved.
 Omit filler. Use first names only. No passive voice.
 
+Each message has a "ts" field. For each bullet, prefix it with the ts of the most relevant message in square brackets, e.g. "[1773771342.788049] cory shipped the new CLI"
+
 MESSAGES:
 ${serialized}
 
 Respond with ONLY a JSON object:
-{"bullets": ["...", "..."]}
+{"bullets": ["[ts] ...", "[ts] ..."]}
 No explanation, no markdown fences, just the JSON object.`;
 }
 
@@ -467,10 +469,12 @@ Use first names only. Be concrete — name the specific artifact, issue, or topi
 Combine multiple small messages from the same person into one bullet when possible.
 If fewer than 3 distinct topics, use fewer bullets.
 
+Each message has a "ts" field. For each bullet, include the ts of the most relevant message in square brackets at the start, like: "- [1773771342.788049] cory shipped the new CLI"
+
 MESSAGES:
 ${serialized}
 
-Respond with ONLY a JSON object: {"summary": "- bullet1\\n- bullet2\\n- bullet3"}
+Respond with ONLY a JSON object: {"summary": "- [ts] bullet1\\n- [ts] bullet2\\n- [ts] bullet3"}
 No markdown fences, no explanation.`;
 }
 

@@ -1325,8 +1325,25 @@ function reasonBadge(item, cssClass) {
 }
 
 // Shared toggle structure: bullet summary (clickable) → hidden messages
+// Parse channel summary bullet, extracting optional [ts] prefix for linking
+function renderChannelSummaryBullet(bullet, channelId) {
+  const stripped = bullet.replace(/^-\s*/, '');
+  const tsMatch = stripped.match(/^\[(\d+\.\d+)\]\s*/);
+  if (tsMatch && channelId) {
+    const ts = tsMatch[1];
+    const text = stripped.slice(tsMatch[0].length);
+    const href = slackPermalink(channelId, ts);
+    return `<li><a class="summary-bullet-link" href="${href}" target="_blank" data-channel="${channelId}" data-ts="${ts}">${escapeHtml(text)}</a></li>`;
+  }
+  return `<li>${escapeHtml(stripped)}</li>`;
+}
+
+function renderChannelSummaryBullets(summary, channelId) {
+  return summary.split('\n').filter(b => b.trim()).map(b => renderChannelSummaryBullet(b, channelId)).join('');
+}
+
 function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
-  return `<div class="summary-toggle-group summary-toggle" data-target="${targetId}">`
+  return `<div class="summary-toggle-group" data-target="${targetId}">`
     + `<div class="deep-summary-wrap">${extraContent || ''}<ul class="deep-summary">${bulletsHtml}</ul></div>`
     + `</div>`
     + `<div class="deep-messages" id="${targetId}">${messagesHtml}</div>`;
@@ -1605,7 +1622,7 @@ function renderChannelItem(cp, data, cssClass) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
     }
     if (cp._channelSummary) {
-      const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
+      const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
       html += summaryToggleHtml(csMsgId, bullets, messagesHtml);
     } else {
       html += `<div class="msg-row"><div class="msg-content">
@@ -1663,7 +1680,7 @@ function renderDeepSummarizedItem(cp, data) {
     messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
-  const deepBullets = (cp._deepSummary || '').split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
+  const deepBullets = renderChannelSummaryBullets(cp._deepSummary || '', cp.channel_id);
   const deepOpenHref = slackPermalink(cp.channel_id, newestTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
@@ -3580,11 +3597,12 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
         const messages = cp.messages.map((m) => ({
           user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
           text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+          ts: m.ts,
         }));
         let response;
         try {
           response = await new Promise((resolve) =>
-            chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, messages } }, resolve)
+            chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, channelId: cp.channel_id, messages } }, resolve)
           );
         } catch { continue; }
         if (!response?.summary?.summary) continue;
@@ -3605,7 +3623,7 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       const rightEl = itemEl.querySelector('.item-right');
       const actionsEl = itemEl.querySelector('.item-actions');
       const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
-      const bullets = cp._channelSummary.split('\n').filter(b => b.trim()).map(b => `<li>${escapeHtml(b.replace(/^-\s*/, ''))}</li>`).join('');
+      const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
       rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml) + actionsHtml;
     }
   })();
@@ -4063,13 +4081,14 @@ function prioritizeAndRender(data) {
           const entry = {
             user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
             text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+            ts: m.ts,
           };
           const s = JSON.stringify(entry);
           if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
           messages.push(entry);
           bytes += s.length;
         }
-        return { channel: ch, messages };
+        return { channel: ch, channelId: cp.channel_id, messages };
       }
 
       // #8: Cached summarize — reuse if channelId:latestTs matches

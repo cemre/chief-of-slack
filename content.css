@@ -610,9 +610,10 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .show-messages-link:hover { text-decoration: underline; }
 .deep-messages { display: none; margin-top: 8px; }
 .summary-toggle { cursor: pointer; }
-.summary-toggle-group { cursor: pointer; }
-.summary-toggle-group:hover .deep-summary { color: #d1d2d3; }
+.summary-toggle-group { cursor: default; }
 .summary-reply-count { color: #1d9bd1; }
+.summary-bullet-link { color: inherit; text-decoration: none; }
+.summary-bullet-link:hover { color: #d1d2d3; text-decoration: underline; }
 
 .noise-section-footer {
   padding: 20px 16px;
