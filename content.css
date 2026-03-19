@@ -82,6 +82,8 @@ button {
 }
 button:hover { background: #148567; }
 button:disabled { opacity: 0.5; cursor: wait; }
+#fslack-nav-toggle { background: transparent; color: #662500cc; font-size: 13px; font-weight: 500; padding: 4px 8px; border-radius: 8px; }
+#fslack-nav-toggle:hover { background: rgba(0,0,0,0.04); }
 button.secondary {
   background: transparent;
   border: 1px solid #565856;
@@ -614,6 +616,7 @@ ul.deep-summary { margin: 4px 0; padding-left: 18px; }
 .summary-reply-count { color: #1d9bd1; }
 .summary-bullet-link { color: inherit; text-decoration: none; }
 .summary-bullet-link:hover { color: #d1d2d3; text-decoration: underline; }
+.vip-bullet-relevant .summary-bullet-link, .vip-bullet-relevant .summary-bullet-link:hover { color: #e8912d; }
 
 .noise-section-footer {
   padding: 20px 16px;

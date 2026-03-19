@@ -15,6 +15,7 @@
   let _threadViewCache = null;  // { data, ts }
   let _dmContextCache = {};     // { [channelId]: { lastRead, context } }
   const FAST_CACHE_TTL = 60 * 1000; // 60s
+  let _activityFeedMap = {};  // { "channel:thread_ts_or_ts": { type, feed_ts, key } } — for activity.markRead
 
   // ── Mark-read batching (#5) ──
   let _markReadQueue = [];
@@ -35,6 +36,13 @@
           }
         } else {
           await slackApi('conversations.mark', { channel, ts });
+        }
+        // Dismiss from Slack activity feed if we have metadata for this item
+        const actKey = thread_ts ? `${channel}:${thread_ts}` : `${channel}:${ts}`;
+        const actMeta = _activityFeedMap[actKey];
+        if (actMeta) {
+          await slackApi('activity.markRead', { type: actMeta.type, feed_ts: actMeta.feed_ts, key: actMeta.key }).catch(() => {});
+          delete _activityFeedMap[actKey];
         }
         window.postMessage({ type: `${FSLACK}:markReadResult`, requestId, channel, thread_ts, ok: true }, '*');
       } catch {
@@ -256,6 +264,9 @@
       const missedMentions = []; // { channel, ts } — at_user etc.
       const missedThreads = [];  // { channel_id, thread_ts, unread_msg_count, min_unread_ts }
 
+      // Reset activity feed map for fresh data
+      _activityFeedMap = {};
+
       for (const entry of data.items) {
         const item = entry.item;
         if (!item) continue;
@@ -263,6 +274,12 @@
         if (item.type === 'thread_v2') {
           const te = item.bundle_info?.payload?.thread_entry;
           if (!te?.channel_id || !te?.thread_ts) continue;
+          // Store activity metadata for markRead dismissal
+          _activityFeedMap[`${te.channel_id}:${te.thread_ts}`] = {
+            type: item.type,
+            feed_ts: entry.feed_ts || item.feed_ts,
+            key: entry.key || item.key || `thread_v2-${te.channel_id}-${te.thread_ts}`,
+          };
           if (muted.has(te.channel_id)) continue;
           if (coveredThreads.has(`${te.channel_id}:${te.thread_ts}`)) continue;
           missedThreads.push(te);
@@ -270,6 +287,12 @@
           // at_user, at_user_group, at_channel, at_everyone
           const msg = item.message;
           if (!msg?.channel || !msg?.ts) continue;
+          // Store activity metadata for markRead dismissal
+          _activityFeedMap[`${msg.channel}:${msg.ts}`] = {
+            type: item.type,
+            feed_ts: entry.feed_ts || item.feed_ts,
+            key: entry.key || item.key || `${item.type}-${msg.channel}-${msg.ts}`,
+          };
           if (muted.has(msg.channel)) continue;
           if (coveredChannels.has(msg.channel)) continue;
           missedMentions.push({ channel: msg.channel, ts: msg.ts });

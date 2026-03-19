@@ -22,7 +22,7 @@
   }
 
   // ── Archives pages: /archives/C123[/p1710500000123456] ──
-  const archivesMatch = path.match(/^\/archives\/(C[A-Z0-9]+)(?:\/p(\d+))?/);
+  const archivesMatch = path.match(/^\/archives\/([A-Z][A-Z0-9]+)(?:\/p(\d+))?/);
   if (archivesMatch) {
     const channelId = archivesMatch[1];
     const pTimestamp = archivesMatch[2]; // e.g. "1710500000123456"
@@ -48,7 +48,9 @@
     if (teamId) {
       // /client/TEAM/CHANNEL/TS makes Slack's SPA jump directly to the message
       const tsPath = msgTs ? `/${msgTs}` : '';
-      const target = `https://app.slack.com/client/${teamId}/${channelId}${tsPath}`;
+      const threadTs = url.searchParams.get('thread_ts');
+      const threadQuery = threadTs ? `?thread_ts=${threadTs}` : '';
+      const target = `https://app.slack.com/client/${teamId}/${channelId}${tsPath}${threadQuery}`;
       console.log('[fslack redirect] Archives redirect →', target);
       window.location.replace(target);
       return;
