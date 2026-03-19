@@ -3852,6 +3852,68 @@ function buildMyReactionsMap(data) {
   return map;
 }
 
+// Pre-warm the per-item summary cache in background (no DOM changes)
+function warmSummaryCache(data) {
+  const preFiltered = applyPreFilters(data);
+  const { forLlm } = preFiltered;
+  const totalItems = forLlm.threads.length + forLlm.dms.length + forLlm.channelPosts.length;
+  if (totalItems === 0) return;
+
+  const allItems = serializeForLlm(forLlm, data, 0);
+  const ITEMS_PER_BATCH = 50;
+  const now = Date.now();
+  const uncachedItems = [];
+  for (const item of allItems) {
+    const itemHash = djb2Hash(JSON.stringify(item));
+    item._hash = itemHash;
+    const cached = _itemSummaryCache[itemHash];
+    if (cached?.s) {
+      cached.t = now;
+    } else {
+      uncachedItems.push(item);
+    }
+  }
+  if (uncachedItems.length === 0) {
+    console.log('[fslack] Summary cache warm: all items cached');
+    return;
+  }
+  console.log(`[fslack] Warming summary cache: ${uncachedItems.length} uncached items`);
+  const batches = [];
+  for (let i = 0; i < uncachedItems.length; i += ITEMS_PER_BATCH) {
+    batches.push(uncachedItems.slice(i, i + ITEMS_PER_BATCH));
+  }
+  function sendBatch(batch) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: `${FSLACK}:batchSummarize`, data: batch }, (resp) => {
+        if (chrome.runtime.lastError) { resolve({}); return; }
+        resolve(resp?.summaries || {});
+      });
+    });
+  }
+  Promise.all(batches.map(sendBatch)).then((results) => {
+    const MAX_ITEM_SUMMARY_CACHE = 500;
+    let updated = false;
+    for (const summaries of results) {
+      for (const item of uncachedItems) {
+        if (summaries[item.id] && item._hash) {
+          _itemSummaryCache[item._hash] = { s: summaries[item.id], t: now };
+          updated = true;
+        }
+      }
+    }
+    if (updated) {
+      const keys = Object.keys(_itemSummaryCache);
+      if (keys.length > MAX_ITEM_SUMMARY_CACHE) {
+        keys.sort((a, b) => (_itemSummaryCache[a].t || 0) - (_itemSummaryCache[b].t || 0));
+        const toRemove = keys.length - MAX_ITEM_SUMMARY_CACHE;
+        for (let i = 0; i < toRemove; i++) delete _itemSummaryCache[keys[i]];
+      }
+      chrome.storage.local.set({ fslackItemSummaryCache: _itemSummaryCache });
+    }
+    console.log(`[fslack] Summary cache warmed: ${uncachedItems.length} items pre-summarized`);
+  });
+}
+
 function prioritizeAndRender(data) {
   // Build self-mention regex from Slack handle and cache handle for Claude prompts
   if (data.selfHandle) {
@@ -4468,9 +4530,28 @@ function runPrioritize() {
   fetchBtn.disabled = false;
 
   if (isBackgroundFetch) {
-    // Stage data for user to display on demand
-    stagedRenderData = data;
     isBackgroundFetch = false;
+
+    // Auto-refresh if user hasn't scrolled or expanded anything
+    const hasExpanded = bodyEl.querySelector('.expanded, .is-expanded');
+    const atTop = bodyEl.scrollTop === 0 && document.documentElement.scrollTop === 0;
+    if (atTop && !hasExpanded) {
+      console.log('[fslack] Auto-refresh: scroll at top, nothing expanded');
+      refreshLink.textContent = 'refresh now';
+      refreshLink.style.display = '';
+      lastFetchTime = Date.now();
+      updateLastUpdated();
+      if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+      lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+      fetchBtn.textContent = 'Fetch Unreads';
+      prioritizeAndRender(data);
+      scheduleBackgroundPoll();
+      return;
+    }
+
+    // Pre-warm summary cache in background so click is fast
+    stagedRenderData = data;
+    warmSummaryCache(data);
     refreshLink.textContent = 'new update available';
     refreshLink.classList.add('has-update');
     refreshLink.style.display = '';
