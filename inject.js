@@ -890,6 +890,7 @@
     }
 
     // 7. Custom emoji + sidebar sections
+    progress(7, 'Loading emoji + sidebar...');
     let emoji = cachedEmoji;
     const [emojiResult, sidebarSections] = await Promise.all([
       emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
@@ -1186,6 +1187,7 @@
     for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
 
     // 7. Emoji + sidebar sections
+    progress(7, 'Loading emoji + sidebar...');
     let emoji = cachedEmoji;
     const [emojiResult, sidebarSections] = await Promise.all([
       emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
