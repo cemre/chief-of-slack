@@ -1565,6 +1565,57 @@
       }
     }
 
+    // ── Drafts ──
+    if (msgType === `${FSLACK}:draftCreate`) {
+      const { channel, thread_ts, text, requestId } = event.data;
+      try {
+        const blocks = JSON.stringify([{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text }] }] }]);
+        const destinations = JSON.stringify([{ channel_id: channel }]);
+        const params = { blocks, destinations, file_ids: '[]', attachments: '', is_from_composer: 'false' };
+        if (thread_ts) params.thread_ts = thread_ts;
+        const resp = await slackApi('drafts.create', params);
+        const draft = resp.draft || {};
+        window.postMessage({ type: `${FSLACK}:draftCreateResult`, requestId, ok: true, draft_id: draft.id, last_updated_ts: draft.last_updated_ts }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:draftCreateResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:draftUpdate`) {
+      const { channel, thread_ts, text, draft_id, last_updated_ts, requestId } = event.data;
+      try {
+        const blocks = JSON.stringify([{ type: 'rich_text', elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text }] }] }]);
+        const destinations = JSON.stringify([{ channel_id: channel }]);
+        const params = { blocks, destinations, draft_id, client_last_updated_ts: last_updated_ts, file_ids: '[]', attachments: '', is_from_composer: 'false' };
+        if (thread_ts) params.thread_ts = thread_ts;
+        const resp = await slackApi('drafts.update', params);
+        const draft = resp.draft || {};
+        window.postMessage({ type: `${FSLACK}:draftUpdateResult`, requestId, ok: true, last_updated_ts: draft.last_updated_ts || last_updated_ts }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:draftUpdateResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:draftDelete`) {
+      const { draft_id, last_updated_ts, requestId } = event.data;
+      try {
+        await slackApi('drafts.delete', { draft_id, client_last_updated_ts: last_updated_ts, skip_file_deletion: 'false' });
+        window.postMessage({ type: `${FSLACK}:draftDeleteResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:draftDeleteResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:draftsList`) {
+      const { requestId } = event.data;
+      try {
+        const resp = await slackApi('drafts.list');
+        window.postMessage({ type: `${FSLACK}:draftsListResult`, requestId, ok: true, drafts: resp.drafts || [] }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:draftsListResult`, requestId, ok: false, drafts: [] }, '*');
+      }
+    }
+
     if (msgType === `${FSLACK}:fetchPopular`) {
       try {
         const popular = await fetchPopularMessages();
