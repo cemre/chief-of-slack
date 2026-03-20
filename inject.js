@@ -16,7 +16,6 @@
   let _dmContextCache = {};     // { [channelId]: { lastRead, context } }
   const FAST_CACHE_TTL = 60 * 1000; // 60s
   let _activityFeedMap = {};  // { "channel:thread_ts_or_ts": { type, feed_ts, key } } — for activity.markRead
-
   // ── Mark-read batching (#5) ──
   let _markReadQueue = [];
   let _markReadTimer = null;
@@ -76,11 +75,19 @@
       formData.append(k, v);
     }
 
-    const resp = await fetch(`/api/${endpoint}`, {
-      method: 'POST',
-      body: formData,
-      credentials: 'include',
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let resp;
+    try {
+      resp = await fetch(`/api/${endpoint}`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
     const data = await resp.json();
     if (!data.ok) throw new Error(`Slack API error: ${data.error}`);
     return data;
@@ -209,7 +216,9 @@
         const page = section.channel_ids_page || {};
         let channelIds = page.channel_ids || section.channel_ids || [];
         let cursor = page.cursor || null;
-        while (cursor) {
+        let pageCount = 0;
+        while (cursor && pageCount < 10) {
+          pageCount++;
           try {
             const resp2 = await slackApi('users.channelSections.list', { cursor, channel_section_id: section.channel_section_id });
             const pageSections = resp2.channel_sections || [];
@@ -894,7 +903,7 @@
     let emoji = cachedEmoji;
     const [emojiResult, sidebarSections] = await Promise.all([
       emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
-      fetchSidebarSections(),
+      fetchSidebarSections().catch(() => ({})),
     ]);
     emoji = emojiResult;
 
@@ -1191,7 +1200,7 @@
     let emoji = cachedEmoji;
     const [emojiResult, sidebarSections] = await Promise.all([
       emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
-      fetchSidebarSections(),
+      fetchSidebarSections().catch(() => ({})),
     ]);
     emoji = emojiResult;
 
