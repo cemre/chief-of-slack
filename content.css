@@ -166,6 +166,7 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 .item-actions span:hover, .item-actions a:hover { color: #d1d2d3; }
 .item-actions .mark-all-read.done { color: #4a9c6d; }
 .item-actions .mark-all-read.done:hover { color: #e01e5a; }
+.item-actions .mark-above-read { margin-left: auto; }
 .item-mention {
   font-size: 11px;
   font-weight: 700;
@@ -535,7 +536,19 @@ ul.slack-list, ol.slack-list {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  position: relative;
 }
+.draft-saved {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  font-size: 10px;
+  color: #666;
+  margin-bottom: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.draft-saved.visible { opacity: 1; }
 .reply-image-preview {
   display: none;
   align-items: center;

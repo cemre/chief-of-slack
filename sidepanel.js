@@ -77,6 +77,14 @@ function loadDraftIntoForm(form, input, channel, threadTs) {
   form._draftThreadTs = threadTs;
 }
 
+function _flashDraftSaved(form) {
+  const el = form?.querySelector('.draft-saved');
+  if (!el) return;
+  el.classList.add('visible');
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => el.classList.remove('visible'), 1000);
+}
+
 function _findFormByReqId(requestId) {
   for (const form of bodyEl.querySelectorAll('.reply-form')) {
     if (form._pendingDraftReqId === requestId) return form;
@@ -95,6 +103,7 @@ function handleDraftCreateResult(msg) {
       _slackDrafts[key].draft_id = msg.draft_id;
       _slackDrafts[key].last_updated_ts = msg.last_updated_ts;
     }
+    _flashDraftSaved(form);
   }
 }
 
@@ -105,6 +114,7 @@ function handleDraftUpdateResult(msg) {
     form._draftLastTs = msg.last_updated_ts;
     const key = draftKey(form._draftChannel, form._draftThreadTs);
     if (_slackDrafts[key]) _slackDrafts[key].last_updated_ts = msg.last_updated_ts;
+    _flashDraftSaved(form);
   }
 }
 
@@ -2989,7 +2999,7 @@ bodyEl.addEventListener('click', (e) => {
     const { channel, ts } = msgReplyBtn.dataset;
     const form = document.createElement('div');
     form.className = 'reply-form';
-    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="Reply in thread... (⌘Enter to send)"></textarea><button class="reply-send">Send</button></div>`;
+    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="Reply in thread... (⌘Enter to send)"></textarea><span class="draft-saved">saved</span><button class="reply-send">Send</button></div>`;
     msgRow.insertAdjacentElement('afterend', form);
     const input = form.querySelector('.reply-input');
     for (const evt of ['keydown', 'keyup', 'keypress', 'copy', 'cut', 'input']) {
@@ -3026,7 +3036,7 @@ bodyEl.addEventListener('click', (e) => {
     const form = document.createElement('div');
     form.className = 'reply-form';
     const placeholder = isDm ? 'Send a DM... (⌘Enter to send)' : 'Reply... (⌘Enter to send)';
-    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><button class="reply-send">Send</button></div>`;
+    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><span class="draft-saved">saved</span><button class="reply-send">Send</button></div>`;
     itemActions.insertAdjacentElement('beforebegin', form);
     const input = form.querySelector('.reply-input');
     for (const evt of ['keydown', 'keyup', 'keypress', 'copy', 'cut', 'input']) {
