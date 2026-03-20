@@ -483,6 +483,17 @@ function startFetch(background = false) {
 
   // First-ever fetch or stale cache (>1h): auto-promote to full fetch
   if (!cachedView || (cachedView.ts && Date.now() - cachedView.ts > 60 * 60 * 1000)) {
+    if (background) {
+      // Do full fetch silently — don't wipe the UI
+      console.log(`[fslack] ${!cachedView ? 'No cached view' : 'Cache >1h old'} — background full fetch (no UI wipe)`);
+      resetFetchState();
+      isFastFetch = false;
+      startFetchTimeout();
+      loadCachedPrefs((cachePayload) => {
+        sendToInject({ type: `${FSLACK}:fetch`, ...cachePayload });
+      });
+      return;
+    }
     console.log(`[fslack] ${!cachedView ? 'No cached view' : 'Cache >1h old'} — auto-promoting to full fetch`);
     fetchBtn.disabled = false; // allow startFullFetch to proceed
     startFullFetch();
@@ -1323,6 +1334,7 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused 
     ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
+    <span class="mark-above-read">mark above read</span>
   </div>`;
 }
 
@@ -2764,6 +2776,31 @@ bodyEl.addEventListener('click', (e) => {
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
       markAll.dataset.pending = 'true';
     }
+    return;
+  }
+
+  // Mark all above read
+  const markAbove = e.target.closest('.mark-above-read');
+  if (markAbove) {
+    const thisItem = markAbove.closest('.item');
+    if (!thisItem) return;
+    // Walk backward through preceding .item siblings in the same section
+    let sibling = thisItem.previousElementSibling;
+    let count = 0;
+    while (sibling) {
+      if (sibling.classList.contains('section-toggle') || sibling.classList.contains('noise-section-footer')) break;
+      if (sibling.classList.contains('item')) {
+        const markBtn = sibling.querySelector('.mark-all-read:not(.done):not([data-pending])');
+        if (markBtn) {
+          const { channel, ts, threadTs, hasMention } = markBtn.dataset;
+          markBtn.textContent = '...';
+          markBtn.dataset.pending = 'true';
+          sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_above_${++count}` });
+        }
+      }
+      sibling = sibling.previousElementSibling;
+    }
+    if (count > 0) markAbove.textContent = `✓ ${count} marked`;
     return;
   }
 
@@ -4533,7 +4570,7 @@ function runPrioritize() {
     isBackgroundFetch = false;
 
     // Auto-refresh if user hasn't scrolled or expanded anything
-    const hasExpanded = bodyEl.querySelector('.expanded, .is-expanded');
+    const hasExpanded = bodyEl.querySelector('.expanded, .is-expanded, .reply-form');
     const atTop = bodyEl.scrollTop === 0 && document.documentElement.scrollTop === 0;
     if (atTop && !hasExpanded) {
       console.log('[fslack] Auto-refresh: scroll at top, nothing expanded');
