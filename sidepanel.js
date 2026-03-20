@@ -5,73 +5,54 @@ const FSLACK = 'fslack';
 const SEEN_REPLIES_CHUNK = 10;
 const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
 
-// ── Drafts (auto-save to Slack via drafts.create/update/delete) ──
-// Each form tracks: _draftId, _draftLastTs, _draftChannel, _draftThreadTs
-const DRAFT_SAVE_DELAY = 2000; // ms debounce (Slack rate limits)
+// ── Drafts (local-only, chrome.storage) ──
+let _drafts = {}; // { "channel:threadTs" → "text" }
+const DRAFT_KEY = 'fslackDrafts';
+const DRAFT_SAVE_DELAY = 300; // ms debounce
 const _draftTimers = {};
-let _slackDrafts = {}; // { "channel:threadTs" → { draft_id, last_updated_ts, text } } — loaded from drafts.list on init
 
 function draftKey(channel, threadTs) {
   return `${channel}:${threadTs || 'dm'}`;
 }
 
-function saveDraftToSlack(form, channel, threadTs, text) {
-  const key = draftKey(channel, threadTs);
-  if (!text) {
-    // Delete draft if text is empty and we have an existing draft
-    if (form._draftId) {
-      sendToInject({ type: `${FSLACK}:draftDelete`, draft_id: form._draftId, last_updated_ts: form._draftLastTs || '0', requestId: `draftdel_${Date.now()}` });
-      delete _slackDrafts[key];
-      form._draftId = null;
-      form._draftLastTs = null;
-    }
-    return;
-  }
-  if (form._draftId) {
-    // Update existing draft
-    const reqId = `draftupd_${Date.now()}`;
-    form._pendingDraftReqId = reqId;
-    sendToInject({ type: `${FSLACK}:draftUpdate`, channel, thread_ts: threadTs, text, draft_id: form._draftId, last_updated_ts: form._draftLastTs || '0', requestId: reqId });
-  } else {
-    // Create new draft
-    const reqId = `draftcre_${Date.now()}`;
-    form._pendingDraftReqId = reqId;
-    sendToInject({ type: `${FSLACK}:draftCreate`, channel, thread_ts: threadTs, text, requestId: reqId });
-  }
-  _slackDrafts[key] = { draft_id: form._draftId, last_updated_ts: form._draftLastTs, text };
+function _persistDrafts() {
+  chrome.storage.local.set({ [DRAFT_KEY]: _drafts });
 }
 
-function saveDraftDebounced(form, channel, threadTs, text) {
+function saveDraft(channel, threadTs, text) {
+  const key = draftKey(channel, threadTs);
+  if (!text) {
+    delete _drafts[key];
+  } else {
+    _drafts[key] = text;
+  }
+  _persistDrafts();
+}
+
+function saveDraftDebounced(channel, threadTs, text) {
   const key = draftKey(channel, threadTs);
   clearTimeout(_draftTimers[key]);
-  _draftTimers[key] = setTimeout(() => saveDraftToSlack(form, channel, threadTs, text), DRAFT_SAVE_DELAY);
+  _draftTimers[key] = setTimeout(() => saveDraft(channel, threadTs, text), DRAFT_SAVE_DELAY);
 }
 
 function clearDraft(channel, threadTs) {
   const key = draftKey(channel, threadTs);
   clearTimeout(_draftTimers[key]);
-  const existing = _slackDrafts[key];
-  if (existing?.draft_id) {
-    sendToInject({ type: `${FSLACK}:draftDelete`, draft_id: existing.draft_id, last_updated_ts: existing.last_updated_ts || '0', requestId: `draftdel_${Date.now()}` });
-  }
-  delete _slackDrafts[key];
+  delete _drafts[key];
+  _persistDrafts();
 }
 
 function loadDraftIntoForm(form, input, channel, threadTs) {
   const key = draftKey(channel, threadTs);
-  const existing = _slackDrafts[key];
-  if (existing) {
-    if (existing.text) {
-      input.value = existing.text;
-      input.style.height = 'auto';
-      input.style.height = input.scrollHeight + 'px';
-    }
-    form._draftId = existing.draft_id || null;
-    form._draftLastTs = existing.last_updated_ts || null;
+  const text = _drafts[key];
+  if (text) {
+    input.value = text;
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
   }
-  // Auto-save on input
   input.addEventListener('input', () => {
-    saveDraftDebounced(form, channel, threadTs, input.value);
+    saveDraftDebounced(channel, threadTs, input.value);
+    _flashDraftSaved(form);
   });
   form._draftChannel = channel;
   form._draftThreadTs = threadTs;
@@ -83,61 +64,6 @@ function _flashDraftSaved(form) {
   el.classList.add('visible');
   clearTimeout(el._hideTimer);
   el._hideTimer = setTimeout(() => el.classList.remove('visible'), 1000);
-}
-
-function _findFormByReqId(requestId) {
-  for (const form of bodyEl.querySelectorAll('.reply-form')) {
-    if (form._pendingDraftReqId === requestId) return form;
-  }
-  return null;
-}
-
-function handleDraftCreateResult(msg) {
-  if (!msg.ok) return;
-  const form = _findFormByReqId(msg.requestId);
-  if (form) {
-    form._draftId = msg.draft_id;
-    form._draftLastTs = msg.last_updated_ts;
-    const key = draftKey(form._draftChannel, form._draftThreadTs);
-    if (_slackDrafts[key]) {
-      _slackDrafts[key].draft_id = msg.draft_id;
-      _slackDrafts[key].last_updated_ts = msg.last_updated_ts;
-    }
-    _flashDraftSaved(form);
-  }
-}
-
-function handleDraftUpdateResult(msg) {
-  if (!msg.ok) return;
-  const form = _findFormByReqId(msg.requestId);
-  if (form) {
-    form._draftLastTs = msg.last_updated_ts;
-    const key = draftKey(form._draftChannel, form._draftThreadTs);
-    if (_slackDrafts[key]) _slackDrafts[key].last_updated_ts = msg.last_updated_ts;
-    _flashDraftSaved(form);
-  }
-}
-
-function handleDraftsListResult(msg) {
-  if (!msg.ok || !msg.drafts) return;
-  for (const d of msg.drafts) {
-    if (!d.destinations?.length) continue;
-    const ch = d.destinations[0].channel_id;
-    const threadTs = d.thread_ts || null;
-    const key = draftKey(ch, threadTs);
-    // Extract plain text from blocks
-    let text = '';
-    try {
-      for (const block of (d.blocks || [])) {
-        for (const el of (block.elements || [])) {
-          for (const item of (el.elements || [])) {
-            if (item.type === 'text') text += item.text;
-          }
-        }
-      }
-    } catch {}
-    _slackDrafts[key] = { draft_id: d.id, last_updated_ts: d.last_updated_ts, text };
-  }
 }
 
 // ── Demo mode (anonymization — extract text, batch LLM calls, apply) ──
@@ -5023,8 +4949,6 @@ function handlePortMessage(msg) {
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
 
   if (msg.type === `${FSLACK}:ready`) {
-    // Fetch Slack drafts on connect
-    sendToInject({ type: `${FSLACK}:draftsList`, requestId: `draftslist_${Date.now()}` });
     // If the view is already rendered (reconnect after service worker idle),
     // don't re-render and blow away the user's scroll/expand state.
     if (bodyEl.querySelector('.item')) return;
@@ -5179,14 +5103,12 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:muteChannelResult`) { handleMuteChannelResult(msg); return; }
   if (msg.type === `${FSLACK}:postReplyResult`) { handlePostReplyResult(msg); return; }
   if (msg.type === `${FSLACK}:uploadAndPostResult`) { handleUploadAndPostResult(msg); return; }
-  if (msg.type === `${FSLACK}:draftCreateResult`) { handleDraftCreateResult(msg); return; }
-  if (msg.type === `${FSLACK}:draftUpdateResult`) { handleDraftUpdateResult(msg); return; }
-  if (msg.type === `${FSLACK}:draftsListResult`) { handleDraftsListResult(msg); return; }
 }
 
 // ── Initialization ──
 // Load persisted cache, then connect port
-chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads'], (result) => {
+chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', DRAFT_KEY], (result) => {
+  _drafts = result[DRAFT_KEY] || {};
   if (result.fslackViewCache && !cachedView) {
     cachedView = result.fslackViewCache;
   }
