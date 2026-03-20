@@ -28,13 +28,13 @@ let teamDomain = null;
 const _navHideStyle = document.createElement('style');
 _navHideStyle.textContent = `
   .p-tab_rail { display: none !important; }
-  .p-client_workspace__tabpanel > .enabled-managed-focus-container:first-child {
+  .p-client_workspace__tabpanel:not([aria-label="Search"]) > .enabled-managed-focus-container:first-child {
     visibility: hidden !important;
     width: 0 !important;
     min-width: 0 !important;
     overflow: hidden !important;
   }
-  .p-client_workspace__tabpanel { grid-template-columns: 0px auto !important; }
+  .p-client_workspace__tabpanel:not([aria-label="Search"]) { grid-template-columns: 0px auto !important; }
   .p-client_workspace__tabpanel:has(.p-view_contents--secondary):has(.p-view_contents--primary) {
     grid-template-columns: 0px auto auto !important;
     grid-template-areas: "p-view_contents--sidebar p-view_contents--primary p-view_contents--secondary" !important;
