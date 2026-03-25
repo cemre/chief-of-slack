@@ -1369,7 +1369,7 @@ function msgActions(channel, ts, { showReply = true } = {}) {
 function slackPermalink(channel, ts, threadTs) {
   if (!channel || !ts) return '';
   let url = `https://app.slack.com/archives/${channel}/p${ts.replace('.', '')}`;
-  if (threadTs && threadTs !== ts) url += `?thread_ts=${threadTs}&cid=${channel}`;
+  if (threadTs) url += `?thread_ts=${threadTs}&cid=${channel}`;
   return url;
 }
 
@@ -1461,7 +1461,7 @@ function renderThreadItem(t, data, cssClass) {
   let html = `<div class="item ${cssClass}">`;
   html += reasonBadge(t, cssClass);
   if (collapsible) html += '<div class="item-details">';
-  const threadOpenHref = slackPermalink(t.channel_id, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
+  const threadOpenHref = slackPermalink(t.channel_id, t.ts, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
   if (shouldSummarize) {
     html += `<div class="item-left">`;
     html += `<a class="item-channel-link" href="${threadOpenHref}" target="_blank"><span class="item-channel">${channelLabel}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
@@ -4513,7 +4513,7 @@ function render(data) {
       const seenCount = Math.max(0, (t.reply_count || 0) - unread.length);
       const frtRootSeenClass = seenCount > 0 ? ' root-seen' : '';
       const fbThreadTs = lastUnread?.ts || t.ts;
-      const fbThreadHref = slackPermalink(t.channel_id, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
+      const fbThreadHref = slackPermalink(t.channel_id, t.ts, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
       html += `<div class="item">
         <div class="item-left">
           ${itemLeftLink(`<span class="item-channel">#${ch}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(fbThreadTs)}</span>`, fbThreadHref)}
