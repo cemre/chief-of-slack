@@ -3160,8 +3160,11 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
+      markAll.textContent = 'undo';
+      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
+      item.classList.add('read-done');
+      removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
     }
@@ -3180,13 +3183,17 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
+      markAll.textContent = 'undo';
+      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
+      item.classList.add('read-done');
+      removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
     }
     whenfreeMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     whenfreeMarkRead.disabled = true;
+    updateSectionToggleCount(whenfreeItemEls[0]);
     if (section?.classList.contains('expanded')) {
       const toggle = section.previousElementSibling;
       if (toggle?.classList.contains('section-toggle')) toggle.click();
@@ -3206,13 +3213,17 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
+      markAll.textContent = 'undo';
+      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
+      item.classList.add('read-done');
+      removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
     }
     noiseMarkRecent.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     noiseMarkRecent.disabled = true;
+    updateSectionToggleCount(noiseItemEls[0]);
     if (section?.classList.contains('expanded')) {
       const toggle = section.previousElementSibling;
       if (toggle?.classList.contains('section-toggle')) toggle.click();
@@ -3230,13 +3241,17 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
+      markAll.textContent = 'undo';
+      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
+      item.classList.add('read-done');
+      removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
     }
     noiseMarkOlder.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
     noiseMarkOlder.disabled = true;
+    updateSectionToggleCount(noiseItemEls[0]);
     if (section?.classList.contains('expanded')) {
       const toggle = section.previousElementSibling;
       if (toggle?.classList.contains('section-toggle')) toggle.click();
@@ -4845,7 +4860,13 @@ function handleMarkReadResult(msg) {
       markAll.classList.add('done');
       const item = markAll.closest('.item');
       if (item) { item.classList.add('read-done'); updateSectionToggleCount(item); }
-    } else { markAll.textContent = 'mark read'; }
+    } else {
+      // API failed — undo the optimistic UI
+      markAll.textContent = 'mark read';
+      markAll.classList.remove('done');
+      const item = markAll.closest('.item');
+      if (item) { item.classList.remove('read-done'); updateSectionToggleCount(item); }
+    }
   }
 }
 
