@@ -91,7 +91,7 @@ function runDemoAnonymize() {
 
   const overlay = document.createElement('div');
   overlay.id = 'demo-loading';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(26,29,33,0.85);display:flex;align-items:center;justify-content:center;color:#1d9bd1;font-size:14px;';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(19,21,29,0.88);display:flex;align-items:center;justify-content:center;color:#5b9cf5;font-size:14px;';
   document.body.appendChild(overlay);
 
   // Split into batches
@@ -142,20 +142,69 @@ function applyDemoReplacements(map) {
     let text = node.nodeValue;
     let changed = false;
     for (const [real, fake] of entries) {
-      if (text.includes(real)) {
-        text = text.split(real).join(fake);
-        changed = true;
-      }
-      // Also try lowercase match
-      const realLower = real.toLowerCase();
-      if (realLower !== real && text.toLowerCase().includes(realLower)) {
-        const re = new RegExp(real.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+      // Word-boundary replace: only match if preceded/followed by non-word char or string edge
+      const escaped = real.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(?<=^|[\\s,.:;!?@#()\\[\\]/"'\\-])${escaped}(?=$|[\\s,.:;!?@#()\\[\\]/"'\\-])`, 'gi');
+      if (re.test(text)) {
         text = text.replace(re, fake);
         changed = true;
       }
     }
     if (changed) node.nodeValue = text;
   }
+}
+
+// ── Demo snapshot: export/import raw Slack data ──
+const SNAPSHOT_KEYS = [
+  'fslackViewCache', 'fslackLastFetchTs',
+  'fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackUsersCacheVersion',
+  'fslackChannels', 'fslackChannelMeta',
+  'fslackEmoji', 'fslackEmojiTs',
+  'fslackSavedMsgs', 'fslackMutedThreads', 'fslackVipSeen', 'fslackDrafts',
+  'sidebarTierMap', 'sidebarSectionNames',
+  'selfHandle', 'vipNames', 'userContext',
+];
+
+function exportSnapshot() {
+  chrome.storage.local.get(SNAPSHOT_KEYS, (result) => {
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fslack-snapshot-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    console.log(`[fslack] snapshot exported: ${Object.keys(result).length} keys`);
+  });
+}
+
+function importSnapshot() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        // Only restore keys we know about
+        const toStore = {};
+        for (const key of SNAPSHOT_KEYS) {
+          if (key in data) toStore[key] = data[key];
+        }
+        chrome.storage.local.set(toStore, () => {
+          console.log(`[fslack] snapshot imported: ${Object.keys(toStore).length} keys`);
+          location.reload();
+        });
+      } catch (e) {
+        console.error('[fslack] snapshot import failed:', e);
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
 }
 
 // ── Port connection to background.js ──
@@ -192,7 +241,7 @@ function connectPort() {
   setTimeout(() => {
     const status = document.getElementById('status');
     if (status && status.textContent === 'Waiting for Slack tab...') {
-      status.innerHTML = 'No Slack tab found. Open <a href="https://app.slack.com" target="_blank" style="color:#1d9bd1">app.slack.com</a> then <a class="inline-refresh" style="color:#1d9bd1;cursor:pointer">refresh</a>.';
+      status.innerHTML = 'No Slack tab found. Open <a href="https://app.slack.com" target="_blank" style="color:#5b9cf5">app.slack.com</a> then <a class="inline-refresh" style="color:#1d9bd1;cursor:pointer">refresh</a>.';
     }
   }, 5000);
 }
@@ -802,6 +851,30 @@ document.addEventListener('keydown', (e) => {
     const isRow = focused.classList.contains('msg-row');
     const parentItem = isRow ? focused.closest('.item') : focused;
     const scope = isRow ? focused : focused;
+    // Compact mode: ArrowRight expands, ArrowLeft collapses
+    const isCompactItem = parentItem && !parentItem.classList.contains('detail-expanded') && (parentItem.closest('.when-free-items') || parentItem.closest('.noise-items'));
+    if (isCompactItem && key === 'ArrowRight') {
+      e.preventDefault(); e.stopPropagation();
+      parentItem.classList.add('detail-expanded');
+      requestAnimationFrame(() => {
+        const els = getNavigableElements();
+        const firstRow = parentItem.querySelector('.msg-row');
+        const rowIdx = firstRow ? els.indexOf(firstRow) : -1;
+        if (rowIdx >= 0) focusItem(rowIdx);
+      });
+      return;
+    }
+    const isDetailExpanded = parentItem?.classList.contains('detail-expanded') && (parentItem.closest('.when-free-items') || parentItem.closest('.noise-items'));
+    if (isDetailExpanded && key === 'ArrowLeft' && !isRow) {
+      e.preventDefault(); e.stopPropagation();
+      parentItem.classList.remove('detail-expanded');
+      requestAnimationFrame(() => {
+        const els = getNavigableElements();
+        const newIdx = els.indexOf(parentItem);
+        if (newIdx >= 0) focusItem(newIdx);
+      });
+      return;
+    }
     const showMsgsLink = (isRow ? focused : parentItem)?.querySelector('.show-messages-link[data-target]');
     const showMsgsTarget = showMsgsLink ? document.getElementById(showMsgsLink.dataset.target) : null;
     // Also check for summary-toggle on the item (noise items, when-free channel items)
@@ -973,6 +1046,12 @@ function formatTimeTooltip(ts) {
 
 function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function compactBullets(summary) {
+  return summary.split('\n').filter(b => b.trim())
+    .map(b => b.replace(/^-\s*/, '').replace(/^\[\d+\.\d+\]\s*/, '').split(/\s+/).slice(0, 12).join(' '))
+    .join(' · ');
 }
 
 function decodeSlackEntities(str) {
@@ -1476,7 +1555,28 @@ function renderThreadItem(t, data, cssClass) {
     if (!t._mentionInReplies && t.mention_count > 0) {
       leftInner += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
     }
+    if (unread.length > 0) {
+      leftInner += ` <span class="item-sep">·</span> <span class="item-replied">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'}</span>`;
+    }
     html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}</div>`;
+  }
+  // Compact preview for when-free threads: show latest reply, not root post
+  if (cssClass === 'when-free') {
+    let _threadPreview = '';
+    if (t._fullThreadSummary) {
+      _threadPreview = t._fullThreadSummary.split('\n').filter(b => b.trim())[0]?.replace(/^-\s*/, '') || '';
+    }
+    if (!_threadPreview && unread.length > 0) {
+      const _latestReply = unread[unread.length - 1];
+      const _replyAuthor = uname(_latestReply.user, data.users);
+      const _replyText = (_latestReply.text || '').replace(/\n/g, ' ').slice(0, 120);
+      if (_replyText) _threadPreview = `${_replyAuthor} replied: ${_replyText}`;
+    }
+    if (!_threadPreview && t.root_text) {
+      const _rootAuthor = uname(t.root_user, data.users);
+      _threadPreview = `${_rootAuthor}: ${t.root_text.replace(/\n/g, ' ').slice(0, 120)}`;
+    }
+    if (_threadPreview) html += `<div class="compact-preview">${escapeHtml(_threadPreview)}</div>`;
   }
 
   // When full-thread summary is active, replace root content with bullet summary
@@ -1500,7 +1600,7 @@ function renderThreadItem(t, data, cssClass) {
     }
     rootContentHtml = `${rootHtml}${repliesHtml}`;
   } else if (shouldSummarize && !t._fullThreadSummary) {
-    rootContentHtml = `<div id="${threadKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:2px 0">Summarizing thread...</div>`;
+    rootContentHtml = `<div id="${threadKey}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin:2px 0">Summarizing thread...</div>`;
   } else {
     rootSeenClass = (seenCount > 0 || isRootFromSelf) ? ' root-seen' : '';
     const needsRootSummary = (seenCount > 0 || isRootFromSelf) && (t.root_text || '').length > 300;
@@ -1591,6 +1691,7 @@ function renderDmItem(dm, data, cssClass) {
     <div class="item-left">
       ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
     </div>
+    ${cssClass === 'when-free' && latest.text ? `<div class="compact-preview">${escapeHtml(latest.text.slice(0, 120).replace(/\n/g, ' '))}</div>` : ''}
     <div class="item-right">`;
   const dmReversed = [...dm.messages].reverse();
   for (let i = 0; i < dmReversed.length; i++) {
@@ -1658,7 +1759,25 @@ function renderChannelItem(cp, data, cssClass) {
       html += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
     }
     if (csMsgId) html += ` <span class="item-sep">·</span> ${headerExpandHtml(csMsgId, cp.messages.length)}`;
+    // Inline mark-read for noise items (accessible in compact mode)
+    if (cssClass === 'noise-item') {
+      html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
+    }
     html += `</div>`;
+    // Compact preview for when-free items: ALL summary bullets joined, or first message fallback
+    if (cssClass === 'when-free' || cssClass === 'noise-item') {
+      let _chPreview = '';
+      if (cp._channelSummary) {
+        _chPreview = compactBullets(cp._channelSummary);
+      }
+      if (!_chPreview && cp.messages?.length) {
+        const _previewMsg = cp.messages[0];
+        const _previewAuthor = _previewMsg.subtype === 'bot_message' ? 'Bot' : uname(_previewMsg.user, data.users);
+        const _previewText = (_previewMsg.text || '').replace(/\n/g, ' ').slice(0, 120);
+        if (_previewText) _chPreview = `${_previewAuthor}: ${_previewText}`;
+      }
+      if (_chPreview) html += `<div class="compact-preview">${escapeHtml(_chPreview)}</div>`;
+    }
   } else {
     let chLeftInner = `<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
     if (cp._repliers?.length) {
@@ -1688,7 +1807,7 @@ function renderChannelItem(cp, data, cssClass) {
         const repliesId = `${tKey}-replies`;
         const summaryHtml = m._chThreadSummary
           ? `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(m._chThreadSummary)}</div>`
-          : `<div id="${tKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
+          : `<div id="${tKey}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
         messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}`
           + `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
           + summaryHtml
@@ -1707,7 +1826,7 @@ function renderChannelItem(cp, data, cssClass) {
       html += summaryToggleHtml(csMsgId, bullets, messagesHtml);
     } else {
       html += `<div class="msg-row"><div class="msg-content">
-        <div id="${csKey}-loading" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Summarizing...</div>
+        <div id="${csKey}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin-bottom:4px">Summarizing...</div>
       </div></div>
       <div class="deep-messages" style="display:block" id="${csMsgId}">${messagesHtml}</div>`;
     }
@@ -1725,7 +1844,7 @@ function renderChannelItem(cp, data, cssClass) {
         const repliesId = `${key}-replies`;
         const summaryHtml = m._chThreadSummary
           ? `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(m._chThreadSummary)}</div>`
-          : `<div id="${key}-loading" style="color:#555;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
+          : `<div id="${key}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
         html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}`
           + `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
           + summaryHtml
@@ -1768,7 +1887,9 @@ function renderDeepSummarizedItem(cp, data) {
       <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
+      <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
     </div>
+    ${cp._deepSummary ? `<div class="compact-preview">${escapeHtml(compactBullets(cp._deepSummary))}</div>` : ''}
     <div class="item-right">
       ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
@@ -1834,7 +1955,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   } else {
     contentHtml = `
       <div class="msg-row"><div class="msg-content">
-        <div id="${key}-summary" style="color:#555;font-size:12px;font-style:italic;margin-bottom:4px">Analyzing discussion...</div>
+        <div id="${key}-summary" style="color:#3d4260;font-size:12px;font-style:italic;margin-bottom:4px">Analyzing discussion...</div>
       </div></div>
       <div class="deep-messages" style="display:block">${messagesHtml}</div>`;
   }
@@ -1844,6 +1965,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
       ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
+      ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
     </div>
     <div class="item-right">
       ${contentHtml}
@@ -2664,6 +2786,13 @@ function countNewerThreadReplies(data, channelId, threadTs, afterTs) {
 let replyRequestId = 0;
 
 bodyEl.addEventListener('click', (e) => {
+  // Compact mode: click to expand items in when-free and noise sections
+  const compactItem = e.target.closest('.when-free-items .item:not(.detail-expanded), .noise-items .item:not(.detail-expanded)');
+  if (compactItem && !e.target.closest('a, button, .mark-all-read, .action-mute-channel')) {
+    compactItem.classList.add('detail-expanded');
+    return;
+  }
+
   // Reason-badge toggle for collapsible priority items
   const reasonToggle = e.target.closest('.item-reason-toggle');
   if (reasonToggle) {
@@ -2833,9 +2962,12 @@ bodyEl.addEventListener('click', (e) => {
       markAll.dataset.pending = 'true';
     } else if (!markAll.dataset.pending) {
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = '...';
-      sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
+      markAll.textContent = 'undo';
+      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
+      const _markItem = markAll.closest('.item');
+      if (_markItem) { _markItem.classList.add('read-done'); removeCachedItem(channel, threadTs); updateSectionToggleCount(_markItem); }
+      sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
     return;
   }
@@ -3071,6 +3203,11 @@ bodyEl.addEventListener('click', (e) => {
     const msgsDiv = document.getElementById(targetId);
     if (!msgsDiv) return;
     const item = summaryToggle.closest('.item');
+    // In compact sections, clicking the header-expand collapses back to compact one-liner
+    if (item?.classList.contains('detail-expanded') && (item.closest('.when-free-items') || item.closest('.noise-items'))) {
+      item.classList.remove('detail-expanded');
+      return;
+    }
     const itemRight = item?.querySelector('.item-right');
     const msgRow = itemRight?.querySelector('.msg-row.summarized');
     const summaryWrap = itemRight?.querySelector('.deep-summary-wrap');
@@ -3727,6 +3864,12 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
       const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
       rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml) + actionsHtml;
+      // Update compact preview with ALL summary bullets joined
+      const previewEl = itemEl.querySelector('.compact-preview');
+      if (previewEl && cp._channelSummary) {
+        const allBullets = compactBullets(cp._channelSummary);
+        if (allBullets) previewEl.textContent = allBullets;
+      }
     }
   })();
 }
@@ -3801,6 +3944,10 @@ function runThreadReplySummarization(allItems, data) {
       }
       const msgRow = loadingEl.closest('.msg-row.summarized');
       loadingEl.replaceWith(wrapper);
+      // Update compact preview with first summary bullet
+      const threadItemEl = loadingEl?.closest?.('.item') || msgRow?.closest?.('.item');
+      const threadPreviewEl = threadItemEl?.querySelector('.compact-preview');
+      if (threadPreviewEl && rootBullet) threadPreviewEl.textContent = rootBullet;
       if (msgRow && !msgRow.querySelector('.thread-orig-root')) {
         const _ortid = truncateId;
         const origText = truncate(t.root_text, 400, data.users);
@@ -4912,8 +5059,8 @@ function handlePostReplyResult(msg) {
     const item = form.closest('.item');
     const isMsgLevel = form.previousElementSibling?.classList.contains('msg-row');
     const replyHtml = isMsgLevel
-      ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div></div>`
-      : `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
+      ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${escapeHtml(text)}</div></div>`
+      : `<div class="item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
     form.insertAdjacentHTML('beforebegin', replyHtml);
     const inp = form.querySelector('.reply-input');
     const btn = form.querySelector('.reply-send');
@@ -4941,8 +5088,8 @@ function handleUploadAndPostResult(msg) {
     const isMsgLevel = form.previousElementSibling?.classList.contains('msg-row');
     const label = text ? `${escapeHtml(text)} [image]` : '[image]';
     const replyHtml = isMsgLevel
-      ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${label}</div></div>`
-      : `<div class="item-reply" style="color:#1d9bd1"><span class="item-user">You:</span> ${label}</div>`;
+      ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${label}</div></div>`
+      : `<div class="item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${label}</div>`;
     form.insertAdjacentHTML('beforebegin', replyHtml);
     const inp = form.querySelector('.reply-input');
     const btn = form.querySelector('.reply-send');
@@ -5161,4 +5308,8 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
       }
     });
   }
+
+  // ── Snapshot export/import buttons ──
+  document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
+  document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
 });
