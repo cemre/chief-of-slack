@@ -895,7 +895,7 @@ document.addEventListener('keydown', (e) => {
       }
       if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
       if (summaryToggleEl && summaryTarget && summaryTarget.style.display !== 'block') summaryToggleEl.click();
-      if (hasDetails && !detailsEl.classList.contains('expanded')) reasonToggle.click();
+      if (hasDetails && !detailsEl.classList.contains('expanded')) { reasonToggle._kbExpand = true; reasonToggle.click(); }
       // After expand, move cursor into the first visible child
       requestAnimationFrame(() => {
         const els = getNavigableElements();
@@ -919,7 +919,15 @@ document.addEventListener('keydown', (e) => {
       }
       if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
       if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
-      if (hasDetails && detailsEl.classList.contains('expanded')) reasonToggle.click();
+      if (hasDetails && detailsEl.classList.contains('expanded')) {
+        reasonToggle.click();
+        // Re-focus the parent item since the focused row is now hidden
+        requestAnimationFrame(() => {
+          const els = getNavigableElements();
+          const newIdx = els.indexOf(parentItem);
+          if (newIdx >= 0) focusItem(newIdx);
+        });
+      }
     } else if (key === 'ArrowLeft' && !isExpanded && isRow) {
       const threadContainer = focused.closest('.thread-replies-container');
       if (threadContainer) {
@@ -2814,14 +2822,15 @@ bodyEl.addEventListener('click', (e) => {
     const expanded = details.classList.toggle('expanded');
     const reasonText = reasonToggle.querySelector('.reason-text');
     if (reasonText) reasonText.textContent = reasonText.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
-    // Auto-open reply box for DMs when expanding
-    if (expanded) {
+    // Auto-open reply box for DMs when expanding via click (not keyboard)
+    if (expanded && !reasonToggle._kbExpand) {
       const item = reasonToggle.closest('.item');
       const dmReply = item?.querySelector('.action-reply[data-dm="true"]');
       if (dmReply && !item.querySelector('.reply-form')) {
         requestAnimationFrame(() => dmReply.click());
       }
     }
+    delete reasonToggle._kbExpand;
     return;
   }
 
