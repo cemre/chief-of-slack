@@ -1172,11 +1172,19 @@ function formatSlackHtml(text, users, { collapseNewlines = false } = {}) {
     const inner = match[1];
     if (inner.match(/^@U[A-Z0-9]+(\|.+)?$/)) {
       const pipeIdx = inner.indexOf('|');
+      let mentionName;
+      let mentionUid;
       if (pipeIdx !== -1) {
-        result += `@${escapeHtml(inner.slice(pipeIdx + 1))}`;
+        mentionName = inner.slice(pipeIdx + 1);
       } else {
-        const uid = inner.slice(1);
-        result += `@${escapeHtml(users?.[uid] || uid)}`;
+        mentionUid = inner.slice(1);
+        mentionName = users?.[mentionUid] || mentionUid;
+      }
+      const isSelf = _selfHandleLower && mentionName.toLowerCase() === _selfHandleLower;
+      if (isSelf) {
+        result += `<span class="self-mention">@${escapeHtml(mentionName)}</span>`;
+      } else {
+        result += `@${escapeHtml(mentionName)}`;
       }
     } else if (inner.match(/^#C[A-Z0-9]+(\|.+)?$/)) {
       const pipeIdx = inner.indexOf('|');
@@ -1481,7 +1489,11 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused 
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
-  return `<div class="item-reason item-reason-toggle ${cls}">${escapeHtml(item._reason)} ↓</div>`;
+  const markTs = item.sort_ts || item.messages?.[0]?.ts || item.ts || '';
+  const threadTs = item.ts || '';
+  const channel = item.channel_id || '';
+  const hasMention = item._isMentioned || item.mention_count > 0 ? '1' : '0';
+  return `<div class="item-reason item-reason-toggle ${cls}"><span class="reason-text">${escapeHtml(item._reason)} ↓</span><span class="reason-mark-read mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs}" data-has-mention="${hasMention}" title="Mark read">✓</span></div>`;
 }
 
 // Shared toggle structure: bullet summary (clickable) → hidden messages
@@ -1987,6 +1999,7 @@ function renderAnyItem(item, data, cssClass) {
 
 // Build mention regex from Slack handle (set when data arrives from inject.js)
 let _handleMentionRegex = null;
+let _selfHandleLower = null; // lowercase handle for highlight matching
 
 function containsSelfMention(text, selfId) {
   if (!text || !selfId) return false;
@@ -2793,13 +2806,22 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Reason-badge toggle for collapsible priority items
+  // Reason-badge toggle for collapsible priority items (skip if clicking the check mark)
   const reasonToggle = e.target.closest('.item-reason-toggle');
-  if (reasonToggle) {
+  if (reasonToggle && !e.target.closest('.reason-mark-read')) {
     const details = reasonToggle.nextElementSibling;
     if (!details?.classList.contains('item-details')) return;
     const expanded = details.classList.toggle('expanded');
-    reasonToggle.textContent = reasonToggle.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
+    const reasonText = reasonToggle.querySelector('.reason-text');
+    if (reasonText) reasonText.textContent = reasonText.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
+    // Auto-open reply box for DMs when expanding
+    if (expanded) {
+      const item = reasonToggle.closest('.item');
+      const dmReply = item?.querySelector('.action-reply[data-dm="true"]');
+      if (dmReply && !item.querySelector('.reply-form')) {
+        requestAnimationFrame(() => dmReply.click());
+      }
+    }
     return;
   }
 
@@ -4183,6 +4205,7 @@ function prioritizeAndRender(data) {
   if (data.selfHandle) {
     const escaped = data.selfHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     _handleMentionRegex = new RegExp(`(?:^|[\\s"'([{<])@${escaped}(?=$|[\\s.,!?;:)\\]\\}>"'])`, 'i');
+    _selfHandleLower = data.selfHandle.toLowerCase();
     chrome.storage.local.set({ selfHandle: data.selfHandle });
   }
   // Cache VIP names for Claude prompts (resolve IDs → display names)
@@ -5062,15 +5085,18 @@ function handlePostReplyResult(msg) {
       ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${escapeHtml(text)}</div></div>`
       : `<div class="item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
     form.insertAdjacentHTML('beforebegin', replyHtml);
-    const inp = form.querySelector('.reply-input');
-    const btn = form.querySelector('.reply-send');
-    inp.value = '';
-    inp.disabled = false;
-    inp.style.height = 'auto';
-    btn.disabled = false;
-    btn.textContent = 'Send';
-    inp.focus();
+    form.remove();
     autoMarkItemRead(item, { overrideTs: msg.ts });
+    // Focus next item in keyboard nav
+    requestAnimationFrame(() => {
+      const els = getNavigableElements();
+      if (item) {
+        const rows = [...item.querySelectorAll('.msg-row')].filter(r => r.offsetHeight > 0);
+        const lastRow = rows[rows.length - 1];
+        const idx = lastRow ? els.indexOf(lastRow) : els.indexOf(item);
+        if (idx >= 0 && idx + 1 < els.length) focusItem(idx + 1);
+      }
+    });
   } else {
     const btn = form.querySelector('.reply-send');
     btn.textContent = 'Failed';

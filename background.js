@@ -156,6 +156,8 @@ e.g. ["act_now", "josh asked you to confirm the deploy", "josh is blocked waitin
 The reason should explain WHY you chose this category — what signal drove the decision.
 The summary must justify the category — if you can't describe someone waiting on me, it's not act_now.
 
+MENTION RULE: When isMentioned=true and it's a long thread, the summary must cover BOTH what the thread is about AND why I was tagged — e.g. "auth refactor discussion, josh tagged you for review" not just "josh started an auth refactor". The mention is the reason it's elevated, so surface it.
+
 Respond with ONLY a JSON object mapping each item's "id" to its [category, summary, reason] triple, plus a "_noiseOrder" key (array of noise/drop IDs sorted from MOST work-relevant first to LEAST work-relevant last — e.g. engineering discussions before social chatter). No explanation, no markdown fences, just the JSON object.`;
 }
 
@@ -281,6 +283,7 @@ You are summarizing Slack items so they can be prioritized. For each item, write
 - Whether I'm @mentioned and what the mention asks for
 - Whether someone answered a question I asked (if userReplied=true)
 - The topic/subject
+- If isMentioned=true: what the thread/channel is broadly about AND specifically why/where I was @mentioned
 
 "recentContext" = messages I already read (for conversation flow). "newReplies" / "messages" = the unread messages.
 Focus the summary on the UNREAD messages, referencing context only to explain what they're responding to.
@@ -351,22 +354,25 @@ function buildSummarizePrompt(item, identity) {
   const serialized = JSON.stringify(item.messages, null, 0);
   return `${identity.contextClause}
 
-Summarize what happened in this Slack channel as 1-3 bullet points.
+Summarize this Slack channel as 1-3 bullet points. STRICT LIMIT: each bullet MUST be under 8 words.
 
 Channel: #${item.channel}
 
-Each bullet = [first name] [action verb] [specific thing].
-Name the actual artifact, outcome, or content — not a vague category.
+Format: [first name] [verb] [what]
 
-Bad: "Matthew is coordinating end-of-week updates"
-Bad: "Cory introducing a new CLI tool and flagging policy updates"
-Good: "matthew merged a PR that fixes auth timeouts"
-Good: "cory shipped an org-admin CLI for provisioning and flagged that golden-triangle needs legal/policy sign-off"
+Examples of CORRECT length:
+- "jeff added media support to artifacts"
+- "rishi rewrote suggestions prompt"
+- "vardhan flagged suggestion quality issues"
+- "bot surfaced Reddit post about Dia"
 
-For automated channels, name the specific repos, tickets, or people involved.
-Omit filler. Use first names only. No passive voice.
+Examples of WRONG length (TOO LONG — never do this):
+- "jeff explored adding additional sources to clia artifacts by extending adk-core support for fonts, images, media, and stylesheets"
+- "rishi pushed a PR rewriting the combined chat + url suggestions prompt and reports marked quality improvements"
 
-Each message has a "ts" field. For each bullet, prefix it with the ts of the most relevant message in square brackets, e.g. "[1773771342.788049] cory shipped the new CLI"
+Drop all detail. First names only. No filler.
+
+Each message has a "ts" field. Prefix each bullet with the ts of the most relevant message: "[1773771342.788049] jeff added media support"
 
 MESSAGES:
 ${serialized}
