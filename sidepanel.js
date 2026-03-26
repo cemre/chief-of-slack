@@ -1512,6 +1512,10 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused 
   </div>`;
 }
 
+function gutterCheck(channel, markTs, threadTs, hasMention) {
+  return `<span class="gutter-check mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}" title="Mark read">✓</span>`;
+}
+
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
@@ -1693,6 +1697,7 @@ function renderThreadItem(t, data, cssClass) {
 
   html += '</div>';
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread, '', false, t._isMentioned || t.mention_count > 0);
+  if (!collapsible) html += gutterCheck(t.channel_id, markAllTs, t.ts, t._isMentioned || t.mention_count > 0);
   html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
@@ -1744,6 +1749,7 @@ function renderDmItem(dm, data, cssClass) {
     html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${timeHtml}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += itemActions(dm.channel_id, latest.ts, null, true);
+  if (!collapsible) html += gutterCheck(dm.channel_id, latest.ts, null, false);
   html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
@@ -1899,6 +1905,7 @@ function renderChannelItem(cp, data, cssClass) {
     }
   }
   html += itemActions(cp.channel_id, latest?.ts, null, false, ch, cssClass === 'noise-item');
+  if (!collapsible) html += gutterCheck(cp.channel_id, latest?.ts, null, cp._isMentioned || cp.mention_count > 0);
   html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
@@ -1935,6 +1942,7 @@ function renderDeepSummarizedItem(cp, data) {
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
       </div>
     </div>
+    ${gutterCheck(cp.channel_id, latest?.ts, null, false)}
   </div>`;
 }
 
@@ -3005,13 +3013,15 @@ bodyEl.addEventListener('click', (e) => {
   if (markAll) {
     if (markAll.classList.contains('done')) {
       const { channel, ts, threadTs } = markAll.dataset;
-      markAll.textContent = '...';
+      const isInlineCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      markAll.textContent = isInlineCheck ? '✓' : '...';
       markAll.classList.remove('done');
       sendToInject({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` });
       markAll.dataset.pending = 'true';
     } else if (!markAll.dataset.pending) {
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = 'undo';
+      const isInlineCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      markAll.textContent = isInlineCheck ? '✓' : 'undo';
       markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       const _markItem = markAll.closest('.item');
