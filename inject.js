@@ -1664,6 +1664,21 @@
 
   });
 
+  // ── Watch document.title for unread count changes (instant DM detection) ──
+  let _lastTitleCount = 0;
+  function parseTitleCount(title) {
+    const m = title.match(/^\((\d+)\)/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+  _lastTitleCount = parseTitleCount(document.title);
+  new MutationObserver(() => {
+    const count = parseTitleCount(document.title);
+    if (count > _lastTitleCount) {
+      window.postMessage({ type: `${FSLACK}:titleUnreadBump`, count, prev: _lastTitleCount }, '*');
+    }
+    _lastTitleCount = count;
+  }).observe(document.querySelector('title') || document.head, { childList: true, characterData: true, subtree: true });
+
   // Signal ready — include workspace domain for iframe URL construction
   let teamDomain = null;
   try {

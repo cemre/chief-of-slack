@@ -261,6 +261,8 @@ function startFetchTimeout(ms = 15000) {
     } else {
       refreshLink.textContent = 'refresh now';
       refreshLink.style.display = '';
+      document.getElementById('refresh-bar')?.remove();
+      _pendingInlineRefresh = false;
       const statusEl = document.getElementById('status');
       if (statusEl && (statusEl.textContent.includes('Starting') || statusEl.textContent.includes('Fetching'))) {
         bodyEl.innerHTML = '<div id="status" class="error">Fetch timed out. Make sure a Slack tab is open and try again.</div>';
@@ -295,6 +297,10 @@ function updateLastUpdated() {
   if (secs < 60) lastUpdatedEl.textContent = `${secs}s ago`;
   else lastUpdatedEl.textContent = `${Math.floor(secs / 60)}m ago`;
   lastUpdatedEl.classList.toggle('stale', secs >= 300);
+  // Hide "refresh now" for the first 60s after a fetch
+  if (secs < 60 && refreshLink.textContent === 'refresh now') {
+    refreshLink.style.display = 'none';
+  }
 }
 
 // ── Lightbox ──
@@ -444,6 +450,7 @@ let knownDmChannelIds = new Set(); // DM channels already in the current render
 let mutedThreadKeys = new Set();   // Set of "channel:threadTs" strings for muted threads
 let autoRefreshTimer = null;       // background poll timer
 let isBackgroundFetch = false;     // true when fetching silently in background
+let _pendingInlineRefresh = false; // true when user clicked refresh but we kept the old view
 let stagedRenderData = null;       // data fetched in background, waiting for user to display
 
 // ── LLM result caches (persist across fetches) ──
@@ -567,11 +574,22 @@ function loadCachedPrefs(callback) {
 function startFetch(background = false) {
   if (fetchBtn.disabled) return;
   if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
+  // If we already have content, keep it visible and fetch in background
+  const keepVisible = !background && cachedView?.prioritized;
   isBackgroundFetch = background;
+  _pendingInlineRefresh = keepVisible;
   fetchBtn.disabled = true;
   if (!background) {
     fetchBtn.textContent = 'Fetching...';
-    bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
+    if (!keepVisible) {
+      bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
+    } else {
+      // Show inline loading indicator without wiping current view
+      const bar = document.createElement('div');
+      bar.id = 'refresh-bar';
+      bar.textContent = 'Refreshing...';
+      bodyEl.insertBefore(bar, bodyEl.firstChild);
+    }
     stagedRenderData = null;
     refreshLink.style.display = 'none';
     refreshLink.classList.remove('has-update');
@@ -4825,6 +4843,23 @@ function runPrioritize() {
 
   fetchBtn.disabled = false;
 
+  // Inline refresh: user clicked refresh but we kept old view visible
+  if (_pendingInlineRefresh) {
+    _pendingInlineRefresh = false;
+    isBackgroundFetch = false;
+    document.getElementById('refresh-bar')?.remove();
+    refreshLink.textContent = 'refresh now';
+    refreshLink.style.display = '';
+    fetchBtn.textContent = 'Fetch Unreads';
+    lastFetchTime = Date.now();
+    updateLastUpdated();
+    if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+    lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+    prioritizeAndRender(data);
+    scheduleBackgroundPoll();
+    return;
+  }
+
   if (isBackgroundFetch) {
     isBackgroundFetch = false;
 
@@ -5257,6 +5292,20 @@ function handlePortMessage(msg) {
     return;
   }
 
+  // Slack tab title unread count increased — poll DMs immediately
+  if (msg.type === `${FSLACK}:titleUnreadBump`) {
+    if (dmWatchTimer) {
+      console.log(`[fslack] Title unread bump ${msg.prev}→${msg.count}, polling DMs now`);
+      sendToInject({
+        type: `${FSLACK}:pollNewDms`,
+        knownChannelIds: [...knownDmChannelIds],
+        cachedUsers: { ...cachedUserMap, ...(lastRenderData?.users || {}) },
+        requestId: `dmpoll_title_${Date.now()}`,
+      });
+    }
+    return;
+  }
+
   if (msg.type === `${FSLACK}:newDmsResult`) {
     const { newDms, resolvedUsers } = msg;
     if (newDms && newDms.length > 0 && lastRenderData) {
@@ -5277,10 +5326,12 @@ function handlePortMessage(msg) {
     clearFetchTimeout();
     fetchBtn.disabled = false;
     fetchBtn.textContent = 'Fetch Unreads';
-    if (isBackgroundFetch) {
+    document.getElementById('refresh-bar')?.remove();
+    if (isBackgroundFetch || _pendingInlineRefresh) {
       // Silently fail — don't wipe the UI
       console.warn('[fslack] Background fetch error:', msg.error);
       isBackgroundFetch = false;
+      _pendingInlineRefresh = false;
       scheduleBackgroundPoll();
     } else {
       refreshLink.textContent = 'refresh now';

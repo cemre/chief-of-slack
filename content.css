@@ -112,6 +112,16 @@ header {
 .settings-btn:hover { color: var(--text-primary); background: rgba(130,150,220,0.06); }
 .last-updated { font-size: 11px; color: var(--text-muted); font-weight: 400; }
 .refresh-link { font-size: 11px; color: var(--danger); font-weight: 600; cursor: pointer; }
+#refresh-bar {
+  text-align: center;
+  padding: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(91,156,245,0.08);
+  border-bottom: 1px solid rgba(91,156,245,0.15);
+  animation: refresh-pulse 1.5s ease-in-out infinite;
+}
+@keyframes refresh-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
 .refresh-link:hover { text-decoration: underline; }
 .refresh-link.has-update { color: var(--danger); font-weight: 700; }
 .last-updated.stale { color: var(--text-muted); }
