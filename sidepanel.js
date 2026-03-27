@@ -1502,10 +1502,13 @@ function itemTime(ts, channel) {
   return `<span class="item-time"${attrs}>${formatTime(ts)}</span>`;
 }
 
-function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused = false, hasMention = false) {
+function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused = false, hasMention = false, { isPrivate = false } = {}) {
+  const showReply = threadTs || isDm || isPrivate;
+  const replyLabel = isDm ? 'send a DM' : 'reply';
+  const replyTs = threadTs || markTs;
   return `<div class="item-actions">
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}${hasMention ? ' data-has-mention="1"' : ''}><kbd>M</kbd> mark read</span>
-    ${threadTs || isDm ? `<span class="action-reply" data-channel="${channel}" data-ts="${threadTs || markTs}"${isDm ? ' data-dm="true"' : ''}>${isDm ? 'send a DM' : 'reply'}</span>` : ''}
+    ${showReply ? `<span class="action-reply" data-channel="${channel}" data-ts="${replyTs}"${isDm ? ' data-dm="true"' : ''}>${replyLabel}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
     <span class="mark-above-read">mark above read</span>
@@ -1695,10 +1698,11 @@ function renderThreadItem(t, data, cssClass) {
     html += '</div>';
   }
 
-  html += '</div>';
+  html += '</div>'; // close thread-replies-container
+  html += '</div>'; // close item-right
   html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread, '', false, t._isMentioned || t.mention_count > 0);
   if (!collapsible) html += gutterCheck(t.channel_id, markAllTs, t.ts, t._isMentioned || t.mention_count > 0);
-  html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
+  html += (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
 
@@ -1748,9 +1752,10 @@ function renderDmItem(dm, data, cssClass) {
     const timeHtml = isLastInRun ? msgTime(m.ts, dm.channel_id) : '';
     html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${timeHtml}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
+  html += '</div>'; // close item-right
   html += itemActions(dm.channel_id, latest.ts, null, true);
   if (!collapsible) html += gutterCheck(dm.channel_id, latest.ts, null, false);
-  html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
+  html += (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
 
@@ -1904,9 +1909,11 @@ function renderChannelItem(cp, data, cssClass) {
       html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
     }
   }
-  html += itemActions(cp.channel_id, latest?.ts, null, false, ch, cssClass === 'noise-item');
+  html += '</div>'; // close item-right
+  const cpIsPrivate = data.channelMeta?.[cp.channel_id]?.isPrivate || false;
+  html += itemActions(cp.channel_id, latest?.ts, null, false, ch, cssClass === 'noise-item', cp._isMentioned || cp.mention_count > 0, { isPrivate: cpIsPrivate && collapsible });
   if (!collapsible) html += gutterCheck(cp.channel_id, latest?.ts, null, cp._isMentioned || cp.mention_count > 0);
-  html += '</div>' + (collapsible ? '</div>' : '') + '</div>';
+  html += (collapsible ? '</div>' : '') + '</div>';
   return html;
 }
 
@@ -3012,17 +3019,17 @@ bodyEl.addEventListener('click', (e) => {
   const markAll = e.target.closest('.mark-all-read');
   if (markAll) {
     if (markAll.classList.contains('done')) {
-      const { channel, ts, threadTs } = markAll.dataset;
-      const isInlineCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
-      markAll.textContent = isInlineCheck ? '✓' : '...';
-      markAll.classList.remove('done');
-      sendToInject({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` });
-      markAll.dataset.pending = 'true';
+      return; // already marked read, no undo
     } else if (!markAll.dataset.pending) {
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      const isInlineCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
-      markAll.textContent = isInlineCheck ? '✓' : 'undo';
-      markAll.classList.add('done');
+      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      if (isIconCheck) {
+        markAll.textContent = '✓';
+        markAll.classList.add('done');
+      } else {
+        markAll.textContent = 'done';
+        markAll.classList.add('done');
+      }
       markAll.dataset.pending = 'true';
       const _markItem = markAll.closest('.item');
       if (_markItem) { _markItem.classList.add('read-done'); removeCachedItem(channel, threadTs); updateSectionToggleCount(_markItem); }
@@ -3770,10 +3777,10 @@ async function kickoffVipSection(data) {
         const channel = refMatch[1];
         const ts = refMatch[2];
         text = text.slice(refMatch[0].length);
-        // Resolve channel name to ID if needed (messages use name, permalink needs ID)
         const channelId = vip.messages.find(m => (m.channel_name === channel || m.channel_id === channel))?.channel_id || channel;
         const href = slackPermalink(channelId, ts);
-        return `<li${liClass}><a class="summary-bullet-link" href="${href}" target="_blank" data-channel="${channelId}" data-ts="${ts}">${escapeHtml(text)}</a></li>`;
+        const timeStr = formatTime(ts);
+        return `<li${liClass}><a class="summary-bullet-link" href="${href}" target="_blank" data-channel="${channelId}" data-ts="${ts}">${escapeHtml(text)}</a><span class="vip-bullet-time">${timeStr}</span></li>`;
       }
       return `<li${liClass}>${escapeHtml(text)}</li>`;
     }).join('');
@@ -3781,10 +3788,9 @@ async function kickoffVipSection(data) {
       <div class="item-left">
         <a class="item-channel-link" href="${vipHref}" target="_blank"><span class="item-channel">${escapeHtml(vip.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
         <span class="item-sep">·</span> <span class="item-time">${formatTime(latestTs)}</span>
-        <span class="item-sep">·</span> ${headerExpandHtml(msgId, vip.messages.length, vip.messages.length === 1 ? 'message' : 'messages')}
       </div>
       <div class="item-right">
-        ${bulletsHtml ? summaryToggleHtml(msgId, bulletsHtml, messagesHtml) : messagesHtml}
+        ${bulletsHtml ? `<ul class="deep-summary">${bulletsHtml}</ul>` : messagesHtml}
         <div style="display:flex;gap:12px;margin-top:6px;">
           <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
         </div>

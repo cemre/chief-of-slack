@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Slack Attention Firewall",
+  "name": "Chief of Slack",
   "version": "0.1.0",
-  "description": "Slack Attention Firewall — see only what needs your attention",
+  "description": "Chief of Slack — see only what needs your attention",
   "permissions": ["activeTab", "storage", "scripting", "declarativeNetRequest", "sidePanel", "webNavigation"],
   "host_permissions": ["https://app.slack.com/*", "https://*.slack.com/*", "https://api.anthropic.com/*"],
   "background": {
@@ -33,7 +33,7 @@
         "default": "Ctrl+Shift+F",
         "mac": "Command+Shift+F"
       },
-      "description": "Toggle Slack Attention Firewall sidebar"
+      "description": "Toggle Chief of Slack sidebar"
     }
   },
   "web_accessible_resources": [
@@ -55,6 +55,6 @@
   },
   "options_page": "options.html",
   "action": {
-    "default_title": "Slack Attention Firewall"
+    "default_title": "Chief of Slack"
   }
 }
