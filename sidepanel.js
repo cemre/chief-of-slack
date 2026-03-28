@@ -218,12 +218,16 @@ function handleSnapshotFile(file) {
 
 function importSnapshot() {
   console.log('[fslack] importSnapshot button clicked');
-  const existing = document.getElementById('snapshot-file-input');
-  if (existing) {
-    existing.click();
-  } else {
-    console.warn('[fslack] no file input found in DOM');
-  }
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.style.display = 'none';
+  input.addEventListener('change', (e) => {
+    handleSnapshotFile(e.target.files?.[0]);
+    input.remove();
+  });
+  document.body.appendChild(input);
+  input.click();
 }
 
 // ── Port connection to background.js ──
@@ -2027,7 +2031,12 @@ function renderChannelItem(cp, data, cssClass) {
       }
     }
     if (cp.messages.length > 10) {
-      html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
+      const chMsgsKey = `ch-msgs-${cp.channel_id}`;
+      const chMsgsHidden = cp.messages.slice(10).reverse();
+      _hiddenUnreadReplies.set(chMsgsKey, chMsgsHidden);
+      const chMsgsFirst = Math.min(UNREAD_REPLIES_CHUNK, chMsgsHidden.length);
+      html += `<div class="unread-earlier-toggle" data-channel="${cp.channel_id}" data-ts="" data-ch-msgs="1" data-hidden="${chMsgsHidden.length}" data-rendered="0">Show ${chMsgsFirst} earlier ${chMsgsFirst === 1 ? 'message' : 'messages'}</div>`;
+      html += `<div class="unread-earlier-container" data-for="${chMsgsKey}"></div>`;
     }
     if (cp._channelSummary) {
       const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
@@ -2039,6 +2048,14 @@ function renderChannelItem(cp, data, cssClass) {
       <div class="deep-messages" style="display:block" id="${csMsgId}">${messagesHtml}</div>`;
     }
   } else {
+    if (cp.messages.length > 10) {
+      const chMsgsKey = `ch-msgs-${cp.channel_id}`;
+      const chMsgsHidden = cp.messages.slice(10).reverse();
+      _hiddenUnreadReplies.set(chMsgsKey, chMsgsHidden);
+      const chMsgsFirst = Math.min(UNREAD_REPLIES_CHUNK, chMsgsHidden.length);
+      html += `<div class="unread-earlier-toggle" data-channel="${cp.channel_id}" data-ts="" data-ch-msgs="1" data-hidden="${chMsgsHidden.length}" data-rendered="0">Show ${chMsgsFirst} earlier ${chMsgsFirst === 1 ? 'message' : 'messages'}</div>`;
+      html += `<div class="unread-earlier-container" data-for="${chMsgsKey}"></div>`;
+    }
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
@@ -2063,9 +2080,6 @@ function renderChannelItem(cp, data, cssClass) {
         html += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}`;
       }
       html += `</div>`;
-    }
-    if (cp.messages.length > 10) {
-      html += `<div class="item-text" style="color:#888;font-size:0.85em">+${cp.messages.length - 10} more messages</div>`;
     }
   }
   html += '</div>'; // close item-right
@@ -3753,7 +3767,8 @@ function renderNextUnreadChunk(toggle) {
   const channel = toggle.dataset.channel;
   const ts = toggle.dataset.ts;
   const isDm = toggle.dataset.dm === '1';
-  const key = toggle.dataset.key || (isDm ? `dm-${channel}` : `${channel}-${ts}`);
+  const isChMsgs = toggle.dataset.chMsgs === '1';
+  const key = toggle.dataset.key || (isChMsgs ? `ch-msgs-${channel}` : isDm ? `dm-${channel}` : `${channel}-${ts}`);
   const hidden = _hiddenUnreadReplies.get(key);
   if (!hidden || !hidden.length) return;
 
@@ -3774,7 +3789,10 @@ function renderNextUnreadChunk(toggle) {
     const _urtid = truncateId;
     const rTextHtml = truncate(r.text, 1000, data?.users);
     const rExtras = wrapFilesIfTruncated(_urtid, renderFwd(r.fwd, data?.users), renderFiles(r.files));
-    if (isDm) {
+    if (isChMsgs) {
+      const threadUi = buildThreadUiMeta(data, channel, r);
+      html += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(r.subtype === 'bot_message' ? 'Bot' : uname(r.user, data?.users), channel, r.ts)} ${renderMsgBody(r, channel, data?.users, 400, threadUi)}</div></div>${threadRepliesContainer(r, channel, threadUi)}${msgActions(channel, r.ts)}</div>`;
+    } else if (isDm) {
       const isGroup = toggle.closest('.item')?.querySelector('.item-channel')?.textContent?.includes(',');
       const sender = isGroup ? `${userLink(r.subtype === 'bot_message' ? 'Bot' : uname(r.user, data?.users), channel, r.ts)} ` : '';
       html += `<div class="msg-row"><div class="msg-content item-text">${sender}${rTextHtml}${rExtras}${msgTime(r.ts, channel)}</div>${msgActions(channel, r.ts, { showReply: false })}</div>`;
@@ -3790,7 +3808,7 @@ function renderNextUnreadChunk(toggle) {
 
   if (remaining > 0) {
     const nextChunk = Math.min(UNREAD_REPLIES_CHUNK, remaining);
-    const label = isDm ? (nextChunk === 1 ? 'message' : 'messages') : (nextChunk === 1 ? 'reply' : 'replies');
+    const label = (isDm || isChMsgs) ? (nextChunk === 1 ? 'message' : 'messages') : (nextChunk === 1 ? 'reply' : 'replies');
     toggle.textContent = `Show ${nextChunk} earlier ${label}`;
   } else {
     toggle.style.display = 'none';
@@ -5814,9 +5832,4 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   // ── Snapshot export/import buttons ──
   document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
-  document.getElementById('snapshot-file-input')?.addEventListener('change', (e) => {
-    console.log('[fslack] file input change event fired');
-    handleSnapshotFile(e.target.files?.[0]);
-    e.target.value = ''; // reset so same file can be re-selected
-  });
 });
