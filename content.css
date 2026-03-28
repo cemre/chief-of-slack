@@ -903,10 +903,12 @@ ul.deep-summary li + li { border-top: none; }
 }
 
 /* Collapsible reason-badge toggle */
-.item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: -6px -16px; padding: 6px 16px; border-radius: 3px; transition: background 0.1s; }
-.item-reason-toggle:hover { background: rgba(130,150,220,0.08); }
+.item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: -12px -40px -12px -20px; padding: 12px 40px 12px 20px; border-radius: 0; transition: background 0.1s; }
+.act-now .item-reason-toggle:hover { background: rgba(240,71,112,0.10); }
+.priority-item .item-reason-toggle:hover { background: rgba(232,141,58,0.08); }
+.item:has(.item-details.expanded) .item-reason-toggle:hover { background: transparent; }
 .item-reason-toggle .reason-text { flex: 1; }
-.item-reason-toggle .reason-text:hover { text-decoration: underline; }
+.item-reason-toggle:hover .reason-text { text-decoration: underline; }
 .reason-mark-read {
   opacity: 0;
   margin-left: 8px;
