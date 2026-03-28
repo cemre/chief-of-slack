@@ -864,14 +864,8 @@ ul.deep-summary li + li { border-top: none; }
 }
 .msg-row.kb-focused > .msg-content:has(.msg-body-text) { background: transparent; }
 .msg-row.kb-focused > .msg-content > .msg-body-text { background: rgba(130,150,220,0.12); }
-.act-now.kb-focused,
-.act-now .msg-row.kb-focused > .msg-content { background: rgba(240,71,112,0.18); }
-.act-now .msg-row.kb-focused > .msg-content:has(.msg-body-text) { background: transparent; }
-.act-now .msg-row.kb-focused > .msg-content > .msg-body-text { background: rgba(240,71,112,0.18); }
-.priority-item.kb-focused,
-.priority-item .msg-row.kb-focused > .msg-content { background: rgba(232,141,58,0.18); }
-.priority-item .msg-row.kb-focused > .msg-content:has(.msg-body-text) { background: transparent; }
-.priority-item .msg-row.kb-focused > .msg-content > .msg-body-text { background: rgba(232,141,58,0.18); }
+.act-now.kb-focused { background: rgba(240,71,112,0.18); }
+.priority-item.kb-focused { background: rgba(232,141,58,0.18); }
 .section-toggle.kb-focused {
   color: var(--text-secondary);
   background: rgba(130,150,220,0.12);

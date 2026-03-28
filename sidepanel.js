@@ -847,8 +847,8 @@ function classifyFocused(focused) {
   const summaryToggleEl = parentItem?.querySelector('.summary-toggle[data-target]');
   const summaryTarget = summaryToggleEl ? document.getElementById(summaryToggleEl.dataset.target) : null;
   const isContentExpanded = isThreadExpanded(scope) || isTextExpanded(scope) ||
-    (showMsgsTarget && (showMsgsTarget.style.display === 'block' || showMsgsTarget.offsetHeight > 0)) ||
-    (summaryTarget && (summaryTarget.style.display === 'block' || summaryTarget.offsetHeight > 0));
+    (showMsgsTarget && showMsgsTarget.style.display === 'block') ||
+    (summaryTarget && summaryTarget.style.display === 'block');
   const contentFields = { scope, showMsgsLink, showMsgsTarget, summaryToggleEl, summaryTarget, isContentExpanded };
 
   // 4. Collapsible item (priority/act-now with item-details)
@@ -885,8 +885,8 @@ function collapseContent(info) {
     const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
     if (threadBadge) threadBadge.click();
   }
-  if (showMsgsTarget && (showMsgsTarget.style.display === 'block' || showMsgsTarget.offsetHeight > 0)) showMsgsLink.click();
-  if (summaryTarget && (summaryTarget.style.display === 'block' || summaryTarget.offsetHeight > 0)) summaryToggleEl.click();
+  if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
+  if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
 }
 
 function toggleContent(info) {
@@ -904,12 +904,21 @@ function handleSectionToggle(info, dir) {
 }
 
 function handleCompactItem(info, dir) {
-  if (dir !== 'right') return;
-  info.parentItem.classList.add('detail-expanded');
-  refocusAfter(els => {
-    const row = info.parentItem.querySelector('.msg-row');
-    return row ? els.indexOf(row) : -1;
-  });
+  if (dir === 'right') {
+    info.parentItem.classList.add('detail-expanded');
+    refocusAfter(els => {
+      const row = info.parentItem.querySelector('.msg-row');
+      return row ? els.indexOf(row) : -1;
+    });
+  } else {
+    // Left: collapse the entire section
+    const container = info.parentItem.closest('.when-free-items') || info.parentItem.closest('.noise-items');
+    const toggle = container?.previousElementSibling;
+    if (toggle?.classList.contains('section-toggle')) {
+      toggle.click();
+      refocusAfter(els => els.indexOf(toggle));
+    }
+  }
 }
 
 function handleThreadReply(info, dir) {
