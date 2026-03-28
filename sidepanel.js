@@ -194,6 +194,13 @@ function importSnapshot() {
         for (const key of SNAPSHOT_KEYS) {
           if (key in data) toStore[key] = data[key];
         }
+        // Freshen timestamps so showFromCache() treats the import as current
+        if (toStore.fslackViewCache && toStore.fslackViewCache.ts) {
+          toStore.fslackViewCache.ts = Date.now();
+        }
+        if ('fslackLastFetchTs' in toStore) {
+          toStore.fslackLastFetchTs = Date.now();
+        }
         chrome.storage.local.set(toStore, () => {
           console.log(`[fslack] snapshot imported: ${Object.keys(toStore).length} keys`);
           location.reload();
@@ -3018,21 +3025,48 @@ bodyEl.addEventListener('click', (e) => {
   // Mark all read / undo
   const markAll = e.target.closest('.mark-all-read');
   if (markAll) {
-    if (markAll.classList.contains('done')) {
-      return; // already marked read, no undo
+    if (markAll.classList.contains('done') && !markAll.dataset.pending) {
+      // Undo: mark unread
+      const { channel, ts, threadTs } = markAll.dataset;
+      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      markAll.dataset.pending = 'true';
+      markAll.classList.remove('done');
+      if (!isIconCheck) markAll.textContent = '...';
+      const _undoItem = markAll.closest('.item');
+      if (_undoItem) _undoItem.classList.remove('read-done');
+      // Sync sibling entry points
+      const _undoSiblings = _undoItem ? _undoItem.querySelectorAll('.mark-all-read') : [];
+      for (const sib of _undoSiblings) {
+        if (sib === markAll) continue;
+        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+        sib.classList.remove('done');
+        if (!sibIsIcon) sib.textContent = '...';
+      }
+      sendToInject({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` });
     } else if (!markAll.dataset.pending) {
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
       const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
       if (isIconCheck) {
         markAll.textContent = '✓';
-        markAll.classList.add('done');
       } else {
-        markAll.textContent = 'done';
-        markAll.classList.add('done');
+        markAll.textContent = 'undo';
       }
+      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       const _markItem = markAll.closest('.item');
       if (_markItem) { _markItem.classList.add('read-done'); removeCachedItem(channel, threadTs); updateSectionToggleCount(_markItem); }
+      // Sync sibling entry points
+      const _markSiblings = _markItem ? _markItem.querySelectorAll('.mark-all-read') : [];
+      for (const sib of _markSiblings) {
+        if (sib === markAll) continue;
+        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+        if (sibIsIcon) {
+          sib.textContent = '✓';
+        } else {
+          sib.textContent = 'undo';
+        }
+        sib.classList.add('done');
+      }
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
     return;
@@ -3052,7 +3086,8 @@ bodyEl.addEventListener('click', (e) => {
         const markBtn = sibling.querySelector('.mark-all-read:not(.done):not([data-pending])');
         if (markBtn) {
           const { channel, ts, threadTs, hasMention } = markBtn.dataset;
-          markBtn.textContent = '...';
+          const isBtnIcon = markBtn.classList.contains('gutter-check') || markBtn.classList.contains('reason-mark-read');
+          if (!isBtnIcon) markBtn.textContent = '...';
           markBtn.dataset.pending = 'true';
           sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_above_${++count}` });
         }
@@ -3197,7 +3232,8 @@ bodyEl.addEventListener('click', (e) => {
       || muteBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs: tTs, hasMention } = markAllBtn.dataset;
-      markAllBtn.textContent = '...';
+      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
+      if (!_isMuteIcon) markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
@@ -3237,7 +3273,8 @@ bodyEl.addEventListener('click', (e) => {
       || muteChannelBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs, hasMention } = markAllBtn.dataset;
-      markAllBtn.textContent = '...';
+      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
+      if (!_isMuteIcon) markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
@@ -3363,10 +3400,9 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = 'undo';
-      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       item.classList.add('read-done');
+      syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
@@ -3386,10 +3422,9 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = 'undo';
-      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       item.classList.add('read-done');
+      syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
@@ -3416,10 +3451,9 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = 'undo';
-      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       item.classList.add('read-done');
+      syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
@@ -3444,10 +3478,9 @@ bodyEl.addEventListener('click', (e) => {
       const markAll = item.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (!markAll) continue;
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      markAll.textContent = 'undo';
-      markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       item.classList.add('read-done');
+      syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       count++;
@@ -3585,7 +3618,8 @@ function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   const { channel, ts, threadTs, hasMention } = markAll.dataset;
   const markTs = overrideTs || ts;
   if (overrideTs) markAll.dataset.ts = markTs;
-  markAll.textContent = '...';
+  const _isIcon = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+  if (!_isIcon) markAll.textContent = '...';
   markAll.dataset.pending = 'true';
   sendToInject({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
 }
@@ -3925,10 +3959,8 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
         messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
       }
       const rightEl = itemEl.querySelector('.item-right');
-      const actionsEl = itemEl.querySelector('.item-actions');
-      const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
       const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
-      rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml) + actionsHtml;
+      rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml);
       // Update compact preview with ALL summary bullets joined
       const previewEl = itemEl.querySelector('.compact-preview');
       if (previewEl && cp._channelSummary) {
@@ -5080,22 +5112,34 @@ function updateSectionToggleCount(itemEl) {
   }
 }
 
+function syncMarkReadSiblings(itemEl, done) {
+  if (!itemEl) return;
+  for (const sib of itemEl.querySelectorAll('.mark-all-read')) {
+    if (sib.dataset.pending) continue;
+    const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+    if (done) {
+      if (!sibIsIcon) sib.textContent = 'undo';
+      sib.classList.add('done');
+    } else {
+      sib.textContent = sibIsIcon ? '✓' : 'mark read';
+      sib.classList.remove('done');
+    }
+  }
+}
+
 function handleMarkReadResult(msg) {
   if (msg.ok) { removeCachedItem(msg.channel, msg.thread_ts); }
   const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
   if (markAll) {
     delete markAll.dataset.pending;
+    const item = markAll.closest('.item');
     if (msg.ok) {
-      markAll.textContent = 'undo';
-      markAll.classList.add('done');
-      const item = markAll.closest('.item');
       if (item) { item.classList.add('read-done'); updateSectionToggleCount(item); }
+      syncMarkReadSiblings(item, true);
     } else {
       // API failed — undo the optimistic UI
-      markAll.textContent = 'mark read';
-      markAll.classList.remove('done');
-      const item = markAll.closest('.item');
       if (item) { item.classList.remove('read-done'); updateSectionToggleCount(item); }
+      syncMarkReadSiblings(item, false);
     }
   }
 }
@@ -5104,13 +5148,12 @@ function handleMarkUnreadResult(msg) {
   const markAll = bodyEl.querySelector('.mark-all-read[data-pending="true"]');
   if (markAll) {
     delete markAll.dataset.pending;
+    const item = markAll.closest('.item');
     if (msg.ok) {
-      markAll.textContent = 'mark read';
-      const item = markAll.closest('.item');
       if (item) { item.classList.remove('read-done'); updateSectionToggleCount(item); }
+      syncMarkReadSiblings(item, false);
     } else {
-      markAll.textContent = 'undo';
-      markAll.classList.add('done');
+      syncMarkReadSiblings(item, true);
     }
   }
 }

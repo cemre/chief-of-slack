@@ -914,8 +914,8 @@ ul.deep-summary li + li { border-top: none; }
 .reason-mark-read.done {
   opacity: 1;
   font-size: 14px;
-  color: var(--bg);
-  background: var(--accent);
+  color: var(--bg-base);
+  background: var(--text-secondary);
   border-radius: 50%;
   width: 18px;
   height: 18px;
@@ -925,6 +925,11 @@ ul.deep-summary li + li { border-top: none; }
   padding: 0;
   line-height: 1;
 }
+.item.act-now .reason-mark-read.done { background: var(--danger); }
+.item.priority-item .reason-mark-read.done { background: var(--priority-orange); }
+.item.when-free .reason-mark-read.done { background: var(--warning); }
+.item.interesting .reason-mark-read.done { background: var(--accent); }
+.item.noise-item .reason-mark-read.done { background: var(--text-muted); }
 
 /* Gutter check — right-edge mark-read for when-free/noise items */
 .gutter-check {
@@ -953,8 +958,8 @@ ul.deep-summary li + li { border-top: none; }
 .gutter-check.done {
   opacity: 1;
   font-size: 14px;
-  color: var(--bg);
-  background: var(--accent);
+  color: var(--bg-base);
+  background: var(--text-secondary);
   border-radius: 50%;
   width: 20px;
   height: 20px;
@@ -964,6 +969,11 @@ ul.deep-summary li + li { border-top: none; }
   padding: 0;
   line-height: 1;
 }
+.item.act-now .gutter-check.done { background: var(--danger); }
+.item.priority-item .gutter-check.done { background: var(--priority-orange); }
+.item.when-free .gutter-check.done { background: var(--warning); }
+.item.interesting .gutter-check.done { background: var(--accent); }
+.item.noise-item .gutter-check.done { background: var(--text-muted); }
 .item-details { display: none; }
 .item-details.expanded { display: block; }
 
