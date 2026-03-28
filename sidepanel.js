@@ -845,8 +845,8 @@ function classifyFocused(focused) {
   const summaryToggleEl = parentItem?.querySelector('.summary-toggle[data-target]');
   const summaryTarget = summaryToggleEl ? document.getElementById(summaryToggleEl.dataset.target) : null;
   const isContentExpanded = isThreadExpanded(scope) || isTextExpanded(scope) ||
-    (showMsgsTarget && showMsgsTarget.style.display === 'block') ||
-    (summaryTarget && summaryTarget.style.display === 'block');
+    (showMsgsTarget && (showMsgsTarget.style.display === 'block' || showMsgsTarget.offsetHeight > 0)) ||
+    (summaryTarget && (summaryTarget.style.display === 'block' || summaryTarget.offsetHeight > 0));
   const contentFields = { scope, showMsgsLink, showMsgsTarget, summaryToggleEl, summaryTarget, isContentExpanded };
 
   // 4. Collapsible item (priority/act-now with item-details)
@@ -870,8 +870,8 @@ function expandContent(info) {
     const seeMore = scope?.querySelector('.see-more:not([style*="display:none"])');
     if (seeMore) seeMore.click();
   }
-  if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
-  if (summaryToggleEl && summaryTarget && summaryTarget.style.display !== 'block') summaryToggleEl.click();
+  if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block' && !showMsgsTarget.offsetHeight) showMsgsLink.click();
+  if (summaryToggleEl && summaryTarget && summaryTarget.style.display !== 'block' && !summaryTarget.offsetHeight) summaryToggleEl.click();
 }
 
 function collapseContent(info) {
@@ -883,8 +883,8 @@ function collapseContent(info) {
     const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
     if (threadBadge) threadBadge.click();
   }
-  if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
-  if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
+  if (showMsgsTarget && (showMsgsTarget.style.display === 'block' || showMsgsTarget.offsetHeight > 0)) showMsgsLink.click();
+  if (summaryTarget && (summaryTarget.style.display === 'block' || summaryTarget.offsetHeight > 0)) summaryToggleEl.click();
 }
 
 function toggleContent(info) {
