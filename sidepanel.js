@@ -3,6 +3,8 @@ console.log('[fslack] sidepanel.js loaded', new Date().toISOString());
 
 const FSLACK = 'fslack';
 const SEEN_REPLIES_CHUNK = 10;
+const UNREAD_REPLIES_CHUNK = 10;
+const _hiddenUnreadReplies = new Map(); // "channel-ts" → array of reply objects
 const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
 
 // ── Drafts (local-only, chrome.storage) ──
@@ -382,8 +384,22 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 
 const closeBtn = document.getElementById('close-btn');
 const refreshLink = document.getElementById('refresh-link');
+
+function openSettingsPage() {
+  chrome.runtime.sendMessage({ type: `${FSLACK}:openSettings` }, (resp) => {
+    if (chrome.runtime.lastError || !resp?.ok) {
+      console.warn('[fslack] openSettings failed', chrome.runtime.lastError?.message || resp?.error);
+      try {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+      } catch (e) {
+        console.warn('[fslack] local open settings fallback failed', e?.message);
+      }
+    }
+  });
+}
+
 document.getElementById('settings-btn').addEventListener('click', () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+  openSettingsPage();
 });
 
 // ── Slack link click handler: navigate existing tab instead of opening new ones ──
@@ -923,15 +939,25 @@ function handleCompactItem(info, dir) {
 
 function handleThreadReply(info, dir) {
   if (dir !== 'left') return;
-  const { channel, ts } = info;
-  if (!channel || !ts) return;
-  const parentBadge = bodyEl.querySelector(`.msg-thread-badge.expanded[data-channel="${channel}"][data-ts="${ts}"]`);
-  if (parentBadge) {
-    parentBadge.click();
-    refocusAfter(els => {
-      const row = parentBadge.closest('.msg-row');
-      return row ? els.indexOf(row) : -1;
-    });
+  const { channel, ts, parentItem } = info;
+  // Inline-expanded thread (has channel/ts): collapse and focus parent row
+  if (channel && ts) {
+    const parentBadge = bodyEl.querySelector(`.msg-thread-badge.expanded[data-channel="${channel}"][data-ts="${ts}"]`);
+    if (parentBadge) {
+      parentBadge.click();
+      refocusAfter(els => {
+        const row = parentBadge.closest('.msg-row');
+        return row ? els.indexOf(row) : -1;
+      });
+      return;
+    }
+  }
+  // Main thread item: focus the root msg-row (first msg-row not inside thread-replies-container)
+  if (parentItem) {
+    const rootRow = parentItem.querySelector('.msg-row:not(.thread-replies-container .msg-row)');
+    if (rootRow) {
+      refocusAfter(els => els.indexOf(rootRow));
+    }
   }
 }
 
@@ -1796,10 +1822,10 @@ function renderThreadItem(t, data, cssClass) {
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
 
-  const UNREAD_CHUNK = 10;
-  const hiddenCount = Math.max(0, unread.length - UNREAD_CHUNK);
+  const hiddenCount = Math.max(0, unread.length - UNREAD_REPLIES_CHUNK);
   if (hiddenCount > 0) {
-    const firstChunk = Math.min(UNREAD_CHUNK, hiddenCount);
+    _hiddenUnreadReplies.set(`${t.channel_id}-${t.ts}`, unread.slice(0, hiddenCount));
+    const firstChunk = Math.min(UNREAD_REPLIES_CHUNK, hiddenCount);
     html += `<div class="unread-earlier-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-hidden="${hiddenCount}" data-rendered="0">Show ${firstChunk} earlier ${firstChunk === 1 ? 'reply' : 'replies'}</div>`;
     html += `<div class="unread-earlier-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
@@ -1858,9 +1884,17 @@ function renderDmItem(dm, data, cssClass) {
     ${cssClass === 'when-free' && latest.text ? `<div class="compact-preview">${escapeHtml(latest.text.slice(0, 120).replace(/\n/g, ' '))}</div>` : ''}
     <div class="item-right">`;
   const dmReversed = [...dm.messages].reverse();
-  for (let i = 0; i < dmReversed.length; i++) {
-    const m = dmReversed[i];
-    const nextM = dmReversed[i + 1];
+  const dmHiddenCount = Math.max(0, dmReversed.length - UNREAD_REPLIES_CHUNK);
+  if (dmHiddenCount > 0) {
+    _hiddenUnreadReplies.set(`dm-${dm.channel_id}`, dmReversed.slice(0, dmHiddenCount));
+    const firstChunk = Math.min(UNREAD_REPLIES_CHUNK, dmHiddenCount);
+    html += `<div class="unread-earlier-toggle" data-channel="${dm.channel_id}" data-ts="" data-dm="1" data-hidden="${dmHiddenCount}" data-rendered="0">Show ${firstChunk} earlier ${firstChunk === 1 ? 'message' : 'messages'}</div>`;
+    html += `<div class="unread-earlier-container" data-for="dm-${dm.channel_id}"></div>`;
+  }
+  const dmVisible = dmHiddenCount > 0 ? dmReversed.slice(dmHiddenCount) : dmReversed;
+  for (let i = 0; i < dmVisible.length; i++) {
+    const m = dmVisible[i];
+    const nextM = dmVisible[i + 1];
     const isLastInRun = !nextM || nextM.user !== m.user;
     const sender = dm.isGroup ? `${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), dm.channel_id, m.ts)} ` : '';
     const _dtid = truncateId;
@@ -2582,6 +2616,7 @@ function sortNoiseItems(items, noiseOrder = []) {
 
 function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], _unused = false, cachedTs = null) {
   const { actNow, priority, whenFree, noise } = prioritized;
+  _hiddenUnreadReplies.clear();
 
   let html = '';
 
@@ -3611,6 +3646,13 @@ bodyEl.addEventListener('click', (e) => {
     handleSeenRepliesToggleClick(toggle);
     return;
   }
+
+  // Unread earlier replies chunked expansion
+  const unreadToggle = e.target.closest('.unread-earlier-toggle');
+  if (unreadToggle) {
+    renderNextUnreadChunk(unreadToggle);
+    return;
+  }
 });
 
 // ── Shift+hover batch mark-read preview ──
@@ -3704,6 +3746,54 @@ bodyEl.addEventListener('click', (e) => {
 
 function seenRepliesLabel(count) {
   return count === 1 ? 'reply' : 'replies';
+}
+
+function renderNextUnreadChunk(toggle) {
+  const channel = toggle.dataset.channel;
+  const ts = toggle.dataset.ts;
+  const isDm = toggle.dataset.dm === '1';
+  const key = toggle.dataset.key || (isDm ? `dm-${channel}` : `${channel}-${ts}`);
+  const hidden = _hiddenUnreadReplies.get(key);
+  if (!hidden || !hidden.length) return;
+
+  const container = bodyEl.querySelector(`.unread-earlier-container[data-for="${key}"]`);
+  if (!container) return;
+
+  const rendered = parseInt(toggle.dataset.rendered, 10) || 0;
+  // hidden is stored oldest-first; reveal from the end (most recent hidden first)
+  const total = hidden.length;
+  const endIdx = total - rendered;
+  const startIdx = Math.max(0, endIdx - UNREAD_REPLIES_CHUNK);
+  if (startIdx === endIdx) return;
+
+  const data = lastRenderData;
+  let html = '';
+  for (let i = startIdx; i < endIdx; i++) {
+    const r = hidden[i];
+    const _urtid = truncateId;
+    const rTextHtml = truncate(r.text, 1000, data?.users);
+    const rExtras = wrapFilesIfTruncated(_urtid, renderFwd(r.fwd, data?.users), renderFiles(r.files));
+    if (isDm) {
+      const isGroup = toggle.closest('.item')?.querySelector('.item-channel')?.textContent?.includes(',');
+      const sender = isGroup ? `${userLink(r.subtype === 'bot_message' ? 'Bot' : uname(r.user, data?.users), channel, r.ts)} ` : '';
+      html += `<div class="msg-row"><div class="msg-content item-text">${sender}${rTextHtml}${rExtras}${msgTime(r.ts, channel)}</div>${msgActions(channel, r.ts, { showReply: false })}</div>`;
+    } else {
+      html += `<div class="msg-row"><div class="msg-content item-reply">${userLink(uname(r.user, data?.users), channel, r.ts, ts)} ${rTextHtml}${rExtras}${msgTime(r.ts, channel, ts)}</div>${msgActions(channel, r.ts)}</div>`;
+    }
+  }
+  container.insertAdjacentHTML('afterbegin', html);
+
+  const newRendered = rendered + (endIdx - startIdx);
+  toggle.dataset.rendered = `${newRendered}`;
+  const remaining = total - newRendered;
+
+  if (remaining > 0) {
+    const nextChunk = Math.min(UNREAD_REPLIES_CHUNK, remaining);
+    const label = isDm ? (nextChunk === 1 ? 'message' : 'messages') : (nextChunk === 1 ? 'reply' : 'replies');
+    toggle.textContent = `Show ${nextChunk} earlier ${label}`;
+  } else {
+    toggle.style.display = 'none';
+  }
 }
 
 function renderNextSeenRepliesChunk(toggle, container) {
@@ -3943,7 +4033,7 @@ function showSettingsView({ fromApiGate = false, retryData = null } = {}) {
   });
 
   document.getElementById('inline-open-options-btn').addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+    openSettingsPage();
   });
 
   const skipBtn = document.getElementById('inline-skip-key-btn');
@@ -5270,8 +5360,18 @@ function handleRepliesResult(msg) {
       threadReplies = threadReplies.filter((r) => parseThreadTsValue(r.ts) > afterVal);
     }
 
+    const hiddenCount = Math.max(0, threadReplies.length - UNREAD_REPLIES_CHUNK);
+    const visibleReplies = hiddenCount > 0 ? threadReplies.slice(hiddenCount) : threadReplies;
     let html = '';
-    for (const r of threadReplies) {
+    if (hiddenCount > 0) {
+      const hiddenReplies = threadReplies.slice(0, hiddenCount);
+      const key = `fetched-${channel}-${ts}`;
+      _hiddenUnreadReplies.set(key, hiddenReplies);
+      const firstChunk = Math.min(UNREAD_REPLIES_CHUNK, hiddenCount);
+      html += `<div class="unread-earlier-toggle" data-channel="${channel}" data-ts="${ts}" data-key="${key}" data-hidden="${hiddenCount}" data-rendered="0">Show ${firstChunk} earlier ${firstChunk === 1 ? 'reply' : 'replies'}</div>`;
+      html += `<div class="unread-earlier-container" data-for="${key}"></div>`;
+    }
+    for (const r of visibleReplies) {
       const userName = data ? uname(r.user, data.users) : r.user;
       const _trtid = truncateId;
       const trTextHtml = truncate(r.text, 400, data?.users);

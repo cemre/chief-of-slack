@@ -587,6 +587,14 @@ ul.slack-list, ol.slack-list {
 .seen-replies-toggle:hover { color: var(--text-secondary); }
 .seen-replies-toggle.loading { color: var(--text-muted); cursor: wait; }
 .seen-replies-container .item-reply { color: var(--text-muted); }
+.unread-earlier-toggle {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.unread-earlier-toggle:hover { color: var(--text-secondary); }
 .root-seen { color: var(--text-muted); }
 .root-seen .item-user { color: var(--text-secondary); }
 .root-summary { font-style: italic; }
@@ -860,12 +868,16 @@ ul.deep-summary li + li { border-top: none; }
 /* Keyboard navigation */
 .item.kb-focused,
 .msg-row.kb-focused > .msg-content {
-  background: rgba(130,150,220,0.12);
+  background: rgba(130,150,220,0.05);
 }
-.msg-row.kb-focused > .msg-content:has(.msg-body-text) { background: transparent; }
-.msg-row.kb-focused > .msg-content > .msg-body-text { background: rgba(130,150,220,0.12); }
-.act-now.kb-focused { background: rgba(240,71,112,0.18); }
-.priority-item.kb-focused { background: rgba(232,141,58,0.18); }
+.msg-row.kb-focused > .msg-content {
+  box-shadow: 0 0 0 6px rgba(130,150,220,0.05);
+  border-radius: 3px;
+}
+.msg-row.kb-focused > .msg-content:has(.msg-body-text) { background: transparent; box-shadow: none; }
+.msg-row.kb-focused > .msg-content > .msg-body-text { background: rgba(130,150,220,0.05); box-shadow: 0 0 0 6px rgba(130,150,220,0.05); border-radius: 3px; }
+.act-now.kb-focused { background: rgba(240,71,112,0.07); }
+.priority-item.kb-focused { background: rgba(232,141,58,0.07); }
 .section-toggle.kb-focused {
   color: var(--text-secondary);
   background: rgba(130,150,220,0.12);
