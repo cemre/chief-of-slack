@@ -970,10 +970,6 @@ ul.deep-summary li + li { border-top: none; }
 }
 .item:hover > .gutter-check,
 .item:hover .gutter-check { opacity: 0.5; }
-.when-free-items .item:not(.detail-expanded) > .gutter-check,
-.noise-items .item:not(.detail-expanded) > .gutter-check { opacity: 0.35; }
-.when-free-items .item:not(.detail-expanded):hover > .gutter-check,
-.noise-items .item:not(.detail-expanded):hover > .gutter-check { opacity: 0.7; }
 .when-free-items .item.detail-expanded > .gutter-check,
 .noise-items .item.detail-expanded > .gutter-check { display: none; }
 .gutter-check:hover { opacity: 1 !important; color: var(--accent); }
