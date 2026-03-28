@@ -383,7 +383,7 @@ lightbox.querySelector('.lb-arrow.next').addEventListener('click', () => lbNav(1
 const closeBtn = document.getElementById('close-btn');
 const refreshLink = document.getElementById('refresh-link');
 document.getElementById('settings-btn').addEventListener('click', () => {
-  chrome.runtime.openOptionsPage();
+  chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
 });
 
 // ── Slack link click handler: navigate existing tab instead of opening new ones ──
@@ -1796,7 +1796,15 @@ function renderThreadItem(t, data, cssClass) {
     html += `<div class="seen-replies-container" data-for="${t.channel_id}-${t.ts}"></div>`;
   }
 
-  for (const r of unread) {
+  const UNREAD_CHUNK = 10;
+  const hiddenCount = Math.max(0, unread.length - UNREAD_CHUNK);
+  if (hiddenCount > 0) {
+    const firstChunk = Math.min(UNREAD_CHUNK, hiddenCount);
+    html += `<div class="unread-earlier-toggle" data-channel="${t.channel_id}" data-ts="${t.ts}" data-hidden="${hiddenCount}" data-rendered="0">Show ${firstChunk} earlier ${firstChunk === 1 ? 'reply' : 'replies'}</div>`;
+    html += `<div class="unread-earlier-container" data-for="${t.channel_id}-${t.ts}"></div>`;
+  }
+  const visibleUnread = hiddenCount > 0 ? unread.slice(hiddenCount) : unread;
+  for (const r of visibleUnread) {
     const _urtid = truncateId;
     const rTextHtml = truncate(r.text, 1000, data.users);
     const rExtras = wrapFilesIfTruncated(_urtid, renderFwd(r.fwd, data.users), renderFiles(r.files));
@@ -3852,27 +3860,102 @@ function sendReply(form, channel, threadTs, text) {
   }
 }
 
-// ── API key prompt — directs user to options page ──
-function showApiKeyPrompt(rawData) {
+function restoreMainView() {
+  if (cachedView?.prioritized && cachedView?.data) {
+    renderPrioritized(
+      cachedView.prioritized,
+      cachedView.data,
+      cachedView.popular,
+      false,
+      false,
+      cachedView.saved || [],
+      false,
+      cachedView.ts
+    );
+    return;
+  }
+  if (lastRenderData) {
+    render(lastRenderData);
+    return;
+  }
+  if (!showFromCache()) {
+    bodyEl.innerHTML = '<div id="status">Waiting for Slack tab...</div>';
+  }
+}
+
+function showSettingsView({ fromApiGate = false, retryData = null } = {}) {
   bodyEl.innerHTML = `
     <div class="api-key-form">
-      <div style="color: #fff; font-size: 16px; margin-bottom: 12px;">Claude API Key Required</div>
+      <div style="color: #fff; font-size: 16px; margin-bottom: 12px;">Settings</div>
       <div style="color: #ababad; font-size: 13px; margin-bottom: 16px;">
-        Set your Anthropic API key in the extension settings to enable smart prioritization.
+        Enter your Anthropic API key to enable smart prioritization.
       </div>
+      <div style="display:flex; gap:8px; justify-content:center; align-items:center; margin-bottom:8px;">
+        <input id="inline-api-key" type="password" placeholder="sk-ant-..." spellcheck="false" autocomplete="off">
+        <button id="inline-toggle-key" class="secondary" style="padding:6px 10px;">Show</button>
+      </div>
+      <div style="max-width:560px; margin:0 auto 12px; text-align:left;">
+        <div style="color:#6b7190; font-size:12px; margin-bottom:6px;">About me (optional)</div>
+        <textarea id="inline-user-context" maxlength="400" rows="3" style="width:100%; box-sizing:border-box; background:var(--bg-input); color:var(--text-bright); border:1px solid var(--border-strong); border-radius:6px; padding:8px 10px; resize:vertical; font-family:inherit;" placeholder="What context should summaries optimize for?"></textarea>
+      </div>
+      <div id="inline-settings-status" style="font-size:12px; color:#6b7190; min-height:16px; margin-bottom:8px;"></div>
       <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: center;">
-        <button id="open-settings-btn">Open Settings</button>
-        <button id="skip-key-btn" class="secondary">Skip</button>
+        <button id="inline-save-settings-btn">Save</button>
+        <button id="inline-open-options-btn" class="secondary">Advanced</button>
+        ${fromApiGate ? '<button id="inline-skip-key-btn" class="secondary">Skip</button>' : '<button id="inline-back-btn" class="secondary">Back</button>'}
       </div>
     </div>`;
 
-  document.getElementById('open-settings-btn').addEventListener('click', () => {
-    chrome.runtime.openOptionsPage();
+  const keyInput = document.getElementById('inline-api-key');
+  const userContextInput = document.getElementById('inline-user-context');
+  const statusEl = document.getElementById('inline-settings-status');
+  const toggleBtn = document.getElementById('inline-toggle-key');
+  const saveBtn = document.getElementById('inline-save-settings-btn');
+
+  chrome.storage.local.get(['claudeApiKey', 'userContext'], (result) => {
+    keyInput.value = result.claudeApiKey || '';
+    userContextInput.value = result.userContext || '';
   });
 
-  document.getElementById('skip-key-btn').addEventListener('click', () => {
-    render(rawData);
+  toggleBtn.addEventListener('click', () => {
+    const showing = keyInput.type === 'text';
+    keyInput.type = showing ? 'password' : 'text';
+    toggleBtn.textContent = showing ? 'Show' : 'Hide';
   });
+
+  saveBtn.addEventListener('click', () => {
+    const key = keyInput.value.trim();
+    const userContext = userContextInput.value.trim();
+    if (fromApiGate && !key) {
+      statusEl.textContent = 'Enter an API key or press Skip.';
+      return;
+    }
+    saveBtn.disabled = true;
+    chrome.storage.local.set({ claudeApiKey: key, userContext }, () => {
+      saveBtn.disabled = false;
+      statusEl.textContent = 'Saved.';
+      if (fromApiGate && retryData) {
+        prioritizeAndRender(retryData);
+      } else {
+        restoreMainView();
+      }
+    });
+  });
+
+  document.getElementById('inline-open-options-btn').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+  });
+
+  const skipBtn = document.getElementById('inline-skip-key-btn');
+  if (skipBtn) skipBtn.addEventListener('click', () => render(retryData));
+
+  const backBtn = document.getElementById('inline-back-btn');
+  if (backBtn) backBtn.addEventListener('click', restoreMainView);
+}
+
+// ── API key prompt — opens in-panel settings form ──
+function showApiKeyPrompt(rawData) {
+  showSettingsView({ fromApiGate: true, retryData: rawData });
 }
 // ── Async VIP section: wait for data, summarize, render ──
 async function kickoffVipSection(data) {
