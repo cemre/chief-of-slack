@@ -293,7 +293,7 @@ a.item-user[data-channel]::before {
   border: 1px solid var(--border-strong);
 }
 a.item-user[data-channel]:hover::before { opacity: 1; }
-.item-text { color: var(--text-primary); line-height: 1.46; word-break: break-word; margin-top: 2px; }
+.item-text { color: var(--text-primary); line-height: 1.55; word-break: break-word; margin-top: 2px; }
 .item-text a, .item-reply a { color: var(--accent); text-decoration: none; }
 .item-text a:hover, .item-reply a:hover { text-decoration: underline; }
 .item-text:first-child { margin-top: 0; }

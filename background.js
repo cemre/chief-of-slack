@@ -729,6 +729,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   }
+  if (msg.type === `${FSLACK}:openSettings`) {
+    chrome.tabs.create({ url: chrome.runtime.getURL('options.html') }, () => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ ok: false, error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ ok: true });
+      }
+    });
+    return true;
+  }
   // Navigate existing Slack tab (from sidepanel link clicks)
   if (msg.type === `${FSLACK}:navigateSlackTab`) {
     getSlackTabId().then((tabId) => {
