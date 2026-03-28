@@ -3647,7 +3647,12 @@ function clearShiftPreview() {
 }
 
 bodyEl.addEventListener('mouseover', (e) => {
-  const markEl = e.target.closest('.gutter-check, .reason-mark-read');
+  let markEl = e.target.closest('.gutter-check, .reason-mark-read');
+  // Fallback: hovering anywhere on reason-toggle row (large padding) targets its checkmark
+  if (!markEl) {
+    const toggle = e.target.closest('.item-reason-toggle');
+    if (toggle) markEl = toggle.querySelector('.reason-mark-read:not(.done)');
+  }
   if (!markEl) {
     if (shiftPreviewTarget) { clearShiftPreview(); shiftPreviewTarget = null; }
     return;
