@@ -1609,7 +1609,6 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused 
     ${showReply ? `<span class="action-reply" data-channel="${channel}" data-ts="${replyTs}"${isDm ? ' data-dm="true"' : ''}>${replyLabel}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
-    <span class="mark-above-read">mark above read</span>
   </div>`;
 }
 
@@ -1680,7 +1679,7 @@ function renderThreadItem(t, data, cssClass) {
   const threadKey = shouldSummarize ? `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}` : '';
   const repliesMsgId = shouldSummarize ? `${threadKey}-replies` : '';
   const collapsible = cssClass === 'act-now' || cssClass === 'priority-item';
-  let html = `<div class="item ${cssClass}">`;
+  let html = `<div class="item ${cssClass}${shouldSummarize ? ' item-summarized' : ''}">`;
   html += reasonBadge(t, cssClass);
   if (collapsible) html += '<div class="item-details">';
   const threadOpenHref = slackPermalink(t.channel_id, t.ts, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
@@ -1891,7 +1890,8 @@ function renderChannelItem(cp, data, cssClass) {
   const csKeyAttr = needsChannelSummary ? ` data-channel-summary-key="ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}"` : '';
   const csKey = needsChannelSummary ? `ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}` : '';
   const csMsgId = csKey ? `${csKey}-msgs` : '';
-  let html = `<div class="item ${cssClass}"${csKeyAttr}>`;
+  const chSummarized = needsChannelSummary && cp._channelSummary;
+  let html = `<div class="item ${cssClass}${chSummarized ? ' item-summarized' : ''}"${csKeyAttr}>`;
   html += reasonBadge(cp, cssClass);
   if (collapsible) html += '<div class="item-details">';
   const chOpenHref = slackPermalink(cp.channel_id, latest?.ts) || `https://app.slack.com/archives/${cp.channel_id}`;
@@ -1962,14 +1962,14 @@ function renderChannelItem(cp, data, cssClass) {
         const summaryHtml = m._chThreadSummary
           ? `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(m._chThreadSummary)}</div>`
           : `<div id="${tKey}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}`
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}</div>`
           + `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
           + summaryHtml
           + `<span class="show-messages-link" data-target="${repliesId}" data-fetch-replies="1" data-channel="${cp.channel_id}" data-ts="${threadTs}" style="margin-top:2px">show ${m.reply_count} ${m.reply_count === 1 ? 'reply' : 'replies'} ↓</span>`
           + `<div class="deep-messages" id="${repliesId}"></div>`
-          + `</div></div>${msgActions(cp.channel_id, m.ts)}</div>`;
+          + `</div>${msgActions(cp.channel_id, m.ts)}</div>`;
       } else {
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
       }
     }
     if (cp.messages.length > 10) {
@@ -1999,14 +1999,14 @@ function renderChannelItem(cp, data, cssClass) {
         const summaryHtml = m._chThreadSummary
           ? `<div class="deep-summary" style="margin:6px 0 2px">${escapeHtml(m._chThreadSummary)}</div>`
           : `<div id="${key}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin:6px 0 2px">Summarizing replies…</div>`;
-        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}`
+        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi, { skipBadge: true })}</div>`
           + `<div class="thread-replies-container" data-channel="${cp.channel_id}" data-ts="${threadTs}" data-container-id="${containerId}"${modeAttr}${afterAttr}>`
           + summaryHtml
           + `<span class="show-messages-link" data-target="${repliesId}" data-fetch-replies="1" data-channel="${cp.channel_id}" data-ts="${threadTs}" style="margin-top:2px">show ${m.reply_count} ${m.reply_count === 1 ? 'reply' : 'replies'} ↓</span>`
           + `<div class="deep-messages" id="${repliesId}"></div>`
-          + `</div></div>${msgActions(cp.channel_id, m.ts)}`;
+          + `</div>${msgActions(cp.channel_id, m.ts)}`;
       } else {
-        html += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
+        html += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}`;
       }
       html += `</div>`;
     }
@@ -2034,7 +2034,7 @@ function renderDeepSummarizedItem(cp, data) {
   let messagesHtml = '';
   for (const m of [...msgs].reverse()) {
     const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   const deepBullets = renderChannelSummaryBullets(cp._deepSummary || '', cp.channel_id);
@@ -2050,7 +2050,7 @@ function renderDeepSummarizedItem(cp, data) {
     <div class="item-right">
       ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
-        <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark as read</span>
+        <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark read</span>
         <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
       </div>
     </div>
@@ -2096,7 +2096,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   let messagesHtml = '';
   for (const m of allMsgs) {
     const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
   }
 
   let contentHtml;
@@ -2106,7 +2106,7 @@ function renderBotThreadItem(cp, data, cssClass) {
         <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
         <div style="display:flex;gap:12px;margin-top:6px;">
           <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${allMsgs.length} message${allMsgs.length === 1 ? '' : 's'} ↓</span>
-          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" style="margin-top:0">mark as read</span>
+          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" style="margin-top:0">mark read</span>
         </div>
       </div></div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>`;
@@ -3170,32 +3170,6 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Mark all above read
-  const markAbove = e.target.closest('.mark-above-read');
-  if (markAbove) {
-    const thisItem = markAbove.closest('.item');
-    if (!thisItem) return;
-    // Walk backward through preceding .item siblings in the same section
-    let sibling = thisItem.previousElementSibling;
-    let count = 0;
-    while (sibling) {
-      if (sibling.classList.contains('section-toggle') || sibling.classList.contains('noise-section-footer')) break;
-      if (sibling.classList.contains('item')) {
-        const markBtn = sibling.querySelector('.mark-all-read:not(.done):not([data-pending])');
-        if (markBtn) {
-          const { channel, ts, threadTs, hasMention } = markBtn.dataset;
-          const isBtnIcon = markBtn.classList.contains('gutter-check') || markBtn.classList.contains('reason-mark-read');
-          if (!isBtnIcon) markBtn.textContent = '...';
-          markBtn.dataset.pending = 'true';
-          sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_above_${++count}` });
-        }
-      }
-      sibling = sibling.previousElementSibling;
-    }
-    if (count > 0) markAbove.textContent = `✓ ${count} marked`;
-    return;
-  }
-
   // Reaction action (toggle)
   const reactBtn = e.target.closest('.action-react');
   if (reactBtn && !reactBtn.dataset.pending) {
@@ -3404,8 +3378,10 @@ bodyEl.addEventListener('click', (e) => {
     const msgsDiv = document.getElementById(targetId);
     if (!msgsDiv) return;
     const item = summaryToggle.closest('.item');
-    // In compact sections, clicking the header-expand collapses back to compact one-liner
-    if (item?.classList.contains('detail-expanded') && (item.closest('.when-free-items') || item.closest('.noise-items'))) {
+    // In compact sections, clicking the summary body collapses back to compact one-liner
+    // (but clicking the header-expand "N replies ↓" should toggle the replies, not collapse)
+    if (item?.classList.contains('detail-expanded') && (item.closest('.when-free-items') || item.closest('.noise-items'))
+        && !(summaryToggle.classList.contains('header-expand') && item.querySelector('.msg-row.summarized'))) {
       item.classList.remove('detail-expanded');
       return;
     }
@@ -3604,6 +3580,7 @@ bodyEl.addEventListener('click', (e) => {
 
 // Click-to-focus: track position for keyboard nav without showing highlight
 bodyEl.addEventListener('click', (e) => {
+  if (!e.isTrusted) return; // skip programmatic clicks from keyboard nav
   const nav = e.target.closest('.msg-row, .item, .section-toggle');
   if (!nav) return;
   const target = nav.classList.contains('item')
@@ -4005,7 +3982,7 @@ function runBotThreadSummarization(whenFreeItems, data) {
           <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
           <div style="display:flex;gap:12px;margin-top:6px;">
             <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
-            <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark as read</span>
+            <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark read</span>
           </div>
         </div></div>
         <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
@@ -4054,7 +4031,7 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       let messagesHtml = '';
       for (const m of cp.messages.slice(0, 10).reverse()) {
         const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
       }
       const rightEl = itemEl.querySelector('.item-right');
       const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);

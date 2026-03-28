@@ -241,7 +241,7 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 .item-actions span, .item-actions a { cursor: pointer; color: inherit; text-decoration: none; transition: color 0.1s; }
 .item-actions span:hover, .item-actions a:hover { color: var(--text-primary); }
 .item-actions .mark-all-read.done { color: var(--success); }
-.item-actions .mark-above-read { margin-left: auto; }
+.item.item-summarized > .item-actions { display: none; }
 
 /* Mentions */
 .self-mention { color: var(--danger); font-weight: 700; }
@@ -386,8 +386,8 @@ ul.slack-list, ol.slack-list {
 .thread-replies-container .msg-row + .msg-row { margin-top: 5px; }
 .thread-replies-container .file-thumb img { max-width: 160px; max-height: 80px; }
 .thread-replies-container .item-reply { margin-top: 0; }
-.thread-replies-container .msg-content { margin-right: 0; }
-.thread-replies-container .msg-actions { right: 0; }
+.thread-replies-container .msg-content { margin-right: 0; padding-right: 44px; }
+.thread-replies-container .msg-actions { right: -16px; }
 .item .thread-replies-container { margin-bottom: 0; }
 .item-reply {
   margin-top: 6px;
@@ -903,7 +903,8 @@ ul.deep-summary li + li { border-top: none; }
 }
 
 /* Collapsible reason-badge toggle */
-.item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; }
+.item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: -6px -16px; padding: 6px 16px; border-radius: 3px; transition: background 0.1s; }
+.item-reason-toggle:hover { background: rgba(130,150,220,0.08); }
 .item-reason-toggle .reason-text { flex: 1; }
 .item-reason-toggle .reason-text:hover { text-decoration: underline; }
 .reason-mark-read {
@@ -1135,5 +1136,20 @@ ul.deep-summary li + li { border-top: none; }
 }
 .when-free-items .item.detail-expanded .deep-messages,
 .noise-items .item.detail-expanded .deep-messages {
+  display: block !important;
+}
+/* Summarized threads: don't auto-show raw replies — summary is enough.
+   The header-expand toggle can reveal them via inline style. */
+.when-free-items .item.detail-expanded .msg-row.summarized:not(.expanded) ~ .thread-replies-container > .deep-messages,
+.noise-items .item.detail-expanded .msg-row.summarized:not(.expanded) ~ .thread-replies-container > .deep-messages {
+  display: none !important;
+}
+/* When replies are toggled open, swap summary → original root text */
+.when-free-items .item.detail-expanded .msg-row.summarized.expanded > .summary-toggle,
+.noise-items .item.detail-expanded .msg-row.summarized.expanded > .summary-toggle {
+  display: none;
+}
+.when-free-items .item.detail-expanded .msg-row.summarized.expanded > .thread-orig-root,
+.noise-items .item.detail-expanded .msg-row.summarized.expanded > .thread-orig-root {
   display: block !important;
 }
