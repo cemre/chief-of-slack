@@ -1086,7 +1086,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Item-level actions (work for both msg-rows and summary items)
-  if ('mto'.includes(k)) {
+  if ('mtor'.includes(k)) {
     e.preventDefault(); e.stopPropagation();
     if (k === 'm') {
       const markBtn = parentItem?.querySelector('.mark-all-read') || parentItem?.querySelector('.vip-mark-seen');
@@ -1124,6 +1124,7 @@ document.addEventListener('keydown', (e) => {
     }
     else if (k === 't' && !isVip) (parentItem?.querySelector('.action-mute') || parentItem?.querySelector('.action-mute-channel'))?.click();
     else if (k === 'o' && !parentItem?.classList.contains('vip-item')) (parentItem?.querySelector('.item-left-link') || parentItem?.querySelector('.item-channel[data-channel]'))?.click();
+    else if (k === 'r') parentItem?.querySelector('.action-reply')?.click();
     return;
   }
 }, true);
@@ -1797,7 +1798,7 @@ function renderThreadItem(t, data, cssClass) {
 
   html += '</div>'; // close thread-replies-container
   html += '</div>'; // close item-right
-  html += itemActions(t.channel_id, markAllTs, t.ts, t._isDmThread, '', false, t._isMentioned || t.mention_count > 0);
+  if (!t._isDmThread) html += itemActions(t.channel_id, markAllTs, t.ts, false, '', false, t._isMentioned || t.mention_count > 0);
   if (!collapsible) html += gutterCheck(t.channel_id, markAllTs, t.ts, t._isMentioned || t.mention_count > 0);
   html += (collapsible ? '</div>' : '') + '</div>';
   return html;
@@ -1850,7 +1851,6 @@ function renderDmItem(dm, data, cssClass) {
     html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${timeHtml}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += '</div>'; // close item-right
-  html += itemActions(dm.channel_id, latest.ts, null, true);
   if (!collapsible) html += gutterCheck(dm.channel_id, latest.ts, null, false);
   html += (collapsible ? '</div>' : '') + '</div>';
   return html;
