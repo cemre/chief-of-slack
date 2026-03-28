@@ -469,6 +469,8 @@ let autoRefreshTimer = null;       // background poll timer
 let isBackgroundFetch = false;     // true when fetching silently in background
 let _pendingInlineRefresh = false; // true when user clicked refresh but we kept the old view
 let stagedRenderData = null;       // data fetched in background, waiting for user to display
+let shiftPreviewItems = [];   // [{ item, gc }] — items highlighted for Shift+click batch mark
+let shiftPreviewTarget = null; // gutter-check element currently hovered
 
 // ── LLM result caches (persist across fetches) ──
 // Prioritization: hash-based dedup to skip Claude calls when inbox unchanged
@@ -3122,6 +3124,22 @@ bodyEl.addEventListener('click', (e) => {
 
   // Mark all read / undo
   const markAll = e.target.closest('.mark-all-read');
+  if (markAll && e.shiftKey && (markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read')) && shiftPreviewItems.length > 0) {
+    let count = 0;
+    for (const { item, gc } of shiftPreviewItems) {
+      const { channel, ts, threadTs, hasMention } = gc.dataset;
+      gc.dataset.pending = 'true';
+      item.classList.add('read-done');
+      syncMarkReadSiblings(item, true);
+      removeCachedItem(channel, threadTs);
+      sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
+      count++;
+    }
+    if (count > 0) updateSectionToggleCount(shiftPreviewItems[0].item);
+    clearShiftPreview();
+    shiftPreviewTarget = null;
+    return;
+  }
   if (markAll) {
     if (markAll.classList.contains('done') && !markAll.dataset.pending) {
       // Undo: mark unread
@@ -3576,6 +3594,74 @@ bodyEl.addEventListener('click', (e) => {
     handleSeenRepliesToggleClick(toggle);
     return;
   }
+});
+
+// ── Shift+hover batch mark-read preview ──
+function findVisibleMark(item) {
+  // Priority/act-now: reason-mark-read is always visible; gutter-check is inside collapsed details
+  const rm = item.querySelector('.reason-mark-read:not(.done):not([data-pending])');
+  if (rm) return rm;
+  const gc = item.querySelector('.gutter-check:not(.done):not([data-pending])');
+  if (!gc) return null;
+  const details = gc.closest('.item-details');
+  if (details && !details.classList.contains('expanded')) return null;
+  return gc;
+}
+
+function showShiftPreview(targetEl) {
+  clearShiftPreview();
+  const targetItem = targetEl.closest('.item');
+  if (!targetItem) return;
+  const container = targetItem.closest('.when-free-items, .noise-items, .priority-section');
+  if (!container) return;
+  const allItems = container.querySelectorAll('.item:not(.read-done)');
+  const previewed = [];
+  for (const item of allItems) {
+    const mark = findVisibleMark(item);
+    if (!mark) continue;
+    previewed.push({ item, gc: mark });
+    if (item === targetItem) break;
+  }
+  for (const { item, gc } of previewed) {
+    gc.classList.add('shift-mark-preview');
+    item.classList.add('shift-mark-target');
+  }
+  shiftPreviewItems = previewed;
+}
+
+function clearShiftPreview() {
+  for (const { item, gc } of shiftPreviewItems) {
+    gc.classList.remove('shift-mark-preview');
+    item.classList.remove('shift-mark-target');
+  }
+  shiftPreviewItems = [];
+}
+
+bodyEl.addEventListener('mouseover', (e) => {
+  const markEl = e.target.closest('.gutter-check, .reason-mark-read');
+  if (!markEl) {
+    if (shiftPreviewTarget) { clearShiftPreview(); shiftPreviewTarget = null; }
+    return;
+  }
+  if (markEl === shiftPreviewTarget && shiftPreviewItems.length > 0) return;
+  shiftPreviewTarget = markEl;
+  if (e.shiftKey) showShiftPreview(markEl); else clearShiftPreview();
+});
+
+bodyEl.addEventListener('mouseleave', () => {
+  shiftPreviewTarget = null;
+  clearShiftPreview();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Shift' && shiftPreviewTarget) showShiftPreview(shiftPreviewTarget);
+});
+document.addEventListener('keyup', (e) => {
+  if (e.key === 'Shift') clearShiftPreview();
+});
+window.addEventListener('blur', () => {
+  shiftPreviewTarget = null;
+  clearShiftPreview();
 });
 
 // Click-to-focus: track position for keyboard nav without showing highlight
