@@ -3995,10 +3995,8 @@ async function kickoffVipSection(data) {
       </div>
       <div class="item-right">
         ${bulletsHtml ? `<ul class="deep-summary">${bulletsHtml}</ul>` : messagesHtml}
-        <div style="display:flex;gap:12px;margin-top:6px;">
-          <span class="show-messages-link vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" style="margin-top:0">mark as seen</span>
-        </div>
       </div>
+      <span class="gutter-check vip-mark-seen" data-vip-name="${escapeHtml(vip.name)}" data-max-ts="${escapeHtml(vip.messages[0]?.ts || '')}" title="Mark seen">✓</span>
     </div>`;
   }
 

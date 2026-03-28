@@ -152,7 +152,7 @@ button.secondary {
 button.secondary:hover { background: var(--bg-raised); }
 
 /* — Body / sections — */
-#body { flex: 1; padding: 0; }
+#body { flex: 1; padding: 0; padding-bottom: 60vh; }
 section { padding: 0; }
 
 /* Section headers — floating HUD labels */
@@ -986,6 +986,7 @@ ul.deep-summary li + li { border-top: none; }
 .item.when-free .gutter-check.done { background: var(--text-primary); }
 .item.interesting .gutter-check.done { background: var(--accent); }
 .item.noise-item .gutter-check.done { background: var(--text-primary); }
+.item.vip-item > .gutter-check { top: 12px; transform: none; }
 /* Shift+hover batch mark-read preview — base (when-free, noise, interesting) */
 .gutter-check.shift-mark-preview,
 .reason-mark-read.shift-mark-preview {
