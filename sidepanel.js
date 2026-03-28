@@ -178,40 +178,50 @@ function exportSnapshot() {
   });
 }
 
-function importSnapshot() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = '.json';
-  input.addEventListener('change', () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        // Only restore keys we know about
-        const toStore = {};
-        for (const key of SNAPSHOT_KEYS) {
-          if (key in data) toStore[key] = data[key];
-        }
-        // Freshen timestamps so showFromCache() treats the import as current
-        if (toStore.fslackViewCache && toStore.fslackViewCache.ts) {
-          toStore.fslackViewCache.ts = Date.now();
-        }
-        if ('fslackLastFetchTs' in toStore) {
-          toStore.fslackLastFetchTs = Date.now();
-        }
-        chrome.storage.local.set(toStore, () => {
-          console.log(`[fslack] snapshot imported: ${Object.keys(toStore).length} keys`);
-          location.reload();
-        });
-      } catch (e) {
-        console.error('[fslack] snapshot import failed:', e);
+function handleSnapshotFile(file) {
+  console.log('[fslack] handleSnapshotFile called, file:', file?.name, file?.size, 'bytes');
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onerror = (e) => console.error('[fslack] FileReader error:', e);
+  reader.onload = () => {
+    console.log('[fslack] FileReader onload, result length:', reader.result?.length);
+    try {
+      const data = JSON.parse(reader.result);
+      console.log('[fslack] parsed JSON, keys:', Object.keys(data).length);
+      const toStore = {};
+      for (const key of SNAPSHOT_KEYS) {
+        if (key in data) toStore[key] = data[key];
       }
-    };
-    reader.readAsText(file);
-  });
-  input.click();
+      if (toStore.fslackViewCache && toStore.fslackViewCache.ts) {
+        toStore.fslackViewCache.ts = Date.now();
+      }
+      if ('fslackLastFetchTs' in toStore) {
+        toStore.fslackLastFetchTs = Date.now();
+      }
+      console.log('[fslack] storing', Object.keys(toStore).length, 'keys:', Object.keys(toStore));
+      chrome.storage.local.set(toStore, () => {
+        if (chrome.runtime.lastError) {
+          console.error('[fslack] storage.set error:', chrome.runtime.lastError);
+          return;
+        }
+        console.log('[fslack] snapshot imported, reloading...');
+        window.location.href = window.location.href;
+      });
+    } catch (e) {
+      console.error('[fslack] snapshot import failed:', e);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function importSnapshot() {
+  console.log('[fslack] importSnapshot button clicked');
+  const existing = document.getElementById('snapshot-file-input');
+  if (existing) {
+    existing.click();
+  } else {
+    console.warn('[fslack] no file input found in DOM');
+  }
 }
 
 // ── Port connection to background.js ──
@@ -908,8 +918,10 @@ document.addEventListener('keydown', (e) => {
     const reasonToggle = parentItem?.querySelector('.item-reason-toggle');
     const detailsEl = reasonToggle?.nextElementSibling;
     const hasDetails = detailsEl?.classList.contains('item-details');
-    const isExpanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block') || (summaryTarget && summaryTarget.style.display === 'block') || (hasDetails && detailsEl.classList.contains('expanded'));
-    if (key === 'ArrowRight' && !isExpanded) {
+    const isContentExpanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block') || (summaryTarget && summaryTarget.style.display === 'block');
+    const isDetailsExpanded = hasDetails && detailsEl.classList.contains('expanded');
+    // Right: expand content (thread badge, see-more, show-messages) — ignores item-details state
+    if (key === 'ArrowRight' && !isContentExpanded) {
       e.preventDefault(); e.stopPropagation();
       const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
       if (threadBadge) {
@@ -933,7 +945,8 @@ document.addEventListener('keydown', (e) => {
           if (newIdx >= 0) focusedItemIndex = newIdx;
         }
       });
-    } else if (key === 'ArrowLeft' && isExpanded) {
+    // Left: collapse content first (thread/text), then collapse item-details on next press
+    } else if (key === 'ArrowLeft' && isContentExpanded) {
       e.preventDefault(); e.stopPropagation();
       const seeLess = scope?.querySelector('.see-less');
       if (seeLess) {
@@ -944,16 +957,16 @@ document.addEventListener('keydown', (e) => {
       }
       if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
       if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
-      if (hasDetails && detailsEl.classList.contains('expanded')) {
-        reasonToggle.click();
-        // Re-focus the parent item since the focused row is now hidden
-        requestAnimationFrame(() => {
-          const els = getNavigableElements();
-          const newIdx = els.indexOf(parentItem);
-          if (newIdx >= 0) focusItem(newIdx);
-        });
-      }
-    } else if (key === 'ArrowLeft' && !isExpanded && isRow) {
+    } else if (key === 'ArrowLeft' && isDetailsExpanded) {
+      // Collapse item-details back to one-liner reason badge
+      e.preventDefault(); e.stopPropagation();
+      reasonToggle.click();
+      requestAnimationFrame(() => {
+        const els = getNavigableElements();
+        const newIdx = els.indexOf(parentItem);
+        if (newIdx >= 0) focusItem(newIdx);
+      });
+    } else if (key === 'ArrowLeft' && !isContentExpanded && !isDetailsExpanded && isRow) {
       const threadContainer = focused.closest('.thread-replies-container');
       if (threadContainer) {
         e.preventDefault(); e.stopPropagation();
@@ -1038,7 +1051,40 @@ document.addEventListener('keydown', (e) => {
   // Item-level actions (work for both msg-rows and summary items)
   if ('mto'.includes(k)) {
     e.preventDefault(); e.stopPropagation();
-    if (k === 'm') (parentItem?.querySelector('.mark-all-read') || parentItem?.querySelector('.vip-mark-seen'))?.click();
+    if (k === 'm') {
+      const markBtn = parentItem?.querySelector('.mark-all-read') || parentItem?.querySelector('.vip-mark-seen');
+      const isUndo = markBtn?.classList.contains('done');
+      if (e.shiftKey) {
+        // Shift+M: mark unread and go to previous item
+        if (!isUndo) return; // only works on already-read items
+        markBtn?.click();
+        requestAnimationFrame(() => {
+          const els = getNavigableElements();
+          const parentIdx = parentItem ? els.indexOf(parentItem) : -1;
+          const curIdx = parentIdx >= 0 ? parentIdx : focusedItemIndex;
+          if (curIdx > 0) focusItem(curIdx - 1);
+        });
+      } else {
+        markBtn?.click();
+        requestAnimationFrame(() => {
+          const els = getNavigableElements();
+          const parentIdx = parentItem ? els.indexOf(parentItem) : -1;
+          const curIdx = parentIdx >= 0 ? parentIdx : focusedItemIndex;
+          if (isUndo) {
+            // Mark-unread: just advance to next row
+            const next = curIdx + 1;
+            if (next < els.length) focusItem(next);
+          } else {
+            // Mark-read: skip read-done items, stop at section toggles
+            for (let i = (curIdx >= 0 ? curIdx + 1 : 0); i < els.length; i++) {
+              const el = els[i];
+              if (el.classList.contains('section-toggle')) { focusItem(i); return; }
+              if (el.classList.contains('item') && !el.classList.contains('read-done')) { focusItem(i); return; }
+            }
+          }
+        });
+      }
+    }
     else if (k === 't' && !isVip) (parentItem?.querySelector('.action-mute') || parentItem?.querySelector('.action-mute-channel'))?.click();
     else if (k === 'o' && !parentItem?.classList.contains('vip-item')) (parentItem?.querySelector('.item-left-link') || parentItem?.querySelector('.item-channel[data-channel]'))?.click();
     return;
@@ -1085,6 +1131,14 @@ function compactBullets(summary) {
   return summary.split('\n').filter(b => b.trim())
     .map(b => b.replace(/^-\s*/, '').replace(/^\[\d+\.\d+\]\s*/, '').split(/\s+/).slice(0, 12).join(' '))
     .join(' · ');
+}
+// Returns HTML: inline ' · ' for 1-2 bullets, <ul> list for 3+
+function compactBulletsHtml(summary) {
+  const items = summary.split('\n').filter(b => b.trim())
+    .map(b => b.replace(/^-\s*/, '').replace(/^\[\d+\.\d+\]\s*/, '').split(/\s+/).slice(0, 12).join(' '));
+  if (items.length === 0) return '';
+  if (items.length <= 2) return escapeHtml(items.join(' · '));
+  return '<ul class="compact-bullet-list">' + items.map(b => `<li>${escapeHtml(b)}</li>`).join('') + '</ul>';
 }
 
 function decodeSlackEntities(str) {
@@ -1832,7 +1886,14 @@ function renderChannelItem(cp, data, cssClass) {
         const _previewText = (_previewMsg.text || '').replace(/\n/g, ' ').slice(0, 120);
         if (_previewText) _chPreview = `${_previewAuthor}: ${_previewText}`;
       }
-      if (_chPreview) html += `<div class="compact-preview">${escapeHtml(_chPreview)}</div>`;
+      if (_chPreview) {
+        // If _chPreview came from compactBullets (plain text), use compactBulletsHtml for list rendering
+        if (cp._channelSummary) {
+          html += `<div class="compact-preview">${compactBulletsHtml(cp._channelSummary)}</div>`;
+        } else {
+          html += `<div class="compact-preview">${escapeHtml(_chPreview)}</div>`;
+        }
+      }
     }
   } else {
     let chLeftInner = `<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
@@ -1871,7 +1932,7 @@ function renderChannelItem(cp, data, cssClass) {
           + `<div class="deep-messages" id="${repliesId}"></div>`
           + `</div></div>${msgActions(cp.channel_id, m.ts)}</div>`;
       } else {
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
       }
     }
     if (cp.messages.length > 10) {
@@ -1908,7 +1969,7 @@ function renderChannelItem(cp, data, cssClass) {
           + `<div class="deep-messages" id="${repliesId}"></div>`
           + `</div></div>${msgActions(cp.channel_id, m.ts)}`;
       } else {
-        html += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
+        html += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}`;
       }
       html += `</div>`;
     }
@@ -1936,7 +1997,7 @@ function renderDeepSummarizedItem(cp, data) {
   let messagesHtml = '';
   for (const m of [...msgs].reverse()) {
     const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
   const deepBullets = renderChannelSummaryBullets(cp._deepSummary || '', cp.channel_id);
@@ -1948,7 +2009,7 @@ function renderDeepSummarizedItem(cp, data) {
       <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
       <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
     </div>
-    ${cp._deepSummary ? `<div class="compact-preview">${escapeHtml(compactBullets(cp._deepSummary))}</div>` : ''}
+    ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
     <div class="item-right">
       ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
@@ -1998,7 +2059,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   let messagesHtml = '';
   for (const m of allMsgs) {
     const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-    messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
+    messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
   }
 
   let contentHtml;
@@ -3956,7 +4017,7 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       let messagesHtml = '';
       for (const m of cp.messages.slice(0, 10).reverse()) {
         const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
+        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div>${threadRepliesContainer(m, cp.channel_id, threadUi)}</div>${msgActions(cp.channel_id, m.ts)}</div>`;
       }
       const rightEl = itemEl.querySelector('.item-right');
       const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
@@ -3964,8 +4025,8 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       // Update compact preview with ALL summary bullets joined
       const previewEl = itemEl.querySelector('.compact-preview');
       if (previewEl && cp._channelSummary) {
-        const allBullets = compactBullets(cp._channelSummary);
-        if (allBullets) previewEl.textContent = allBullets;
+        const html = compactBulletsHtml(cp._channelSummary);
+        if (html) previewEl.innerHTML = html;
       }
     }
   })();
@@ -5457,4 +5518,9 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   // ── Snapshot export/import buttons ──
   document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
+  document.getElementById('snapshot-file-input')?.addEventListener('change', (e) => {
+    console.log('[fslack] file input change event fired');
+    handleSnapshotFile(e.target.files?.[0]);
+    e.target.value = ''; // reset so same file can be re-selected
+  });
 });
