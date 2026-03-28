@@ -800,6 +800,177 @@ function isThreadExpanded(scopeEl) {
   return container ? container.style.display !== 'none' : false;
 }
 
+function refocusAfter(targetFn) {
+  requestAnimationFrame(() => {
+    const els = getNavigableElements();
+    const idx = targetFn(els);
+    if (idx >= 0) focusItem(idx);
+  });
+}
+
+// --- Arrow key navigation: classify focused element, then dispatch ---
+
+function classifyFocused(focused) {
+  const isRow = focused.classList.contains('msg-row');
+  const parentItem = isRow ? focused.closest('.item') : focused;
+  const scope = focused;
+
+  // 1. Section toggle
+  if (focused.classList.contains('section-toggle')) {
+    const items = focused.nextElementSibling;
+    const isVip = focused.id === 'vip-toggle';
+    const isExpanded = isVip ? (items && items.style.display !== 'none') : (items && items.classList.contains('expanded'));
+    return { type: 'section-toggle', el: focused, items, isVip, isExpanded };
+  }
+
+  const inCompactSection = parentItem && (parentItem.closest('.when-free-items') || parentItem.closest('.noise-items'));
+
+  // 2. Compact item (when-free/noise, not yet detail-expanded)
+  if (inCompactSection && !parentItem.classList.contains('detail-expanded')) {
+    return { type: 'compact-item', el: focused, parentItem, isRow };
+  }
+
+  // 3. Thread reply (msg-row inside thread-replies-container)
+  if (isRow) {
+    const threadContainer = focused.closest('.thread-replies-container');
+    if (threadContainer) {
+      return { type: 'thread-reply', el: focused, parentItem, isRow, threadContainer,
+        channel: threadContainer.dataset.channel, ts: threadContainer.dataset.ts };
+    }
+  }
+
+  // Gather content-expansion state (shared by collapsible-item and content-row)
+  const showMsgsLink = scope.querySelector('.show-messages-link[data-target]');
+  const showMsgsTarget = showMsgsLink ? document.getElementById(showMsgsLink.dataset.target) : null;
+  const summaryToggleEl = parentItem?.querySelector('.summary-toggle[data-target]');
+  const summaryTarget = summaryToggleEl ? document.getElementById(summaryToggleEl.dataset.target) : null;
+  const isContentExpanded = isThreadExpanded(scope) || isTextExpanded(scope) ||
+    (showMsgsTarget && showMsgsTarget.style.display === 'block') ||
+    (summaryTarget && summaryTarget.style.display === 'block');
+  const contentFields = { scope, showMsgsLink, showMsgsTarget, summaryToggleEl, summaryTarget, isContentExpanded };
+
+  // 4. Collapsible item (priority/act-now with item-details)
+  const reasonToggle = parentItem?.querySelector('.item-reason-toggle');
+  const detailsEl = reasonToggle?.nextElementSibling;
+  if (detailsEl?.classList.contains('item-details')) {
+    return { type: 'collapsible-item', el: focused, parentItem, isRow, reasonToggle, detailsEl,
+      isDetailsExpanded: detailsEl.classList.contains('expanded'), ...contentFields };
+  }
+
+  // 5. Content row (everything else) — isCompactParent enables Left-collapse to one-liner
+  return { type: 'content-row', el: focused, parentItem, isRow, isCompactParent: !!inCompactSection, ...contentFields };
+}
+
+function expandContent(info) {
+  const { scope, showMsgsLink, showMsgsTarget, summaryToggleEl, summaryTarget } = info;
+  const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
+  if (threadBadge) {
+    threadBadge.click();
+  } else {
+    const seeMore = scope?.querySelector('.see-more:not([style*="display:none"])');
+    if (seeMore) seeMore.click();
+  }
+  if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
+  if (summaryToggleEl && summaryTarget && summaryTarget.style.display !== 'block') summaryToggleEl.click();
+}
+
+function collapseContent(info) {
+  const { scope, showMsgsLink, showMsgsTarget, summaryToggleEl, summaryTarget } = info;
+  const seeLess = scope?.querySelector('.see-less');
+  if (seeLess) {
+    seeLess.click();
+  } else {
+    const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
+    if (threadBadge) threadBadge.click();
+  }
+  if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
+  if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
+}
+
+function toggleContent(info) {
+  if (info.isContentExpanded) collapseContent(info);
+  else expandContent(info);
+}
+
+function handleSectionToggle(info, dir) {
+  if (dir === 'right' && !info.isExpanded) {
+    info.el.click();
+    refocusAfter(() => focusedItemIndex + 1);
+  } else if (dir === 'left' && info.isExpanded) {
+    info.el.click();
+  }
+}
+
+function handleCompactItem(info, dir) {
+  if (dir !== 'right') return;
+  info.parentItem.classList.add('detail-expanded');
+  refocusAfter(els => {
+    const row = info.parentItem.querySelector('.msg-row');
+    return row ? els.indexOf(row) : -1;
+  });
+}
+
+function handleThreadReply(info, dir) {
+  if (dir !== 'left') return;
+  const { channel, ts } = info;
+  if (!channel || !ts) return;
+  const parentBadge = bodyEl.querySelector(`.msg-thread-badge.expanded[data-channel="${channel}"][data-ts="${ts}"]`);
+  if (parentBadge) {
+    parentBadge.click();
+    refocusAfter(els => {
+      const row = parentBadge.closest('.msg-row');
+      return row ? els.indexOf(row) : -1;
+    });
+  }
+}
+
+function handleCollapsibleItem(info, dir) {
+  if (dir === 'right') {
+    if (!info.isDetailsExpanded) {
+      // Expand item-details (suppresses DM auto-reply via _kbExpand flag)
+      info.reasonToggle._kbExpand = true;
+      info.reasonToggle.click();
+      refocusAfter(els => {
+        const row = info.parentItem?.querySelector('.msg-row');
+        return row ? els.indexOf(row) : els.indexOf(info.el);
+      });
+    } else if (!info.isContentExpanded) {
+      expandContent(info);
+    }
+  } else {
+    if (info.isContentExpanded) {
+      collapseContent(info);
+    } else if (info.isDetailsExpanded) {
+      info.reasonToggle.click();
+      refocusAfter(els => els.indexOf(info.parentItem));
+    }
+  }
+}
+
+function handleContentRow(info, dir) {
+  if (dir === 'right') {
+    if (!info.isContentExpanded) expandContent(info);
+  } else {
+    if (info.isContentExpanded) {
+      collapseContent(info);
+    } else if (info.isCompactParent) {
+      // Collapse back to compact one-liner
+      info.parentItem.classList.remove('detail-expanded');
+      refocusAfter(els => els.indexOf(info.parentItem));
+    }
+  }
+}
+
+const arrowHandlers = {
+  'section-toggle': handleSectionToggle,
+  'compact-item': handleCompactItem,
+  'thread-reply': handleThreadReply,
+  'collapsible-item': handleCollapsibleItem,
+  'content-row': handleContentRow,
+};
+
+// --- End arrow key navigation helpers ---
+
 function focusItem(index) {
   const els = getNavigableElements();
   if (els.length === 0) return;
@@ -864,128 +1035,16 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Arrow left/right: collapse/expand (no focus required beyond having a focused item)
+  // Arrow left/right: tree-like collapse/expand via classify → dispatch
   if (key === 'ArrowRight' || key === 'ArrowLeft') {
     if (focusedItemIndex < 0) return;
     const focused = bodyEl.querySelector('.kb-focused');
     if (!focused) return;
-    // Section toggles: right=expand, left=collapse
-    if (focused.classList.contains('section-toggle')) {
+    const info = classifyFocused(focused);
+    const handler = arrowHandlers[info.type];
+    if (handler) {
       e.preventDefault(); e.stopPropagation();
-      const items = focused.nextElementSibling;
-      const isVip = focused.id === 'vip-toggle';
-      const isExpanded = isVip ? (items && items.style.display !== 'none') : (items && items.classList.contains('expanded'));
-      if (key === 'ArrowRight' && !isExpanded) {
-        focused.click();
-        // Move cursor to first item inside the expanded section
-        requestAnimationFrame(() => focusItem(focusedItemIndex + 1));
-      }
-      if (key === 'ArrowLeft' && isExpanded) focused.click();
-      return;
-    }
-    const isRow = focused.classList.contains('msg-row');
-    const parentItem = isRow ? focused.closest('.item') : focused;
-    const scope = isRow ? focused : focused;
-    // Compact mode: ArrowRight expands, ArrowLeft collapses
-    const isCompactItem = parentItem && !parentItem.classList.contains('detail-expanded') && (parentItem.closest('.when-free-items') || parentItem.closest('.noise-items'));
-    if (isCompactItem && key === 'ArrowRight') {
-      e.preventDefault(); e.stopPropagation();
-      parentItem.classList.add('detail-expanded');
-      requestAnimationFrame(() => {
-        const els = getNavigableElements();
-        const firstRow = parentItem.querySelector('.msg-row');
-        const rowIdx = firstRow ? els.indexOf(firstRow) : -1;
-        if (rowIdx >= 0) focusItem(rowIdx);
-      });
-      return;
-    }
-    const isDetailExpanded = parentItem?.classList.contains('detail-expanded') && (parentItem.closest('.when-free-items') || parentItem.closest('.noise-items'));
-    if (isDetailExpanded && key === 'ArrowLeft' && !isRow) {
-      e.preventDefault(); e.stopPropagation();
-      parentItem.classList.remove('detail-expanded');
-      requestAnimationFrame(() => {
-        const els = getNavigableElements();
-        const newIdx = els.indexOf(parentItem);
-        if (newIdx >= 0) focusItem(newIdx);
-      });
-      return;
-    }
-    const showMsgsLink = (isRow ? focused : parentItem)?.querySelector('.show-messages-link[data-target]');
-    const showMsgsTarget = showMsgsLink ? document.getElementById(showMsgsLink.dataset.target) : null;
-    // Also check for summary-toggle on the item (noise items, when-free channel items)
-    const summaryToggleEl = parentItem?.querySelector('.summary-toggle[data-target]');
-    const summaryTarget = summaryToggleEl ? document.getElementById(summaryToggleEl.dataset.target) : null;
-    const reasonToggle = parentItem?.querySelector('.item-reason-toggle');
-    const detailsEl = reasonToggle?.nextElementSibling;
-    const hasDetails = detailsEl?.classList.contains('item-details');
-    const isContentExpanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block') || (summaryTarget && summaryTarget.style.display === 'block');
-    const isDetailsExpanded = hasDetails && detailsEl.classList.contains('expanded');
-    // Right: expand content (thread badge, see-more, show-messages) — ignores item-details state
-    if (key === 'ArrowRight' && !isContentExpanded) {
-      e.preventDefault(); e.stopPropagation();
-      const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
-      if (threadBadge) {
-        threadBadge.click();
-      } else {
-        const seeMore = scope?.querySelector('.see-more:not([style*="display:none"])');
-        if (seeMore) seeMore.click();
-      }
-      if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
-      if (summaryToggleEl && summaryTarget && summaryTarget.style.display !== 'block') summaryToggleEl.click();
-      if (hasDetails && !detailsEl.classList.contains('expanded')) { reasonToggle._kbExpand = true; reasonToggle.click(); }
-      // After expand, move cursor into the first visible child
-      requestAnimationFrame(() => {
-        const els = getNavigableElements();
-        const firstRow = parentItem?.querySelector('.msg-row');
-        const rowIdx = firstRow ? els.indexOf(firstRow) : -1;
-        if (rowIdx >= 0) focusItem(rowIdx);
-        else {
-          // Fallback: re-resolve current position
-          const newIdx = els.indexOf(focused);
-          if (newIdx >= 0) focusedItemIndex = newIdx;
-        }
-      });
-    // Left: collapse content first (thread/text), then collapse item-details on next press
-    } else if (key === 'ArrowLeft' && isContentExpanded) {
-      e.preventDefault(); e.stopPropagation();
-      const seeLess = scope?.querySelector('.see-less');
-      if (seeLess) {
-        seeLess.click();
-      } else {
-        const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
-        if (threadBadge) threadBadge.click();
-      }
-      if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
-      if (summaryTarget && summaryTarget.style.display === 'block') summaryToggleEl.click();
-    } else if (key === 'ArrowLeft' && isDetailsExpanded) {
-      // Collapse item-details back to one-liner reason badge
-      e.preventDefault(); e.stopPropagation();
-      reasonToggle.click();
-      requestAnimationFrame(() => {
-        const els = getNavigableElements();
-        const newIdx = els.indexOf(parentItem);
-        if (newIdx >= 0) focusItem(newIdx);
-      });
-    } else if (key === 'ArrowLeft' && !isContentExpanded && !isDetailsExpanded && isRow) {
-      const threadContainer = focused.closest('.thread-replies-container');
-      if (threadContainer) {
-        e.preventDefault(); e.stopPropagation();
-        const { channel, ts } = threadContainer.dataset;
-        if (channel && ts) {
-          const parentBadge = bodyEl.querySelector(`.msg-thread-badge.expanded[data-channel="${channel}"][data-ts="${ts}"]`);
-          if (parentBadge) {
-            parentBadge.click();
-            requestAnimationFrame(() => {
-              const parentRow = parentBadge.closest('.msg-row');
-              if (parentRow) {
-                const els = getNavigableElements();
-                const newIdx = els.indexOf(parentRow);
-                if (newIdx >= 0) focusItem(newIdx);
-              }
-            });
-          }
-        }
-      }
+      handler(info, key === 'ArrowRight' ? 'right' : 'left');
     }
     return;
   }
@@ -1017,34 +1076,12 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Expand / Collapse toggle — scope to focused row when applicable
+  // Expand / Collapse toggle — reuses shared content helpers
   if (k === 'e') {
     e.preventDefault(); e.stopPropagation();
-    const scope = isRow ? focused : parentItem;
-    const showMsgsLink = (isRow ? focused : parentItem)?.querySelector('.show-messages-link[data-target]');
-    const showMsgsTarget = showMsgsLink ? document.getElementById(showMsgsLink.dataset.target) : null;
-    const expanded = isThreadExpanded(scope) || isTextExpanded(scope) || (showMsgsTarget && showMsgsTarget.style.display === 'block');
-    if (expanded) {
-      // Collapse — thread badge, see-less, or show-messages-link
-      const threadBadge = scope?.querySelector('.msg-thread-badge.expanded');
-      if (threadBadge) {
-        threadBadge.click();
-      } else {
-        const seeLess = scope?.querySelector('.see-less');
-        if (seeLess) seeLess.click();
-      }
-      if (showMsgsTarget && showMsgsTarget.style.display === 'block') showMsgsLink.click();
-    } else {
-      // Expand — thread badge (not yet loaded, or loaded but collapsed), see-more, or show-messages-link
-      const threadBadge = scope?.querySelector('.msg-thread-badge:not(.loading)');
-      if (threadBadge) {
-        threadBadge.click();
-      } else {
-        const seeMore = scope?.querySelector('.see-more:not([style*="display:none"])');
-        if (seeMore) seeMore.click();
-      }
-      if (showMsgsLink && showMsgsTarget && showMsgsTarget.style.display !== 'block') showMsgsLink.click();
-    }
+    const info = classifyFocused(focused);
+    if (info.type === 'section-toggle') { focused.click(); return; }
+    toggleContent(info);
     return;
   }
 
