@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Chief of Slack",
   "version": "0.1.0",
-  "description": "Chief of Slack — see only what needs your attention",
-  "permissions": ["activeTab", "storage", "scripting", "declarativeNetRequest", "sidePanel", "webNavigation"],
+  "description": "Triage your Slack with AI",
+  "permissions": ["storage", "declarativeNetRequest", "sidePanel"],
   "host_permissions": ["https://app.slack.com/*", "https://*.slack.com/*", "https://api.anthropic.com/*"],
   "background": {
     "service_worker": "background.js"
@@ -18,7 +18,9 @@
       "matches": [
         "https://app.slack.com/archives/*",
         "https://*.slack.com/archives/*",
-        "https://*.slack.com/ssb/redirect*"
+        "https://*.slack.com/ssb/redirect*",
+        "https://slack.com/app_redirect*",
+        "https://*.slack.com/app_redirect*"
       ],
       "js": ["redirect.js"],
       "run_at": "document_start"

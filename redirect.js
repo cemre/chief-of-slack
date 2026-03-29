@@ -9,6 +9,18 @@
   const url = new URL(window.location.href);
   const path = url.pathname;
 
+  // ── App redirect pages: /app_redirect?channel=C123&team=T456 ──
+  if (path.startsWith('/app_redirect')) {
+    const channel = url.searchParams.get('channel');
+    const team = url.searchParams.get('team');
+    if (channel && team) {
+      const target = `https://app.slack.com/client/${team}/${channel}`;
+      console.log('[fslack redirect] app_redirect →', target);
+      window.location.replace(target);
+      return;
+    }
+  }
+
   // ── SSB redirect pages: /ssb/redirect?channel=C123&team=T456 ──
   if (path.startsWith('/ssb/redirect')) {
     const channel = url.searchParams.get('channel');

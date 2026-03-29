@@ -69,28 +69,38 @@
     const token = getToken();
     if (!token) throw new Error('No Slack token found');
 
-    const formData = new FormData();
-    formData.append('token', token);
-    for (const [k, v] of Object.entries(params)) {
-      formData.append(k, v);
-    }
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const formData = new FormData();
+      formData.append('token', token);
+      for (const [k, v] of Object.entries(params)) {
+        formData.append(k, v);
+      }
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    let resp;
-    try {
-      resp = await fetch(`/api/${endpoint}`, {
-        method: 'POST',
-        body: formData,
-        credentials: 'include',
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timeout);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      let resp;
+      try {
+        resp = await fetch(`/api/${endpoint}`, {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+          signal: controller.signal,
+        });
+      } catch (err) {
+        clearTimeout(timeout);
+        if (attempt === 0 && err instanceof TypeError) {
+          console.warn(`[${FSLACK}] Retrying ${endpoint} after TypeError`);
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        throw err;
+      } finally {
+        clearTimeout(timeout);
+      }
+      const data = await resp.json();
+      if (!data.ok) throw new Error(`Slack API error: ${data.error}`);
+      return data;
     }
-    const data = await resp.json();
-    if (!data.ok) throw new Error(`Slack API error: ${data.error}`);
-    return data;
   }
 
   function resetApiCounter() {
@@ -898,15 +908,16 @@
       if (mp.last_read) lastRead[mp.id] = mp.last_read;
     }
 
-    // 7. Custom emoji + sidebar sections
-    progress(7, 'Loading emoji + sidebar...');
+    // 7. Custom emoji
+    progress(7, 'Loading custom emoji...');
     let emoji = cachedEmoji;
-    const [emojiResult, sidebarSections] = await Promise.all([
-      emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
-      fetchSidebarSections().catch(() => ({})),
-    ]);
-    emoji = emojiResult;
+    if (!emoji) emoji = await fetchEmojiList().catch(() => ({}));
 
+    // 8. Sidebar sections
+    progress(8, 'Loading sidebar sections...');
+    const sidebarSections = await fetchSidebarSections().catch(() => ({}));
+
+    progress(9, 'Preparing results...');
     return {
       selfId,
       selfHandle,
@@ -1195,15 +1206,16 @@
     for (const im of (counts.ims || [])) { if (im.last_read) lastRead[im.id] = im.last_read; }
     for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
 
-    // 7. Emoji + sidebar sections
-    progress(7, 'Loading emoji + sidebar...');
+    // 7. Custom emoji
+    progress(7, 'Loading custom emoji...');
     let emoji = cachedEmoji;
-    const [emojiResult, sidebarSections] = await Promise.all([
-      emoji ? Promise.resolve(emoji) : fetchEmojiList().catch(() => ({})),
-      fetchSidebarSections().catch(() => ({})),
-    ]);
-    emoji = emojiResult;
+    if (!emoji) emoji = await fetchEmojiList().catch(() => ({}));
 
+    // 8. Sidebar sections
+    progress(8, 'Loading sidebar sections...');
+    const sidebarSections = await fetchSidebarSections().catch(() => ({}));
+
+    progress(9, 'Preparing results...');
     return {
       selfId,
       selfHandle,

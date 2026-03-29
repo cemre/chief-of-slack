@@ -31,15 +31,15 @@ const TOKEN_LABELS = {
 
 // ── Load saved settings ──
 const RULE_GROUPS = [
-  { group: 'AI decides, with a floor', options: [
-    { value: 'floor_priority', label: 'Priority' },
-    { value: 'floor_whenfree', label: 'Floor: Relevant' },
-    { value: 'normal', label: 'Floor: Noise' },
+  { group: 'AI-prioritized (with a minimum)', options: [
+    { value: 'normal', label: 'No minimum' },
+    { value: 'floor_whenfree', label: 'At least Relevant' },
+    { value: 'floor_priority', label: 'At least Priority' },
   ]},
-  { group: 'Fixed rule', options: [
-    { value: 'high_volume', label: 'High-volume (5+ replies → Relevant)' },
-    { value: 'hard_noise', label: 'Noise' },
-    { value: 'skip', label: 'Exclude' },
+  { group: 'Fixed rule (skip AI)', options: [
+    { value: 'high_volume', label: 'Only show if 5+ replies' },
+    { value: 'hard_noise', label: 'Always Noise' },
+    { value: 'skip', label: 'Exclude entirely' },
   ]},
 ];
 
@@ -160,8 +160,8 @@ saveBtn.addEventListener('click', () => {
     sidebarTierMap,
     tokenLimits,
   }, () => {
-    saveStatus.textContent = 'Saved!';
-    setTimeout(() => { saveStatus.textContent = ''; }, 2000);
+    saveStatus.textContent = 'Saved — return to the Slack tab and refresh to see changes.';
+    setTimeout(() => { saveStatus.textContent = ''; }, 4000);
   });
 });
 

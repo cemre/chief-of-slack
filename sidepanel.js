@@ -621,7 +621,7 @@ function startFetch(background = false) {
   if (!background) {
     fetchBtn.textContent = 'Fetching...';
     if (!keepVisible) {
-      bodyEl.innerHTML = '<div id="status">Starting fetch...</div>';
+      bodyEl.innerHTML = statusHtml(FACE_FETCHING, 'Starting fetch...');
     } else {
       // Show inline loading indicator without wiping current view
       const bar = document.createElement('div');
@@ -699,7 +699,7 @@ function startFullFetch() {
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
-  bodyEl.innerHTML = '<div id="status">Starting full fetch...</div>';
+  bodyEl.innerHTML = statusHtml(FACE_FETCHING, 'Starting full fetch...');
   resetFetchState();
   isFastFetch = false;
   if (!port) {
@@ -1170,6 +1170,16 @@ document.addEventListener('keydown', (e) => {
   }
 }, true);
 
+
+// ── Loading stage faces ──
+const FACE_WAITING     = '(• _ •)';
+const FACE_FETCHING    = 'ε=ε=┏( >_<)┛';
+const FACE_SUMMARIZING = '( •̀ᄇ• ́)ﻭ✧';
+const FACE_PRIORITIZING = '(⌐■_■)';
+
+function statusHtml(face, detail) {
+  return `<div id="status"><div class="status-face">${face}</div><div class="detail">${detail}</div></div>`;
+}
 
 // ── Render helpers ──
 function formatTime(ts) {
@@ -2703,7 +2713,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 
   // Loading indicator while LLM is working
   if (loading) {
-    html += '<div id="status"><div class="detail">Analyzing remaining messages with AI...</div></div>';
+    html += statusHtml(FACE_SUMMARIZING, 'Analyzing remaining messages with AI...');
   }
 
   // Channel Messages (noise)
@@ -2758,6 +2768,9 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   resetThreadUnreadIndex();
   lastRenderData = data;
   mentionLookupDirty = true;
+
+  // Show education banner for new users (dismissible)
+  if (!loading) maybeShowEducationBanner();
 
   // Schedule background poll to check for new data without disrupting UI
   if (!loading) scheduleBackgroundPoll();
@@ -3988,7 +4001,7 @@ function restoreMainView() {
     return;
   }
   if (!showFromCache()) {
-    bodyEl.innerHTML = '<div id="status">Waiting for Slack tab...</div>';
+    bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
   }
 }
 
@@ -4042,11 +4055,11 @@ function showSettingsView({ fromApiGate = false, retryData = null } = {}) {
     saveBtn.disabled = true;
     chrome.storage.local.set({ claudeApiKey: key, userContext }, () => {
       saveBtn.disabled = false;
-      statusEl.textContent = 'Saved.';
       if (fromApiGate && retryData) {
         prioritizeAndRender(retryData);
       } else {
         restoreMainView();
+        startFetch();
       }
     });
   });
@@ -4062,9 +4075,55 @@ function showSettingsView({ fromApiGate = false, retryData = null } = {}) {
   if (backBtn) backBtn.addEventListener('click', restoreMainView);
 }
 
-// ── API key prompt — opens in-panel settings form ──
-function showApiKeyPrompt(rawData) {
-  showSettingsView({ fromApiGate: true, retryData: rawData });
+// ── API key prompt — show welcome screen pointing to settings ──
+function showApiKeyPrompt() {
+  showWelcomeScreen();
+}
+
+// ── Welcome screen (first run, no API key) ──
+function showWelcomeScreen() {
+  // Hide header chrome that doesn't apply yet
+  refreshLink.style.display = 'none';
+  document.getElementById('last-updated').style.display = 'none';
+
+  bodyEl.innerHTML = `
+    <div class="welcome-screen">
+      <div class="welcome-emoji">🫡</div>
+      <div class="welcome-greeting">Welcome to Chief of Slack!</div>
+      <div class="welcome-body">Visit <a class="welcome-settings-link">Settings</a> to enter your Claude API key and tell me what's important.</div>
+      <div class="welcome-tagline">I'm looking forward to saving your time and attention span.</div>
+    </div>`;
+  bodyEl.querySelector('.welcome-settings-link').addEventListener('click', () => {
+    openSettingsPage();
+  });
+}
+
+// ── Education banner (dismissible tips) ──
+function maybeShowEducationBanner() {
+  chrome.storage.local.get('fslackEducationDismissed', (result) => {
+    if (result.fslackEducationDismissed) return;
+    // Don't duplicate
+    if (bodyEl.querySelector('.education-banner')) return;
+    const banner = document.createElement('div');
+    banner.className = 'education-banner';
+    banner.innerHTML = `
+      <button class="edu-close" title="Dismiss">&times;</button>
+      <div class="edu-section">I'll scan your Slack unreads, use AI to sort them by urgency, and let you triage them quickly.</div>
+      <div class="edu-section" style="margin-top:6px;">
+        <div class="edu-row"><kbd>j</kbd> <kbd>k</kbd> <kbd>↑</kbd> <kbd>↓</kbd> <span class="edu-label">Move up/down</span></div>
+        <div class="edu-row"><kbd>e</kbd> <kbd>←</kbd> <kbd>→</kbd> <span class="edu-label">Expand/collapse</span></div>
+        <div class="edu-row"><kbd>m</kbd> <span class="edu-label">Mark read</span></div>
+        <div class="edu-row"><kbd>o</kbd> <span class="edu-label">Open in Slack</span></div>
+        <div class="edu-row"><kbd>r</kbd> <span class="edu-label">Reply</span></div>
+        <div class="edu-row"><kbd>t</kbd> <span class="edu-label">Mute</span></div>
+      </div>
+      <div class="edu-tip">Tip: Hold down <kbd>Shift</kbd> while clicking ✓ to mark multiple items as read quickly.</div>`;
+    banner.querySelector('.edu-close').addEventListener('click', () => {
+      chrome.storage.local.set({ fslackEducationDismissed: true });
+      banner.remove();
+    });
+    bodyEl.insertBefore(banner, bodyEl.firstChild);
+  });
 }
 // ── Async VIP section: wait for data, summarize, render ──
 async function kickoffVipSection(data) {
@@ -4641,6 +4700,14 @@ function warmSummaryCache(data) {
 }
 
 function prioritizeAndRender(data) {
+  // No API key → show welcome screen immediately, don't attempt any LLM calls
+  chrome.storage.local.get('claudeApiKey', (result) => {
+    if (!result.claudeApiKey) { showWelcomeScreen(); return; }
+    _prioritizeAndRenderInner(data);
+  });
+}
+
+function _prioritizeAndRenderInner(data) {
   // Build self-mention regex from Slack handle and cache handle for Claude prompts
   if (data.selfHandle) {
     const escaped = data.selfHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -4691,7 +4758,7 @@ function prioritizeAndRender(data) {
   }
 
   // Show loading while LLM works
-  bodyEl.innerHTML = '<div id="status"><div class="detail">Summarizing messages...</div></div>';
+  bodyEl.innerHTML = statusHtml(FACE_SUMMARIZING, 'Summarizing messages...');
 
   const selfName = data.users?.[data.selfId] || '';
 
@@ -4746,8 +4813,18 @@ function prioritizeAndRender(data) {
 
   function handleLlmError(error, stage) {
     if (error === 'extension_error') { render(data); return; }
-    if (error === 'no_api_key') { showApiKeyPrompt(data); return; }
+    if (error === 'no_api_key') { showApiKeyPrompt(); return; }
     console.warn(`FSlack ${stage} error:`, error);
+    // Invalid API key (401/403) — point user to settings
+    const isAuthError = typeof error === 'string' && /API (401|403)/.test(error);
+    if (isAuthError) {
+      bodyEl.innerHTML = `<div class="welcome-screen">
+        <div class="welcome-greeting">API key error</div>
+        <div class="welcome-body">Your API key doesn't seem to be working. Check <a class="welcome-settings-link">Settings</a> to make sure it's correct.</div>
+      </div>`;
+      bodyEl.querySelector('.welcome-settings-link').addEventListener('click', () => openSettingsPage());
+      return;
+    }
     if (cachedView?.prioritized) {
       renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
       const banner = document.createElement('div');
@@ -4829,7 +4906,7 @@ function prioritizeAndRender(data) {
     console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
 
     // Step 2: Single lean prioritize call
-    bodyEl.innerHTML = '<div id="status"><div class="detail">Prioritizing...</div></div>';
+    bodyEl.innerHTML = statusHtml(FACE_PRIORITIZING, 'Prioritizing...');
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
@@ -5624,6 +5701,8 @@ function handlePortMessage(msg) {
     // If the view is already rendered (reconnect after service worker idle),
     // don't re-render and blow away the user's scroll/expand state.
     if (bodyEl.querySelector('.item')) return;
+    // Don't auto-fetch if the welcome/setup screen is showing
+    if (bodyEl.querySelector('.welcome-screen') || bodyEl.querySelector('.api-key-form')) return;
     if (showFromCache()) return;
     startFetch();
     return;
@@ -5633,9 +5712,7 @@ function handlePortMessage(msg) {
     clearFetchTimeout(); // got a response, fetch is alive — restart timeout
     startFetchTimeout(30000); // allow more time for in-progress fetches
     if (!isBackgroundFetch) {
-      bodyEl.innerHTML = `<div id="status">
-        <div class="detail">${msg.detail || ''}</div>
-      </div>`;
+      bodyEl.innerHTML = statusHtml(FACE_FETCHING, msg.detail || '');
     }
     return;
   }
@@ -5795,7 +5872,7 @@ function handlePortMessage(msg) {
 
 // ── Initialization ──
 // Load persisted cache, then connect port
-chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', DRAFT_KEY], (result) => {
+chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', 'claudeApiKey', DRAFT_KEY], (result) => {
   _drafts = result[DRAFT_KEY] || {};
   if (result.fslackViewCache && !cachedView) {
     cachedView = result.fslackViewCache;
@@ -5805,10 +5882,13 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   vipSeenTimestamps = result.fslackVipSeen || {};
   mutedThreadKeys = new Set(result.fslackMutedThreads || []);
 
-  // Show cached view immediately — panel is usable even without a Slack connection
+  // First run: no API key and no cache → show welcome screen
+  const hasApiKey = !!result.claudeApiKey;
   const hadCache = showFromCache();
-  if (!hadCache) {
-    bodyEl.innerHTML = '<div id="status">Waiting for Slack tab...</div>';
+  if (!hadCache && !hasApiKey) {
+    showWelcomeScreen();
+  } else if (!hadCache) {
+    bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
   }
 
   // Connect port to background.js (which relays to content.js → inject.js)

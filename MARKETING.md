@@ -63,29 +63,126 @@ You don't have to mute entire channels anymore either. Low-priority channels get
 
 **Detailed description:**
 
-> Slack scatters your unreads across DMs, Mentions, Threads, and the Unreads view — four separate inboxes, none sorted by urgency. You click through each one, doing the prioritization in your head. That's Slack in 2026.
->
-> This extension puts everything in one place and tells you what each message is about and whether it's urgent — before you open it.
->
-> Open the side panel, and every unread across your channels, DMs, and threads appears in a single list, classified: act now, priority, when free, or noise. Someone blocked on your approval? Red, top of the list, one-line summary. A DM that's just "thanks"? Batched with the rest.
->
-> You don't have to mute entire channels anymore. Low-priority channels get scanned and anything relevant to you gets elevated — no more choosing between "this channel interrupts me" and "I might miss something."
->
-> **Features:**
-> - AI priority classification powered by Claude — understands context, not just keywords
-> - Summarizes messages before you read them — know what it's about in one line
-> - Prioritizes within your mentions and DMs — not all red badges are equal
-> - Uses your existing Slack sidebar sections — set rules per section and you're done
-> - VIP tracking — highlights activity from people you care about most
-> - "About me" context so the AI knows what's relevant to your role
-> - Mark-as-read in bulk by priority group
-> - All data stays local — no backend, no account, no tracking
->
-> **Requirements:**
-> - Slack web app (app.slack.com)
-> - Your own Anthropic API key (uses Claude Haiku — very cheap, typically pennies/day)
->
-> Built for engineers, PMs, and managers drowning in Slack.
+Slack scatters your unreads across DMs, Mentions, Threads, and the Unreads view — four separate inboxes, none sorted by urgency. You click through each one, doing the prioritization in your head. That's Slack in 2026.
+
+This extension puts everything in one place and tells you what each message is about and whether it's urgent — before you open it.
+
+Open the side panel, and every unread across your channels, DMs, and threads appears in a single list, classified: act now, priority, when free, or noise. Someone blocked on your approval? Red, top of the list, one-line summary. A DM that's just "thanks"? Batched with the rest.
+
+Think Superhuman, but for Slack. Navigate everything with your keyboard — arrow through your unreads, mark as read, open in Slack, skip entire priority groups. You can burn through 50 unreads in a minute without touching your mouse.
+
+You don't have to mute entire channels anymore. Low-priority channels get scanned and anything relevant to you gets elevated — no more choosing between "this channel interrupts me" and "I might miss something."
+
+**Features:**
+- AI priority classification powered by Claude — understands context, not just keywords
+- Summarizes messages before you read them — know what it's about in one line
+- Prioritizes within your mentions and DMs — not all red badges are equal
+- Full keyboard navigation — fly through your unreads like Superhuman for email
+- Uses your existing Slack sidebar sections — set rules per section and you're done
+- VIP tracking — highlights activity from people you care about most
+- "About me" context so the AI knows what's relevant to your role
+- Mark-as-read in bulk by priority group
+- All data stays local — no backend, no account, no tracking
+
+**Requirements:**
+- Slack web app (app.slack.com)
+- Your own Anthropic API key (uses Claude Haiku — very cheap, typically pennies/day)
+
+Built for engineers, PMs, and managers drowning in Slack.
+
+**Chrome Web Store description (16k char limit):**
+
+**Your email has had priority inbox for 15 years. Why doesn't Slack?**
+
+It's 2026. AI can write code, generate movies, and pass the bar exam. But when you open Slack, you still click through every unread message one by one — first your DMs, then Mentions, then Threads, then the Unreads view — doing the prioritization in your head.
+
+Chief of Slack fixes this. It puts all your unreads in one place, sorted by what actually needs you.
+
+
+**The problem**
+
+Your Slack unreads are scattered across four different places. None of them talk to each other. None of them are sorted by urgency.
+
+12 unread DMs — click through each one to find out which is "sounds good" and which is your manager asking for something urgent. 8 unread channels — click into each to see if anything's relevant. 5 thread replies — open each to remember what the conversation was even about.
+
+You're doing the work of a priority inbox in your head, every single time you open Slack.
+
+
+**How it works**
+
+Open the side panel and every unread across your channels, DMs, and threads appears in a single list, classified into four levels:
+
+- Act Now (red) — someone is blocked, waiting on you, or needs a decision
+- Priority (orange) — important but not time-sensitive
+- When Free (blue) — FYIs, updates, things to read when you have a moment
+- Noise (gray) — reactions, "thanks!", status updates you don't need to open
+
+Before you open a single message, you already know what each one is about and how urgent it is. Someone blocked on your approval? Red, top of the list, one-line summary of what they need. A DM that's just "thanks"? Batched with the noise.
+
+
+**Superhuman for Slack**
+
+Navigate everything with your keyboard. Arrow through your unreads, mark as read, open in Slack, skip entire priority groups. You can burn through 50 unreads in a minute without touching your mouse.
+
+This isn't about reading faster — it's about deciding faster. Most of your unreads don't need you. The ones that do are at the top, summarized, ready to act on.
+
+
+**Stop muting channels**
+
+You don't have to banish entire channels into mute anymore. A channel that's 95% noise can still have the one thread where someone needs your sign-off. Chief of Slack catches it and elevates it. You stop managing channels and start managing attention.
+
+
+**Your sidebar sections, your rules**
+
+You already organized your Slack sidebar into sections. This extension respects that. Set a rule per section — auto-prioritize, auto-noise, or exclude — and you're done. No duplicate configuration. Your existing organization carries over.
+
+
+**Not a keyword filter. Actual comprehension.**
+
+Powered by Claude (Anthropic's AI), Chief of Slack reads your messages and understands context. "Someone asked you a direct question and is waiting for a response" is not the same as "someone reacted to your message with a thumbs up." Slack treats them identically. This doesn't.
+
+It knows the difference between:
+- "Can you approve this PR?" (act now) and "FYI, I approved the PR" (noise)
+- "Are you free Thursday?" (needs a reply) and "See you Thursday!" (doesn't)
+- "This is blocking the release" (urgent) and "This might be nice for the next release" (not)
+
+You can set an "about me" so the AI knows your role, your team, and what's relevant to you. A message about a backend outage means something different to the on-call engineer than to the marketing intern.
+
+
+**VIP tracking**
+
+Mark the people who matter most — your manager, your skip-level, key collaborators. Their activity gets highlighted and summarized separately. Know what your VIPs are saying without reading every message in every channel they post in.
+
+
+**Features**
+
+- AI priority classification — understands context, not just keywords
+- One-line summaries — know what each message is about before you open it
+- Smart prioritization within mentions and DMs — not all red badges are equal
+- Full keyboard navigation — arrow keys, mark as read, open, skip groups
+- Sidebar section rules — set it once, never configure again
+- VIP tracking — highlights activity from people you care about most
+- "About me" context — the AI knows your role and what's relevant to you
+- Bulk mark-as-read by priority group — clear an entire tier in one click
+- All data stays local — no backend, no account, no tracking
+- Cost tracking built in — see exactly what you're spending
+
+
+**Secure by design**
+
+Your messages go directly from your browser to Anthropic's API — no middleman server, no proxy, no third party ever sees your data. You enter your own Anthropic API key and that's it. There's no account to create, no backend to trust, no data collected. Nothing is stored anywhere. You can inspect every API call yourself in Chrome DevTools. This extension is just code running in your browser talking directly to Anthropic.
+
+
+**Requirements**
+
+- Slack web app (app.slack.com)
+- Your own Anthropic API key
+- Uses Claude Haiku — typically pennies per day
+
+
+**Who it's for**
+
+Engineers, PMs, and managers at companies where Slack is the nervous system and the notification count never hits zero. If you open Slack in the morning to 40+ unread channels and feel dread, this is for you.
 
 ## Screenshots Plan (5 for the store, 1280x800)
 

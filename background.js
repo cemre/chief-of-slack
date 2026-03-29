@@ -44,7 +44,9 @@ chrome.runtime.onConnect.addListener((port) => {
       try { port.postMessage({ type: `${FSLACK}:error`, error: 'No Slack tab found. Open app.slack.com and try again.' }); } catch {}
       return;
     }
-    chrome.tabs.sendMessage(tabId, msg).catch(() => injectAndRetry(tabId, msg));
+    chrome.tabs.sendMessage(tabId, msg).catch(() => {
+      try { port.postMessage({ type: `${FSLACK}:error`, error: 'Could not reach Slack tab. Try refreshing the Slack page.' }); } catch {}
+    });
   });
 
   port.onDisconnect.addListener(() => {
@@ -70,20 +72,6 @@ const LLM_TYPES = new Set([
   `${FSLACK}:getApiKey`,
 ]);
 
-// ── Inject content script if missing, then retry the message ──
-async function injectAndRetry(tabId, msg) {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ['content.js'],
-    });
-    console.log(`[fslack bg] injected content.js into tab ${tabId}`);
-    await chrome.tabs.sendMessage(tabId, msg);
-  } catch (e) {
-    console.warn(`[fslack bg] inject+retry failed: ${e.message}`);
-    try { panelPort?.postMessage({ type: `${FSLACK}:error`, error: 'Could not reach Slack tab. Try refreshing the Slack page.' }); } catch {}
-  }
-}
 
 // ── Track active Slack tab ──
 async function getSlackTabId() {
@@ -566,24 +554,6 @@ async function handleChannelPostSummarize(item) {
   } catch (err) { return { error: err.message }; }
 }
 
-// ── Intercept slack.com/app_redirect navigations ──
-chrome.webNavigation.onBeforeNavigate.addListener(
-  async (details) => {
-    if (details.frameId !== 0) return; // top frame only
-    const { openInBrowser } = await chrome.storage.local.get('openInBrowser');
-    if (openInBrowser === false) return;
-
-    const url = new URL(details.url);
-    const channel = url.searchParams.get('channel');
-    const team = url.searchParams.get('team');
-    if (channel && team) {
-      const target = `https://app.slack.com/client/${team}/${channel}`;
-      console.log('[fslack bg] app_redirect →', target);
-      chrome.tabs.update(details.tabId, { url: target });
-    }
-  },
-  { url: [{ hostEquals: 'slack.com', pathPrefix: '/app_redirect' }] }
-);
 
 // ── Call Claude API to build anonymization replacement map ──
 async function handleAnonymize(data) {
