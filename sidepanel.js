@@ -2002,6 +2002,7 @@ function gutterCheck(channel, markTs, threadTs, hasMention) {
 }
 
 function ruleOverrideIcon(item) {
+  if (typeof _assessMode === 'undefined' || !_assessMode) return '';
   if (!item._ruleOverride) return '';
   return ` <span class="assess-info" title="${escapeHtml(item._ruleOverride)}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg></span>`;
 }
@@ -2233,7 +2234,7 @@ function renderDmItem(dm, data, cssClass) {
   let html = `<div class="item ${cssClass}">${reasonBadge(dm, cssClass)}
     ${collapsible ? '<div class="item-details">' : ''}
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>${ruleOverrideIcon(dm)}`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
+      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}${ruleOverrideIcon(dm)}
     </div>
     ${cssClass === 'when-free' && latest.text ? `<div class="compact-preview">${escapeHtml(latest.text.slice(0, 120).replace(/\n/g, ' '))}</div>` : ''}
     <div class="item-right">`;
@@ -2542,7 +2543,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   const botOpenHref = slackPermalink(cp.channel_id, botOpenTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>${ruleOverrideIcon(cp)}`, botOpenHref)}
+      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}${ruleOverrideIcon(cp)}
       ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
     </div>
     <div class="item-right">
