@@ -1158,15 +1158,15 @@ document.addEventListener('keydown', (e) => {
       const markBtn = parentItem?.querySelector('.mark-all-read') || parentItem?.querySelector('.vip-mark-seen');
       const isUndo = markBtn?.classList.contains('done');
       if (e.shiftKey) {
-        // Shift+M: mark unread and go to previous item
-        if (!isUndo) return; // only works on already-read items
-        markBtn?.click();
-        requestAnimationFrame(() => {
-          const els = getNavigableElements();
-          const parentIdx = parentItem ? els.indexOf(parentItem) : -1;
-          const curIdx = parentIdx >= 0 ? parentIdx : focusedItemIndex;
-          if (curIdx > 0) focusItem(curIdx - 1);
-        });
+        // Shift+M: undo "m" — go to previous item and mark it unread
+        const els = getNavigableElements();
+        const curIdx = parentItem ? els.indexOf(parentItem) : focusedItemIndex;
+        if (curIdx <= 0) return;
+        const prevEl = els[curIdx - 1];
+        if (!prevEl || prevEl.classList.contains('section-toggle')) return;
+        focusItem(curIdx - 1);
+        const prevBtn = prevEl.querySelector('.mark-all-read') || prevEl.querySelector('.vip-mark-seen');
+        if (prevBtn?.classList.contains('done')) prevBtn.click();
       } else {
         markBtn?.click();
         requestAnimationFrame(() => {
@@ -2792,7 +2792,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 
   // Interesting Elsewhere
   if (popular && popular.length > 0) {
-    html += '<section class="priority-section"><h2 class="interesting">Interesting Elsewhere</h2>';
+    html += '<section class="priority-section"><h2 class="interesting">Popular</h2>';
     for (const p of popular) {
       const _ptid = truncateId;
       const pTextHtml = truncate(p.text, 400, data.users);
