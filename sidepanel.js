@@ -408,7 +408,13 @@ document.getElementById('settings-btn').addEventListener('click', () => {
 
 const helpBtn = document.getElementById('help-btn');
 helpBtn.addEventListener('click', () => {
-  showEducationBanner();
+  helpBtn.blur();
+  const existing = bodyEl.querySelector('.education-banner:not(.edu-bottom)');
+  if (existing) {
+    existing.remove();
+  } else {
+    showEducationBanner();
+  }
 });
 
 // ── Slack link click handler: navigate existing tab instead of opening new ones ──
@@ -628,6 +634,7 @@ function startFetch(background = false) {
     fetchBtn.textContent = 'Fetching...';
     if (!keepVisible) {
       bodyEl.innerHTML = statusHtml(FACE_FETCHING, 'Starting fetch...');
+      showEducationBanner(true);
     } else {
       // Show inline loading indicator without wiping current view
       const bar = document.createElement('div');
@@ -706,6 +713,7 @@ function startFullFetch() {
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
   bodyEl.innerHTML = statusHtml(FACE_FETCHING, 'Starting full fetch...');
+  showEducationBanner(true);
   resetFetchState();
   isFastFetch = false;
   if (!port) {
@@ -2779,8 +2787,13 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   lastRenderData = data;
   mentionLookupDirty = true;
 
-  // Show education banner for new users (dismissible)
-  if (!loading) maybeShowEducationBanner();
+  // Show education banner during loading, remove when done
+  if (loading) {
+    showEducationBanner(true);
+  } else {
+    removeEducationBannerBottom();
+    maybeShowEducationBanner();
+  }
 
   // Schedule background poll to check for new data without disrupting UI
   if (!loading) scheduleBackgroundPoll();
@@ -3742,7 +3755,15 @@ bodyEl.addEventListener('mouseover', (e) => {
     if (toggle) markEl = toggle.querySelector('.reason-mark-read:not(.done)');
   }
   if (!markEl) {
-    if (shiftPreviewTarget) { clearShiftPreview(); shiftPreviewTarget = null; }
+    // Don't clear if mouse is still inside the same item that owns the current target
+    if (shiftPreviewTarget) {
+      const hoverItem = e.target.closest('.item');
+      const targetItem = shiftPreviewTarget.closest('.item');
+      if (!hoverItem || hoverItem !== targetItem) {
+        clearShiftPreview();
+        shiftPreviewTarget = null;
+      }
+    }
     return;
   }
   if (markEl === shiftPreviewTarget && shiftPreviewItems.length > 0) return;
@@ -3764,6 +3785,16 @@ document.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => {
   shiftPreviewTarget = null;
   clearShiftPreview();
+});
+// Backup shift detector: pointermove carries shiftKey, catches shift press with any mouse tremor
+let _lastPointerShift = false;
+bodyEl.addEventListener('pointermove', (e) => {
+  if (e.shiftKey && !_lastPointerShift && shiftPreviewTarget && shiftPreviewItems.length === 0) {
+    showShiftPreview(shiftPreviewTarget);
+  } else if (!e.shiftKey && _lastPointerShift && shiftPreviewItems.length > 0) {
+    clearShiftPreview();
+  }
+  _lastPointerShift = e.shiftKey;
 });
 
 // Click-to-focus: track position for keyboard nav without showing highlight
@@ -4110,12 +4141,7 @@ function showWelcomeScreen() {
 }
 
 // ── Education banner (dismissible tips) ──
-function showEducationBanner() {
-  if (bodyEl.querySelector('.education-banner')) return;
-  const banner = document.createElement('div');
-  banner.className = 'education-banner';
-  banner.innerHTML = `
-    <button class="edu-close" title="Dismiss">&times;</button>
+const eduBannerHtml = `
     <div class="edu-section" style="margin-top:6px;">
       <div class="edu-row"><kbd>↑</kbd> <kbd>↓</kbd> <span class="edu-label">Move up/down</span></div>
       <div class="edu-row"><kbd>←</kbd> <kbd>→</kbd> <span class="edu-label">Expand/collapse</span></div>
@@ -4127,13 +4153,27 @@ function showEducationBanner() {
       <div class="edu-row"><kbd>⌘⇧.</kbd> <span class="edu-label">Toggle Slack sidebar</span></div>
     </div>
     <div class="edu-tip">Tip: Hold down <kbd>⇧</kbd> while clicking ✓ to mark multiple items as read quickly.</div>`;
-  banner.querySelector('.edu-close').addEventListener('click', () => {
-    chrome.storage.local.set({ fslackEducationDismissed: true });
-    banner.remove();
-    helpBtn.style.display = '';
-  });
-  helpBtn.style.display = 'none';
-  bodyEl.insertBefore(banner, bodyEl.firstChild);
+
+function showEducationBanner(bottom = false) {
+  if (bottom) {
+    // Fixed tip pinned to bottom of sidebar — lives on #overlay so innerHTML changes don't destroy it
+    if (document.querySelector('.education-banner.edu-bottom')) return;
+    const banner = document.createElement('div');
+    banner.className = 'education-banner edu-bottom';
+    banner.innerHTML = `<div class="edu-tip">Tip: Use your keyboard to navigate! Click <span class="edu-help-ref">?</span> to see what all you can do.</div>`;
+    document.getElementById('overlay').appendChild(banner);
+  } else {
+    // Inline banner at top of body — toggled via (?)
+    if (bodyEl.querySelector('.education-banner')) return;
+    const banner = document.createElement('div');
+    banner.className = 'education-banner';
+    banner.innerHTML = eduBannerHtml;
+    bodyEl.insertBefore(banner, bodyEl.firstChild);
+  }
+}
+
+function removeEducationBannerBottom() {
+  document.querySelector('.education-banner.edu-bottom')?.remove();
 }
 
 function maybeShowEducationBanner() {
@@ -5907,6 +5947,7 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   }
   if (!hadCache) {
     bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
+    showEducationBanner(true);
   }
 
   // Connect port to background.js (which relays to content.js → inject.js)

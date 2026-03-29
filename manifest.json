@@ -32,8 +32,8 @@
   "commands": {
     "toggle-flack": {
       "suggested_key": {
-        "default": "Ctrl+Shift+F",
-        "mac": "Command+Shift+F"
+        "default": "Ctrl+Period",
+        "mac": "Command+Period"
       },
       "description": "Toggle Chief of Slack sidebar"
     }
