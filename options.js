@@ -43,7 +43,7 @@ const RULE_GROUPS = [
   ]},
 ];
 
-chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog', 'priorityRules'], (result) => {
+chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarSectionChannels', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog', 'priorityRules'], (result) => {
   if (result.claudeApiKey) apiKeyInput.value = result.claudeApiKey;
   if (result.userContext) userContextInput.value = result.userContext;
   charCount.textContent = `${(result.userContext || '').length}/400`;
@@ -65,8 +65,10 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
 
   // Render sidebar section rules
   const sectionNames = result.sidebarSectionNames || [];
+  const sectionChannels = result.sidebarSectionChannels || {};
   const savedRules = result.sidebarTierMap || {};
   const defaultRules = {}; // all sections default to 'normal'
+  const infoSvg = `<svg class="section-info-icon" viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="8" y="12" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">?</text></svg>`;
   if (sectionNames.length) {
     const tierMapEl = document.getElementById('tier-map');
     tierMapEl.innerHTML = '';
@@ -88,18 +90,22 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
     }
     for (const name of sorted) {
       const key = name.toLowerCase();
+      if (key === 'dms' || key === 'direct messages') continue;
       const currentRule = savedRules[key] || defaultRules[key] || 'normal';
+      const channels = sectionChannels[key];
+      const infoIcon = channels && channels.length ? `<span class="section-info-wrap" title="${channels.map(c => '#' + c).join(', ')}">${infoSvg}</span>` : '';
       const row = document.createElement('div');
       row.className = 'tier-row';
-      row.innerHTML = `<span class="section-name">${name}</span><select data-section="${key}">${buildRuleSelect(key, currentRule)}</select>`;
+      row.innerHTML = `<span class="section-name">${name}${infoIcon}</span><select data-section="${key}">${buildRuleSelect(key, currentRule)}</select>`;
       tierMapEl.appendChild(row);
     }
 
+  }
+  // Render bot-only rule (lives under Message Type section in HTML, but stored in sidebarTierMap)
+  const botSelect = document.querySelector('select[data-section="__bot_only"]');
+  if (botSelect) {
     const botRule = savedRules['__bot_only'] || 'high_volume';
-    const botRow = document.createElement('div');
-    botRow.className = 'tier-row';
-    botRow.innerHTML = `<span class="section-name">\u{1F916} Bot-only channels</span><select data-section="__bot_only">${buildRuleSelect('__bot_only', botRule)}</select>`;
-    tierMapEl.appendChild(botRow);
+    botSelect.innerHTML = buildRuleSelect('__bot_only', botRule);
   }
 
   // Render token table

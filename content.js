@@ -186,6 +186,16 @@ chrome.runtime.onMessage.addListener((msg) => {
     return;
   }
 
+  /* DEV_ONLY_START */
+  // Clear inject.js localStorage caches
+  if (msg.type === `${FSLACK}:nukeLocalStorage`) {
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('fslack'));
+    keys.forEach(k => localStorage.removeItem(k));
+    console.log(`[fslack content] nuked ${keys.length} localStorage keys:`, keys);
+    return;
+  }
+  /* DEV_ONLY_END */
+
   // Forward all other fslack:* messages to inject.js via postMessage
   window.postMessage(msg, '*');
 });

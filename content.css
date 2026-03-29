@@ -27,6 +27,7 @@
 
 body { margin: 0; padding: 0; height: 100vh; overflow: hidden; }
 
+/* DEV_ONLY_START */
 /* Demo bar */
 #demo-bar {
   position: fixed;
@@ -35,11 +36,12 @@ body { margin: 0; padding: 0; height: 100vh; overflow: hidden; }
   z-index: 9999;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 12px;
   opacity: 0.01;
   transition: opacity 0.15s;
 }
 #demo-bar:hover { opacity: 0.9; }
+.demo-group { display: flex; align-items: center; gap: 3px; }
 #demo-label { cursor: pointer; font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
 #demo-checkbox { margin: 0; cursor: pointer; }
 .snapshot-btn {
@@ -57,49 +59,56 @@ body { margin: 0; padding: 0; height: 100vh; overflow: hidden; }
 #assess-checkbox { margin: 0; cursor: pointer; }
 
 /* Assessment mode: disagree buttons on items */
-.assess-btn {
+.assess-wrap {
   display: none;
-  font-size: 11px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-secondary);
-  opacity: 0.5;
-  transition: opacity 0.15s, border-color 0.15s, color 0.15s;
-  line-height: 1.3;
-  flex-shrink: 0;
+  gap: 6px;
+  padding: 2px 0;
 }
-.assess-btn:hover { opacity: 1; border-color: var(--danger); color: var(--danger); }
-body.assess-mode .assess-btn { display: inline-block; }
+body.assess-mode .assess-wrap { display: flex; }
+.assess-btn {
+  display: inline;
+  font-size: 11px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  opacity: 0.35;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+.assess-btn:hover { opacity: 1; background: none; }
+.assess-btn.assessed { opacity: 0.8; }
 
 /* Category picker popover */
 .assess-picker {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 100;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-strong);
-  border-radius: 6px;
-  padding: 4px;
-  display: flex;
-  gap: 2px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 4px;
 }
 .assess-picker button {
-  font-size: 10px;
-  padding: 3px 6px;
-  border-radius: 4px;
+  font-size: 11px;
+  padding: 0;
   cursor: pointer;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
+  background: none;
+  border: none;
+  color: var(--text-muted);
   white-space: nowrap;
+  outline: none;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  transition: color 0.12s, text-decoration-color 0.12s;
 }
-.assess-picker button:hover { color: var(--text-bright); border-color: var(--text-secondary); }
-.assess-btn.assessed { opacity: 1; border-color: var(--warning); color: var(--warning); }
+.assess-picker button:hover { color: var(--accent); text-decoration-color: var(--accent); background: none; }
+/* DEV_ONLY_END */
+.assess-info {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.35;
+  color: var(--text-secondary);
+  cursor: default;
+  transition: opacity 0.15s;
+}
+.assess-info:hover { opacity: 1; }
 
 #overlay {
   display: flex;
@@ -180,7 +189,7 @@ header {
 
 /* — Buttons — */
 button {
-  background: var(--success);
+  background: var(--accent);
   color: #fff;
   border: none;
   padding: 6px 16px;
@@ -190,7 +199,7 @@ button {
   cursor: pointer;
   transition: background 0.12s;
 }
-button:hover { background: var(--success-hover); }
+button:hover { background: var(--accent-hover); }
 button:disabled { opacity: 0.5; cursor: wait; }
 #fslack-nav-toggle { background: transparent; color: #662500cc; font-size: 13px; font-weight: 500; padding: 4px 8px; border-radius: 8px; }
 #fslack-nav-toggle:hover { background: rgba(0,0,0,0.04); }
@@ -265,7 +274,8 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 /* Channel link hover */
 .item-channel-link { text-decoration: none; color: inherit; }
 .item-channel-link .open-in-slack { font-size: 11px; color: var(--accent); margin-left: 6px; display: none; }
-.item-channel-link:hover .open-in-slack { display: inline; }
+.item.detail-expanded .item-channel-link:hover .open-in-slack,
+.priority-section:has(.priority-header) .item-channel-link:hover .open-in-slack { display: inline; }
 .item-channel-link:hover .item-channel { text-decoration: underline; }
 .item-channel-link:hover ~ .item-sep,
 .item-channel-link:hover ~ .item-time,
@@ -600,7 +610,6 @@ ul.slack-list, ol.slack-list {
   to   { opacity: 1; transform: translateY(0); }
 }
 .dm-watch-new { animation: dm-watch-fadein 0.4s ease-out; }
-.dm-watch-new .item { box-shadow: inset 0 0 0 1px rgba(240,71,112,0.25); }
 
 /* Read-done: fade + compress exit */
 .item.read-done {

@@ -70,7 +70,7 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeChannelPost`,
   `${FSLACK}:summarizeThreadReplies`,
   `${FSLACK}:summarizeFullThread`,
-  `${FSLACK}:anonymize`,
+  /* DEV_ONLY_START */ `${FSLACK}:anonymize`, /* DEV_ONLY_END */
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
 ]);
@@ -281,10 +281,14 @@ You are summarizing Slack items so they can be prioritized. For each item, write
 Capture:
 - WHO is talking, who they're addressing, and the relationship (teammate, manager, external)
 - WHAT they need: are they blocked on me, asking a question, requesting review/approval, sharing info, or just chatting?
-- WHETHER I'm @mentioned and what specifically the mention asks for
 - WHETHER someone answered a question I asked (if userReplied=true) and what the answer was
 - The TOPIC and any urgency signals (deadlines, "ASAP", "blocking", "waiting on")
-- If isMentioned=true in a long thread: what the thread is about AND specifically why/where I was tagged
+
+CRITICAL — @mention handling (isMentioned=true):
+When isMentioned=true, you MUST find the exact message that contains my @mention and quote what it says.
+The summary MUST answer: "Who mentioned me, and what did they say/ask when they tagged me?"
+Do NOT just say "you were mentioned" — find the message text around the @mention and include it.
+Example: "julia tagged you asking to review the spacing changes in her top bar PR" NOT "@gem898 is @mentioned in polish-team channel"
 
 "recentContext" = messages I already read (for conversation flow). "newReplies" / "messages" = the unread messages.
 Focus on the UNREAD messages, referencing context only to explain what they're responding to.
@@ -542,6 +546,7 @@ function buildChannelPostPrompt(item, identity) {
 Summarize what people are discussing in #${item.channel} as exactly 3 bullet points.
 Each bullet: "- [first name] [verb] [specific thing]"
 Use first names only. Be concrete — name the specific artifact, issue, or topic, not a vague category.
+For bot/automated messages (bot_id present), skip the reporter or source name — just describe the issue or topic directly. E.g. "stuck toast notification bug" not "zendesk reported stuck toast notification bug" or "customer reported stuck toast notification bug".
 Combine multiple small messages from the same person into one bullet when possible.
 If fewer than 3 distinct topics, use fewer bullets.
 
@@ -568,6 +573,7 @@ async function handleChannelPostSummarize(item) {
 }
 
 
+/* DEV_ONLY_START */
 // ── Call Claude API to build anonymization replacement map ──
 async function handleAnonymize(data) {
   console.log(`[fslack bg] anonymize: ${data.names?.length} names, ${data.channels?.length} channels, ${data.snippets?.length} snippets`);
@@ -645,6 +651,7 @@ Example: {"josh": "Marcus", "deploy-pipeline": "release-flow", "ProjectX": "Beac
     return { error: err.message };
   }
 }
+/* DEV_ONLY_END */
 
 // ── Message handler (LLM calls + API key) ──
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -696,10 +703,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleFullThreadSummarize(msg.data).then(sendResponse);
     return true;
   }
+  /* DEV_ONLY_START */
   if (msg.type === `${FSLACK}:anonymize`) {
     handleAnonymize(msg.data).then(sendResponse);
     return true;
   }
+  /* DEV_ONLY_END */
   if (msg.type === `${FSLACK}:setApiKey`) {
     chrome.storage.local.set({ claudeApiKey: msg.key }, () => {
       sendResponse({ ok: true });

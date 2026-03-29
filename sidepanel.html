@@ -30,12 +30,16 @@
     <button class="lb-arrow next">&#8250;</button>
     <div class="lb-media"></div>
   </div>
+  <!-- DEV_ONLY_START -->
   <div id="demo-bar">
-    <label id="demo-label" title="Demo mode"><input type="checkbox" id="demo-checkbox"> demo</label>
+    <span class="demo-group"><label id="demo-label" title="Demo mode"><input type="checkbox" id="demo-checkbox"> demo</label>
     <button id="snapshot-export" class="snapshot-btn" title="Download cached data">&#x2913;</button>
-    <button id="snapshot-import" class="snapshot-btn" title="Upload cached data (re-open extension to show)">&#x2912;</button>
-    <label id="assess-label" title="Assessment mode — show disagree buttons on items"><input type="checkbox" id="assess-checkbox">&#x1F9EA;</label>
+    <button id="snapshot-import" class="snapshot-btn" title="Upload cached data (re-open extension to show)">&#x2912;</button></span>
+    <span class="demo-group"><label id="assess-label" title="Assessment mode — show disagree buttons on items"><input type="checkbox" id="assess-checkbox">&#x1F9EA;</label>
+    <button id="eval-export" class="snapshot-btn" title="Download eval data (Shift+E)">&#x2913;</button></span>
+    <button id="nuke-cache" class="snapshot-btn" title="Clear all AI caches and re-analyze">&#x1F5D1;</button>
   </div>
+  <!-- DEV_ONLY_END -->
   <script src="sidepanel.js"></script>
 </body>
 </html>

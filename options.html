@@ -61,11 +61,23 @@
           </select>
         </div>
         <div class="tier-row">
+          <span class="section-name">Private channels</span>
+          <select data-rule="privateChannel">
+            <option value="when_free">At least Relevant</option>
+            <option value="priority">Priority</option>
+            <option value="ai">AI decides</option>
+          </select>
+        </div>
+        <div class="tier-row">
           <span class="section-name">Public channels (no mention)</span>
           <select data-rule="publicChannel">
             <option value="cap_whenfree">Can't reach Priority</option>
             <option value="ai">AI decides</option>
           </select>
+        </div>
+        <div class="tier-row">
+          <span class="section-name">Bot-only channels</span>
+          <select data-section="__bot_only"></select>
         </div>
       </div>
     </section>

@@ -68,6 +68,7 @@ function _flashDraftSaved(form) {
   el._hideTimer = setTimeout(() => el.classList.remove('visible'), 1000);
 }
 
+/* DEV_ONLY_START */
 // ── Demo mode (anonymization — extract text, batch LLM calls, apply) ──
 const DEMO_BATCH_SIZE = 20;
 
@@ -229,6 +230,7 @@ function importSnapshot() {
   document.body.appendChild(input);
   input.click();
 }
+/* DEV_ONLY_END */
 
 // ── Port connection to background.js ──
 let port = null;
@@ -487,6 +489,7 @@ window._fslackDebug = function(channelId) {
 let cachedView = null; // { data, popular, prioritized, ts }
 let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
 let sidebarSections = {};    // { [channelId]: 'floor_priority'|'floor_whenfree'|'hard_noise'|'skip'|'normal' }
+let sidebarSectionNameMap = {}; // { [channelId]: 'Daily'|'Important'|... } — display name of Slack sidebar section
 let priorityRules = {};      // { vipDm, dm, mention, publicChannel, hardGate } from settings
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let myReactionsMap = {};     // { "channel:ts": ["+1", "yellow_heart", ...] }
@@ -559,6 +562,7 @@ chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fsl
   }
 });
 
+/* DEV_ONLY_START */
 // ── Assessment mode (AI quality evaluation) ──
 let _lastPipelineData = null; // { rawItems, summaries, leanItems, priorities, reasons }
 let _assessMode = false;
@@ -585,13 +589,75 @@ function _injectAssessButtons() {
     const btn = document.createElement('button');
     btn.className = 'assess-btn';
     btn.textContent = '👎';
-    btn.title = 'Wrong bucket? Click to log disagreement';
-    // Position it at the top-right of the item
-    item.style.position = 'relative';
-    btn.style.position = 'absolute';
-    btn.style.right = '4px';
-    btn.style.top = '4px';
-    item.appendChild(btn);
+    btn.title = 'Wrong bucket';
+    const upBtn = document.createElement('button');
+    upBtn.className = 'assess-btn assess-up';
+    upBtn.textContent = '👍';
+    upBtn.title = 'Correct bucket';
+    upBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _logAssessment(item, _getCategoryForItem(item), _getCategoryForItem(item));
+      upBtn.classList.add('assessed');
+      btn.style.display = 'none';
+    });
+    // Find the AI's reasoning or rule explanation from cachedView
+    let reasonWhy = '';
+    if (cachedView?.prioritized) {
+      const allItems = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []),
+                        ...(cachedView.prioritized.whenFree || []), ...(cachedView.prioritized.noise || [])];
+      const dataEl = item.querySelector('[data-channel]');
+      if (dataEl) {
+        const ch = dataEl.dataset.channel;
+        const ts = dataEl.dataset.threadTs || dataEl.dataset.ts;
+        const match = allItems.find(i => i.channel_id === ch && (i.ts === ts || i.sort_ts === ts))
+          || allItems.find(i => i.channel_id === ch);
+        if (match) {
+          const cat = _getCategoryForItem(item);
+          const aiReason = match._reasonWhy || '';
+          // Check if a hard rule overrode the AI's classification
+          let rule = '';
+          const llmCat = _lastPipelineData?.priorities?.[match._llmId];
+          const overridden = llmCat && llmCat !== cat;
+          if (overridden) {
+            const isDm = match._type === 'dm' || match._isDmThread;
+            const isPriv = !isDm && (cachedView.data?.channelMeta?.[match.channel_id]?.isPrivate);
+            if (isDm) rule = 'Rule: DM (AI said ' + llmCat + ')';
+            else if (match._isMentioned) rule = 'Rule: @mention (AI said ' + llmCat + ')';
+            else if (isPriv) rule = 'Rule: private channel (AI said ' + llmCat + ')';
+            else if (match._sidebarSection && match._sidebarSection !== 'normal') {
+              const secName = match._sidebarSectionName;
+              const secFloor = match._sidebarSection === 'floor_priority' ? 'Minimum: Priority'
+                : match._sidebarSection === 'floor_whenfree' ? 'Minimum: Relevant' : match._sidebarSection;
+              rule = secName ? `Rule: "${secName}" section (${secFloor}) — AI said ${llmCat}` : `Rule: ${secFloor} — AI said ${llmCat}`;
+            }
+          }
+          // Combine: rule first, then AI reason
+          if (rule && aiReason) reasonWhy = rule + '\nAI: ' + aiReason;
+          else if (rule) reasonWhy = rule;
+          else reasonWhy = aiReason;
+        }
+      }
+    }
+
+    const wrap = document.createElement('span');
+    wrap.className = 'assess-wrap';
+    const hasInlineOverride = item.querySelector('.assess-info');
+    if (reasonWhy && !hasInlineOverride) {
+      const info = document.createElement('span');
+      info.className = 'assess-info';
+      info.title = reasonWhy;
+      info.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg>';
+      wrap.appendChild(info);
+    }
+    wrap.appendChild(upBtn);
+    wrap.appendChild(btn);
+    // Insert after reason badge as sibling, or at end of item
+    const reason = item.querySelector('.item-reason');
+    if (reason && reason.nextSibling) {
+      reason.parentNode.insertBefore(wrap, reason.nextSibling);
+    } else {
+      item.appendChild(wrap);
+    }
   }
 }
 
@@ -600,7 +666,7 @@ function _showAssessPicker(btn, itemEl) {
   document.querySelector('.assess-picker')?.remove();
   const currentCat = _getCategoryForItem(itemEl);
   const cats = ['act_now', 'priority', 'when_free', 'noise'];
-  const labels = { act_now: 'Act Now', priority: 'Priority', when_free: 'Relevant', noise: 'Noise' };
+  const labels = { act_now: 'Priority (red)', priority: 'Priority', when_free: 'Relevant', noise: 'Noise' };
   const picker = document.createElement('div');
   picker.className = 'assess-picker';
   for (const cat of cats) {
@@ -612,16 +678,14 @@ function _showAssessPicker(btn, itemEl) {
       _logAssessment(itemEl, currentCat, cat);
       btn.classList.add('assessed');
       btn.textContent = '👎 → ' + labels[cat];
+      const upBtn = wrap.querySelector('.assess-up');
+      if (upBtn) upBtn.style.display = 'none';
       picker.remove();
     });
     picker.appendChild(b);
   }
-  btn.parentElement.appendChild(picker);
-  // Close on outside click
-  setTimeout(() => {
-    const close = (e) => { if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('click', close); } };
-    document.addEventListener('click', close);
-  }, 0);
+  const wrap = btn.closest('.assess-wrap') || btn.parentElement;
+  wrap.appendChild(picker);
 }
 
 function _logAssessment(itemEl, llmCategory, userCategory) {
@@ -725,6 +789,7 @@ function _computeAssessStats() {
   }
   return { total, criticalMisses, falseUrgency, transitions: byCat };
 }
+/* DEV_ONLY_END */
 
 // Load standard emoji map (bundled JSON) async
 fetch(chrome.runtime.getURL('standard-emoji.json'))
@@ -1936,6 +2001,11 @@ function gutterCheck(channel, markTs, threadTs, hasMention) {
   return `<span class="gutter-check mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}" title="Mark read">✓</span>`;
 }
 
+function ruleOverrideIcon(item) {
+  if (!item._ruleOverride) return '';
+  return ` <span class="assess-info" title="${escapeHtml(item._ruleOverride)}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg></span>`;
+}
+
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
@@ -2011,6 +2081,7 @@ function renderThreadItem(t, data, cssClass) {
       html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
     }
     html += ` <span class="item-sep">·</span> ${headerExpandHtml(repliesMsgId, unread.length, unread.length === 1 ? 'new reply' : 'new replies')}`;
+    html += ruleOverrideIcon(t);
     html += `</div>`;
   } else {
     let leftInner = `<span class="item-channel">${channelLabel}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
@@ -2020,6 +2091,7 @@ function renderThreadItem(t, data, cssClass) {
     if (unread.length > 0) {
       leftInner += ` <span class="item-sep">·</span> <span class="item-replied">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'}</span>`;
     }
+    leftInner += ruleOverrideIcon(t);
     html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}</div>`;
   }
   // Compact preview for when-free threads: show latest reply, not root post
@@ -2161,7 +2233,7 @@ function renderDmItem(dm, data, cssClass) {
   let html = `<div class="item ${cssClass}">${reasonBadge(dm, cssClass)}
     ${collapsible ? '<div class="item-details">' : ''}
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
+      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>${ruleOverrideIcon(dm)}`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
     </div>
     ${cssClass === 'when-free' && latest.text ? `<div class="compact-preview">${escapeHtml(latest.text.slice(0, 120).replace(/\n/g, ' '))}</div>` : ''}
     <div class="item-right">`;
@@ -2246,6 +2318,7 @@ function renderChannelItem(cp, data, cssClass) {
     if (cssClass === 'noise-item') {
       html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
     }
+    html += ruleOverrideIcon(cp);
     html += `</div>`;
     // Compact preview for when-free items: ALL summary bullets joined, or first message fallback
     if (cssClass === 'when-free' || cssClass === 'noise-item') {
@@ -2275,6 +2348,7 @@ function renderChannelItem(cp, data, cssClass) {
       const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
       chLeftInner += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
     }
+    chLeftInner += ruleOverrideIcon(cp);
     html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
   }
   html += `<div class="item-right">`;
@@ -2468,7 +2542,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   const botOpenHref = slackPermalink(cp.channel_id, botOpenTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
+      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>${ruleOverrideIcon(cp)}`, botOpenHref)}
       ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
     </div>
     <div class="item-right">
@@ -2561,6 +2635,7 @@ function applyPreFilters(data) {
     t._type = 'thread';
     t._isDmThread = t.channel_id?.startsWith('D') || false;
     t._sidebarSection = sidebarSections[t.channel_id] || null;
+    t._sidebarSectionName = sidebarSectionNameMap[t.channel_id] || null;
 
     // Check unread replies for direct @-mentions (drives floor rule → forced priority)
     const unreadTexts = (t.unread_replies || []).map((r) => r.text).join(' ');
@@ -2573,20 +2648,18 @@ function applyPreFilters(data) {
     // High-volume channels: only surface if 10+ replies, rest → noise
     const isOwnThread = t.root_user === selfId;
     if (t._sidebarSection === 'high_volume' && !isOwnThread) {
+      const secName = t._sidebarSectionName || 'high-volume';
       if ((t.reply_count || 0) >= 5) {
         t._forceThreadSummary = true;
+        t._ruleOverride = `"${secName}" section: 5+ replies → relevant`;
         whenFree.push(t);
       } else {
+        t._ruleOverride = `"${secName}" section: <5 replies → noise`;
         noise.push(t);
       }
       continue;
     }
 
-    // All-bot unread replies → when free
-    if ((t.unread_replies || []).every(isBot)) {
-      whenFree.push(t);
-      continue;
-    }
 
     forLlm.threads.push(t);
   }
@@ -2606,6 +2679,7 @@ function applyPreFilters(data) {
   for (const cp of channelPostList) {
     cp._type = 'channel';
     cp._sidebarSection = sidebarSections[cp.channel_id] || null;
+    cp._sidebarSectionName = sidebarSectionNameMap[cp.channel_id] || null;
 
     const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
     cp._isMentioned = containsSelfMention(allCpTexts, selfId);
@@ -2631,10 +2705,11 @@ function applyPreFilters(data) {
 
     // High-volume channels: split — individual posts with 10+ replies → whenFree, rest → noise
     if (cp._sidebarSection === 'high_volume') {
+      const secName = cp._sidebarSectionName || 'high-volume';
       const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 5);
       const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 5);
       if (hotMsgs.length > 0) {
-        const hotCp = { ...cp, messages: hotMsgs, _type: 'channel' };
+        const hotCp = { ...cp, messages: hotMsgs, _type: 'channel', _ruleOverride: `"${secName}" section: 5+ replies → relevant` };
         const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
         hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
         hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
@@ -2642,7 +2717,7 @@ function applyPreFilters(data) {
         whenFree.push(hotCp);
       }
       if (coldMsgs.length > 0) {
-        noise.push({ ...cp, messages: coldMsgs, _type: 'channel' });
+        noise.push({ ...cp, messages: coldMsgs, _type: 'channel', _ruleOverride: `"${secName}" section: <5 replies → noise` });
       }
       _dbgLog('high_volume');
       continue;
@@ -2650,6 +2725,8 @@ function applyPreFilters(data) {
 
     // Hard noise rule → bypass LLM, straight to noise
     if (cp._sidebarSection === 'hard_noise') {
+      const secName = cp._sidebarSectionName || 'hard-noise';
+      cp._ruleOverride = `"${secName}" section → always noise`;
       _dbgLog('hard_noise');
       noise.push(cp);
       continue;
@@ -2667,18 +2744,18 @@ function applyPreFilters(data) {
       cp._isAllBot = true;
       const botRule = sidebarSections['__bot_only'] || 'high_volume';
       if (botRule === 'skip') { _dbgLog('allBot-skip'); continue; }
-      if (botRule === 'hard_noise') { _dbgLog('allBot-noise'); noise.push(cp); continue; }
+      if (botRule === 'hard_noise') { cp._ruleOverride = 'bot-only → always noise'; _dbgLog('allBot-noise'); noise.push(cp); continue; }
       if (botRule === 'high_volume') {
         const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 5);
         const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 5);
         if (hotMsgs.length > 0) {
-          const hotCp = { ...cp, messages: hotMsgs, _isAllBot: true };
+          const hotCp = { ...cp, messages: hotMsgs, _isAllBot: true, _ruleOverride: 'bot-only, 5+ replies → relevant' };
           const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
           hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
           hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
           whenFree.push(hotCp);
         }
-        if (coldMsgs.length > 0) noise.push({ ...cp, messages: coldMsgs, _isAllBot: true });
+        if (coldMsgs.length > 0) noise.push({ ...cp, messages: coldMsgs, _isAllBot: true, _ruleOverride: 'bot-only, <5 replies → noise' });
         _dbgLog('allBot-highvol');
         continue;
       }
@@ -2808,6 +2885,8 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
   const noise = [...deterministicNoise];
   const meta = data?.channelMeta || {};
 
+  const CAT_LABEL = { act_now: 'urgent', priority: 'priority', when_free: 'relevant', noise: 'noise', drop: 'drop' };
+
   function place(item, cat) {
     const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm' || item._isDmThread;
     const isDm = item._type === 'dm' || item._isDmThread;
@@ -2826,25 +2905,46 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
       const senderIds = (item.messages || item.unread_replies || []).map((m) => m.user).filter(Boolean);
       const isVipDm = senderIds.some((uid) => vipSet.has(uid));
       if (isVipDm && vipDmRule !== 'ai') {
+        const before = cat;
         cat = floorCategory(cat, vipDmRule);
+        if (cat !== before) item._ruleOverride = `VIP DM → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
       } else if (!isVipDm && dmRule !== 'ai') {
+        const before = cat;
         cat = floorCategory(cat, dmRule);
+        if (cat !== before) item._ruleOverride = `DM → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
       }
     }
 
     // @mention floor (configurable)
     const mentionRule = priorityRules.mention || 'priority'; // default: at least priority
     if (isMentioned && mentionRule !== 'ai') {
+      const before = cat;
       cat = floorCategory(cat, mentionRule);
+      if (cat !== before) item._ruleOverride = `@mention → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
     }
 
     // Floor rules from sidebar section config
-    if (item._sidebarSection === 'floor_priority' && cat !== 'act_now') cat = 'priority';
-    if (item._sidebarSection === 'floor_whenfree' && (cat === 'noise' || cat === 'drop')) cat = 'when_free';
+    const sectionName = item._sidebarSectionName;
+    const sectionFloorLabel = item._sidebarSection === 'floor_priority' ? 'Minimum: Priority'
+      : item._sidebarSection === 'floor_whenfree' ? 'Minimum: Relevant' : '';
+    if (item._sidebarSection === 'floor_priority' && cat !== 'act_now') {
+      if (cat !== 'priority') item._ruleOverride = sectionName
+        ? `"${sectionName}" section (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`
+        : `${sectionFloorLabel} — AI said ${CAT_LABEL[llmCat]}`;
+      cat = 'priority';
+    }
+    if (item._sidebarSection === 'floor_whenfree' && (cat === 'noise' || cat === 'drop')) {
+      item._ruleOverride = sectionName
+        ? `"${sectionName}" section (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`
+        : `${sectionFloorLabel} — AI said ${CAT_LABEL[llmCat]}`;
+      cat = 'when_free';
+    }
+
+    // Always store the AI's reasoning (used by eval mode and priority display)
+    item._reasonWhy = reasons[item._llmId + '_why'] || undefined;
 
     if (cat === 'act_now' || cat === 'priority') {
       item._reason = reasons[item._llmId] || undefined;
-      item._reasonWhy = reasons[item._llmId + '_why'] || undefined;
       // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
       if (!item._reason && isMentioned) item._reason = item._mentionInReplies && !item._mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
       // Fallback: truncate most substantive message text
@@ -2878,15 +2978,25 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     if (cat === 'act_now') { actNow.push(item); return; }
     if (cat === 'priority') { priority.push(item); return; }
 
+    // Private channel floor (configurable, excludes DMs which have their own rules)
+    const privateRule = priorityRules.privateChannel || 'when_free'; // default: at least relevant
+    if (isPrivate && !isDm && privateRule !== 'ai') {
+      const before = cat;
+      cat = floorCategory(cat, privateRule);
+      if (cat !== before) item._ruleOverride = `private channel → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
+    }
+
     // Public channel posts without @mention — cap rule (configurable)
     const publicRule = priorityRules.publicChannel || 'cap_whenfree'; // default: can't reach priority
     if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel && publicRule === 'cap_whenfree') {
-      if (cat === 'act_now' || cat === 'priority') cat = 'when_free';
+      if (cat === 'act_now' || cat === 'priority') {
+        item._ruleOverride = `public channel capped at relevant (AI said ${CAT_LABEL[llmCat]})`;
+        cat = 'when_free';
+      }
     }
 
     if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
     if (cat === 'drop') return;
-    if (cat === 'noise' && isPrivate) { whenFree.push(item); return; }
     if (cat === 'when_free') { whenFree.push(item); return; }
     noise.push(item);
   }
@@ -3045,7 +3155,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   bodyEl.innerHTML = html;
-  if (_assessMode) _injectAssessButtons();
+  /* DEV_ONLY_START */ if (_assessMode) _injectAssessButtons(); /* DEV_ONLY_END */
   focusedItemIndex = -1;
   resetThreadUnreadIndex();
   lastRenderData = data;
@@ -3313,33 +3423,38 @@ function countNewerThreadReplies(data, channelId, threadTs, afterTs) {
 }
 let replyRequestId = 0;
 
+/* DEV_ONLY_START */
 // ── Assessment mode: delegated click handler for assess buttons ──
 bodyEl.addEventListener('click', (e) => {
-  const btn = e.target.closest('.assess-btn');
+  const btn = e.target.closest('.assess-btn, .assess-info, .assess-picker button');
   if (!btn) return;
-  e.stopPropagation();
+  e.stopImmediatePropagation();
+  if (!btn.classList.contains('assess-btn')) return; // info/picker handled elsewhere
   const itemEl = btn.closest('.item');
   if (!itemEl) return;
+  const wrap = btn.closest('.assess-wrap') || btn.parentElement;
   // If already has a picker open, close it
-  if (btn.parentElement.querySelector('.assess-picker')) {
-    btn.parentElement.querySelector('.assess-picker').remove();
+  if (wrap.querySelector('.assess-picker')) {
+    wrap.querySelector('.assess-picker').remove();
     return;
   }
   _showAssessPicker(btn, itemEl);
 });
+/* DEV_ONLY_END */
 
 bodyEl.addEventListener('click', (e) => {
   // Compact mode: click to expand items in when-free and noise sections
   const compactItem = e.target.closest('.when-free-items .item:not(.detail-expanded), .noise-items .item:not(.detail-expanded)');
-  if (compactItem && !e.target.closest('a, button, .mark-all-read, .action-mute-channel')) {
+  if (compactItem && !e.target.closest('a, button:not(.assess-btn), .mark-all-read, .action-mute-channel, .assess-picker')) {
     compactItem.classList.add('detail-expanded');
     return;
   }
 
   // Reason-badge toggle for collapsible priority items (skip if clicking the check mark)
   const reasonToggle = e.target.closest('.item-reason-toggle');
-  if (reasonToggle && !e.target.closest('.reason-mark-read')) {
-    const details = reasonToggle.nextElementSibling;
+  if (reasonToggle && !e.target.closest('.reason-mark-read, .assess-wrap')) {
+    let details = reasonToggle.nextElementSibling;
+    if (details?.classList.contains('assess-wrap')) details = details.nextElementSibling;
     if (!details?.classList.contains('item-details')) return;
     const expanded = details.classList.toggle('expanded');
     const reasonText = reasonToggle.querySelector('.reason-text');
@@ -5053,9 +5168,12 @@ function _prioritizeAndRenderInner(data) {
     const vipNames = data.vipUserIds.map((uid) => data.users[uid]).filter(Boolean);
     chrome.storage.local.set({ vipNames });
   }
-  // Cache sidebar section names for options page
+  // Cache sidebar section names + channel lists for options page
   if (data.sidebarSectionNames && data.sidebarSectionNames.length) {
     chrome.storage.local.set({ sidebarSectionNames: data.sidebarSectionNames });
+  }
+  if (data.sidebarSectionChannels) {
+    chrome.storage.local.set({ sidebarSectionChannels: data.sidebarSectionChannels });
   }
   myReactionsMap = buildMyReactionsMap(data);
   const preFiltered = applyPreFilters(data);
@@ -5244,8 +5362,7 @@ function _prioritizeAndRenderInner(data) {
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
 
-      // Stash full pipeline data for eval export
-      _lastPipelineData = { rawItems: allItems, summaries, leanItems, priorities: resp.priorities, reasons: resp.reasons };
+      /* DEV_ONLY_START */ _lastPipelineData = { rawItems: allItems, summaries, leanItems, priorities: resp.priorities, reasons: resp.reasons }; /* DEV_ONLY_END */
 
       // Cache the full pipeline result
       _prioritizationCache = { allHash, result: resp };
@@ -6061,6 +6178,7 @@ function handlePortMessage(msg) {
     gotUnreads = true;
     if (msg.data) {
       if (msg.data.sidebarSections) sidebarSections = msg.data.sidebarSections;
+      if (msg.data.sidebarSectionNameMap) sidebarSectionNameMap = msg.data.sidebarSectionNameMap;
       const toStore = {};
       if (msg.data.users) {
         mergeCachedUsers(msg.data.users);
@@ -6094,6 +6212,7 @@ function handlePortMessage(msg) {
     gotUnreads = true;
     if (msg.data) {
       if (msg.data.sidebarSections) sidebarSections = msg.data.sidebarSections;
+      if (msg.data.sidebarSectionNameMap) sidebarSectionNameMap = msg.data.sidebarSectionNameMap;
       const toStore = {};
       if (msg.data.users) {
         mergeCachedUsers(msg.data.users);
@@ -6131,8 +6250,14 @@ function handlePortMessage(msg) {
     if (d.sidebarSections) {
       sidebarSections = d.sidebarSections;
     }
+    if (d.sidebarSectionNameMap) {
+      sidebarSectionNameMap = d.sidebarSectionNameMap;
+    }
     if (d.sidebarSectionNames) {
       chrome.storage.local.set({ sidebarSectionNames: d.sidebarSectionNames });
+    }
+    if (d.sidebarSectionChannels) {
+      chrome.storage.local.set({ sidebarSectionChannels: d.sidebarSectionChannels });
     }
     console.log('[fslack] deferred update applied:', Object.keys(d));
     return;
@@ -6255,6 +6380,7 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   // Connect port to background.js (which relays to content.js → inject.js)
   connectPort();
 
+  /* DEV_ONLY_START */
   // ── Demo mode checkbox ──
   const demoCheckbox = document.getElementById('demo-checkbox');
   if (demoCheckbox) {
@@ -6274,12 +6400,44 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
 
-  // ── Assessment mode checkbox ──
+  // ── Nuke AI caches button ──
+  document.getElementById('nuke-cache')?.addEventListener('click', () => {
+    _prioritizationCache = null;
+    _summaryCache = {};
+    _vipSummaryCache = {};
+    _allSummaryCache = {};
+    _itemSummaryCache = {};
+    chrome.storage.local.remove([
+      'fslackPrioritizationCache', 'fslackSummaryCache',
+      'fslackVipSummaryCache', 'fslackAllSummaryCache',
+      'fslackItemSummaryCache', 'sidebarSectionChannels',
+    ], () => {
+      console.log('[fslack] AI caches nuked');
+      // Also clear inject.js localStorage caches via content script
+      sendToInject({ type: `${FSLACK}:nukeLocalStorage` });
+      // Trigger a fresh fetch
+      document.getElementById('refresh-link')?.click();
+    });
+  });
+
+  // ── Eval export button ──
+  document.getElementById('eval-export')?.addEventListener('click', exportAssessmentData);
+
+  // ── Assessment mode checkbox (sticky) ──
   const assessCheckbox = document.getElementById('assess-checkbox');
   if (assessCheckbox) {
+    chrome.storage.local.get('fslackAssessMode', (r) => {
+      if (r.fslackAssessMode) {
+        assessCheckbox.checked = true;
+        _assessMode = true;
+        document.body.classList.add('assess-mode');
+        _injectAssessButtons();
+      }
+    });
     assessCheckbox.addEventListener('change', () => {
       _assessMode = assessCheckbox.checked;
       document.body.classList.toggle('assess-mode', _assessMode);
+      chrome.storage.local.set({ fslackAssessMode: _assessMode });
       if (_assessMode) _injectAssessButtons();
     });
   }
@@ -6293,6 +6451,7 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
       exportAssessmentData();
     }
   });
+  /* DEV_ONLY_END */
 });
 
 // ── Auto-detect API key saved from Settings page ──

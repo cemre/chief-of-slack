@@ -178,6 +178,18 @@ textarea {
   color: #1d1c1d;
 }
 
+.section-info-wrap {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  vertical-align: middle;
+  cursor: default;
+}
+
+.section-info-icon {
+  color: #b0aeb3;
+}
+
 .tier-row select {
   padding: 5px 8px;
   border: 1px solid #d6d4d9;

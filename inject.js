@@ -197,9 +197,15 @@
     try {
       cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
     } catch {}
-    if (cached && cached.ts && Date.now() - cached.ts < CACHE_TTL && cached.sectionNames) {
+    if (cached && cached.ts && Date.now() - cached.ts < CACHE_TTL && cached.sectionNames && cached.sectionChannelIds) {
       // Restore section names from cache for the options page
       try { localStorage.setItem('fslackSectionNames', JSON.stringify(cached.sectionNames)); } catch {}
+      if (cached.sectionChannelIds) {
+        try { localStorage.setItem('fslackSectionChannelIds', JSON.stringify(cached.sectionChannelIds)); } catch {}
+      }
+      if (cached.sectionNameMap) {
+        try { localStorage.setItem('fslackSectionNameMap', JSON.stringify(cached.sectionNameMap)); } catch {}
+      }
       return cached.data;
     }
 
@@ -213,6 +219,8 @@
 
     const result = {};
     const sectionNames = []; // store for options page
+    const sectionChannelIds = {}; // store section → channel IDs for options page tooltips
+    const sectionNameMap = {}; // channelId → display section name (e.g. "Daily")
     try {
       const resp = await slackApi('users.channelSections.list');
       const sections = resp.channel_sections || [];
@@ -220,7 +228,8 @@
         const name = (section.name || '').trim();
         const nameLower = name.toLowerCase();
         if (!name) continue;
-        sectionNames.push(name);
+        const isDmSection = nameLower === 'dms' || nameLower === 'direct messages';
+        if (!isDmSection) sectionNames.push(name);
         const rule = rules[nameLower] || 'normal';
         // Collect channel IDs — API nests them under channel_ids_page
         const page = section.channel_ids_page || {};
@@ -238,10 +247,16 @@
             cursor = nextPage.cursor || null;
           } catch { break; }
         }
-        for (const cid of channelIds) result[cid] = rule;
+        for (const cid of channelIds) {
+          result[cid] = rule;
+          sectionNameMap[cid] = name;
+        }
+        sectionChannelIds[nameLower] = [...new Set(channelIds)];
       }
       // Store section names for the options page
       try { localStorage.setItem('fslackSectionNames', JSON.stringify(sectionNames)); } catch {}
+      try { localStorage.setItem('fslackSectionChannelIds', JSON.stringify(sectionChannelIds)); } catch {}
+      try { localStorage.setItem('fslackSectionNameMap', JSON.stringify(sectionNameMap)); } catch {}
       // Pass through virtual section rules
       if (rules['__bot_only']) result['__bot_only'] = rules['__bot_only'];
     } catch (err) {
@@ -252,7 +267,7 @@
 
     // Cache result + section names in localStorage
     try {
-      localStorage.setItem('fslackSidebarSections', JSON.stringify({ data: result, sectionNames, ts: Date.now() }));
+      localStorage.setItem('fslackSidebarSections', JSON.stringify({ data: result, sectionNames, sectionChannelIds, sectionNameMap, ts: Date.now() }));
     } catch {}
     return result;
   }
@@ -919,11 +934,13 @@
 
     // 8. Sidebar sections — use localStorage cache if available, fetch async later
     let sidebarSections;
+    let sidebarSectionChannelIds = {};
     let needsSidebarRefresh = false;
     try {
       const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
       if (cached?.data && cached.ts) {
         sidebarSections = cached.data;
+        if (cached.sectionChannelIds) sidebarSectionChannelIds = cached.sectionChannelIds;
         needsSidebarRefresh = Date.now() - cached.ts > 60 * 60 * 1000; // refresh if >1h old
       }
     } catch {}
@@ -931,9 +948,21 @@
       // No cache at all — must fetch now
       progress(8, 'Loading sidebar sections...');
       sidebarSections = await fetchSidebarSections().catch(() => ({}));
+      try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
     progress(9, 'Preparing results...');
+    // Build section → channel names mapping for options page tooltips
+    let sidebarSectionChannels = {};
+    for (const [section, ids] of Object.entries(sidebarSectionChannelIds)) {
+      sidebarSectionChannels[section] = [...new Set(ids.map(id => channels[id] || id))]
+          .sort((a, b) => {
+            const aIsId = /^[A-Z][A-Z0-9]{8,}$/.test(a);
+            const bIsId = /^[A-Z][A-Z0-9]{8,}$/.test(b);
+            if (aIsId !== bIsId) return aIsId ? 1 : -1;
+            return a.localeCompare(b);
+          });
+    }
     const result = {
       selfId,
       selfHandle,
@@ -952,7 +981,9 @@
       emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
       sidebarSections,
+      sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
       sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
+      sidebarSectionChannels,
       _deferredRefresh: needsSidebarRefresh || (cachedEmoji && !needsEmojiRefresh),
     };
     return result;
@@ -970,6 +1001,9 @@
       if (sidebar) {
         updates.sidebarSections = sidebar;
         updates.sidebarSectionNames = JSON.parse(localStorage.getItem('fslackSectionNames') || '[]');
+        updates.sidebarSectionNameMap = JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}');
+        // Note: sidebarSectionChannels not updated here since we don't have resolved channel names
+        // It will be rebuilt on next full fetch
       }
     } catch {}
     if (Object.keys(updates).length > 0) {
@@ -1252,16 +1286,31 @@
 
     // 8. Sidebar sections — use localStorage cache if available
     let sidebarSections;
+    let sidebarSectionChannelIds = {};
     try {
       const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
-      if (cached?.data) sidebarSections = cached.data;
+      if (cached?.data) {
+        sidebarSections = cached.data;
+        if (cached.sectionChannelIds) sidebarSectionChannelIds = cached.sectionChannelIds;
+      }
     } catch {}
     if (!sidebarSections) {
       progress(8, 'Loading sidebar sections...');
       sidebarSections = await fetchSidebarSections().catch(() => ({}));
+      try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
     progress(9, 'Preparing results...');
+    let sidebarSectionChannels = {};
+    for (const [section, ids] of Object.entries(sidebarSectionChannelIds)) {
+      sidebarSectionChannels[section] = [...new Set(ids.map(id => channels[id] || id))]
+          .sort((a, b) => {
+            const aIsId = /^[A-Z][A-Z0-9]{8,}$/.test(a);
+            const bIsId = /^[A-Z][A-Z0-9]{8,}$/.test(b);
+            if (aIsId !== bIsId) return aIsId ? 1 : -1;
+            return a.localeCompare(b);
+          });
+    }
     return {
       selfId,
       selfHandle,
@@ -1280,7 +1329,9 @@
       emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
       sidebarSections,
+      sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
       sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
+      sidebarSectionChannels,
     };
   }
 
