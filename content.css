@@ -95,7 +95,21 @@ header {
   flex-shrink: 0;
   transition: color 0.15s;
 }
-.settings-btn:hover { color: var(--text-primary); background: rgba(130,150,220,0.06); }
+.settings-btn:hover { color: var(--text-primary); }
+.help-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.help-btn:hover { color: var(--text-primary); }
 .last-updated { font-size: 11px; color: var(--text-muted); font-weight: 400; }
 .refresh-link { font-size: 11px; color: var(--danger); font-weight: 600; cursor: pointer; }
 #refresh-bar {
@@ -594,14 +608,15 @@ ul.slack-list, ol.slack-list {
 }
 .education-banner .edu-close {
   position: absolute;
-  top: 6px;
-  right: 8px;
+  top: -2px;
+  right: -4px;
   background: none;
   border: none;
   color: var(--text-muted);
-  font-size: 16px;
+  font-size: 20px;
+  font-weight: 300;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 8px 12px;
   line-height: 1;
 }
 .education-banner .edu-close:hover { color: var(--text-primary); }

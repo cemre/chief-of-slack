@@ -160,8 +160,8 @@ saveBtn.addEventListener('click', () => {
     sidebarTierMap,
     tokenLimits,
   }, () => {
-    saveStatus.textContent = 'Saved — return to the Slack tab and refresh to see changes.';
-    setTimeout(() => { saveStatus.textContent = ''; }, 4000);
+    saveStatus.textContent = 'Saved — go back to the Slack tab and refresh to see changes.';
+    setTimeout(() => { saveStatus.textContent = ''; }, 10000);
   });
 });
 

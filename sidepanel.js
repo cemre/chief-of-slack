@@ -406,6 +406,11 @@ document.getElementById('settings-btn').addEventListener('click', () => {
   openSettingsPage();
 });
 
+const helpBtn = document.getElementById('help-btn');
+helpBtn.addEventListener('click', () => {
+  showEducationBanner();
+});
+
 // ── Slack link click handler: navigate existing tab instead of opening new ones ──
 // Cmd/Ctrl-click or middle-click still opens in new tab (browser default)
 document.addEventListener('click', (e) => {
@@ -489,6 +494,7 @@ let autoRefreshTimer = null;       // background poll timer
 let isBackgroundFetch = false;     // true when fetching silently in background
 let _pendingInlineRefresh = false; // true when user clicked refresh but we kept the old view
 let stagedRenderData = null;       // data fetched in background, waiting for user to display
+let _hasApiKey = false;            // true once a Claude API key is confirmed in storage
 let shiftPreviewItems = [];   // [{ item, gc }] — items highlighted for Shift+click batch mark
 let shiftPreviewTarget = null; // gutter-check element currently hovered
 
@@ -1179,6 +1185,10 @@ const FACE_PRIORITIZING = '(⌐■_■)';
 
 function statusHtml(face, detail) {
   return `<div id="status"><div class="status-face">${face}</div><div class="detail">${detail}</div></div>`;
+}
+
+function formatErrorTwoLines(err) {
+  return err.replace(/\. ([A-Z])/, '.<br>$1');
 }
 
 // ── Render helpers ──
@@ -4085,6 +4095,7 @@ function showWelcomeScreen() {
   // Hide header chrome that doesn't apply yet
   refreshLink.style.display = 'none';
   document.getElementById('last-updated').style.display = 'none';
+  helpBtn.style.display = 'none';
 
   bodyEl.innerHTML = `
     <div class="welcome-screen">
@@ -4099,31 +4110,34 @@ function showWelcomeScreen() {
 }
 
 // ── Education banner (dismissible tips) ──
-function maybeShowEducationBanner() {
-  chrome.storage.local.get('fslackEducationDismissed', (result) => {
-    if (result.fslackEducationDismissed) return;
-    // Don't duplicate
-    if (bodyEl.querySelector('.education-banner')) return;
-    const banner = document.createElement('div');
-    banner.className = 'education-banner';
-    banner.innerHTML = `
-      <button class="edu-close" title="Dismiss">&times;</button>
-      <div class="edu-section">I'll scan your Slack unreads, use AI to sort them by urgency, and let you triage them quickly.</div>
-      <div class="edu-section" style="margin-top:6px;">
-        <div class="edu-row"><kbd>j</kbd> <kbd>k</kbd> <kbd>↑</kbd> <kbd>↓</kbd> <span class="edu-label">Move up/down</span></div>
-        <div class="edu-row"><kbd>e</kbd> <kbd>←</kbd> <kbd>→</kbd> <span class="edu-label">Expand/collapse</span></div>
-        <div class="edu-row"><kbd>m</kbd> <span class="edu-label">Mark read</span></div>
-        <div class="edu-row"><kbd>o</kbd> <span class="edu-label">Open in Slack</span></div>
-        <div class="edu-row"><kbd>r</kbd> <span class="edu-label">Reply</span></div>
-        <div class="edu-row"><kbd>t</kbd> <span class="edu-label">Mute</span></div>
-      </div>
-      <div class="edu-tip">Tip: Hold down <kbd>Shift</kbd> while clicking ✓ to mark multiple items as read quickly.</div>`;
-    banner.querySelector('.edu-close').addEventListener('click', () => {
-      chrome.storage.local.set({ fslackEducationDismissed: true });
-      banner.remove();
-    });
-    bodyEl.insertBefore(banner, bodyEl.firstChild);
+function showEducationBanner() {
+  if (bodyEl.querySelector('.education-banner')) return;
+  const banner = document.createElement('div');
+  banner.className = 'education-banner';
+  banner.innerHTML = `
+    <button class="edu-close" title="Dismiss">&times;</button>
+    <div class="edu-section" style="margin-top:6px;">
+      <div class="edu-row"><kbd>↑</kbd> <kbd>↓</kbd> <span class="edu-label">Move up/down</span></div>
+      <div class="edu-row"><kbd>←</kbd> <kbd>→</kbd> <span class="edu-label">Expand/collapse</span></div>
+      <div class="edu-row"><kbd>m</kbd> <span class="edu-label">Mark read</span></div>
+      <div class="edu-row"><kbd>o</kbd> <span class="edu-label">Open in Slack</span></div>
+      <div class="edu-row"><kbd>r</kbd> <span class="edu-label">Reply</span></div>
+      <div class="edu-row"><kbd>t</kbd> <span class="edu-label">Mute</span></div>
+      <div class="edu-row"><kbd>⌘.</kbd> <span class="edu-label">Toggle Chief of Slack</span></div>
+      <div class="edu-row"><kbd>⌘⇧.</kbd> <span class="edu-label">Toggle Slack sidebar</span></div>
+    </div>
+    <div class="edu-tip">Tip: Hold down <kbd>⇧</kbd> while clicking ✓ to mark multiple items as read quickly.</div>`;
+  banner.querySelector('.edu-close').addEventListener('click', () => {
+    chrome.storage.local.set({ fslackEducationDismissed: true });
+    banner.remove();
+    helpBtn.style.display = '';
   });
+  helpBtn.style.display = 'none';
+  bodyEl.insertBefore(banner, bodyEl.firstChild);
+}
+
+function maybeShowEducationBanner() {
+  helpBtn.style.display = '';
 }
 // ── Async VIP section: wait for data, summarize, render ──
 async function kickoffVipSection(data) {
@@ -5844,10 +5858,11 @@ function handlePortMessage(msg) {
       isBackgroundFetch = false;
       _pendingInlineRefresh = false;
       scheduleBackgroundPoll();
+    } else if (!_hasApiKey) {
+      showWelcomeScreen();
     } else {
-      refreshLink.textContent = 'refresh now';
-      refreshLink.style.display = '';
-      bodyEl.innerHTML = `<div id="status" class="error">${msg.error}</div>`;
+      refreshLink.style.display = 'none';
+      bodyEl.innerHTML = `<div id="status" class="error">${formatErrorTwoLines(msg.error)}</div>`;
     }
     resetFetchState();
     return;
@@ -5884,6 +5899,7 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
 
   // First run: no API key and no cache → show welcome screen
   const hasApiKey = !!result.claudeApiKey;
+  _hasApiKey = hasApiKey;
   const hadCache = showFromCache();
   if (!hadCache && !hasApiKey) {
     showWelcomeScreen();
@@ -5914,4 +5930,22 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   // ── Snapshot export/import buttons ──
   document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
+});
+
+// ── Auto-detect API key saved from Settings page ──
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return;
+  if (!changes.claudeApiKey) return;
+  console.log('[fslack] storage change detected for claudeApiKey', {
+    oldValue: changes.claudeApiKey.oldValue ? '(set)' : '(empty)',
+    newValue: changes.claudeApiKey.newValue ? '(set)' : '(empty)',
+    welcomeVisible: !!bodyEl.querySelector('.welcome-screen'),
+    port: !!port,
+  });
+  const nowSet = !!changes.claudeApiKey.newValue;
+  _hasApiKey = nowSet;
+  if (nowSet && bodyEl.querySelector('.welcome-screen')) {
+    bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
+    if (!port) connectPort();
+  }
 });
