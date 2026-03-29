@@ -4709,58 +4709,56 @@ function runBotThreadSummarization(whenFreeItems, data) {
   const botThreads = whenFreeItems.filter((item) => item._isBotThread && !item._botSummary);
   if (botThreads.length === 0) return;
 
-  (async () => {
-    for (const cp of botThreads) {
-      // #11: Check persistent cache
-      const cachedBot = getCachedSummary('bot', cp.channel_id, cp.sort_ts);
-      if (cachedBot) {
-        cp._botSummary = cachedBot;
-        console.log(`[fslack] Bot summary cache HIT: ${cp.channel_id}:${cp.sort_ts}`);
-      } else {
-        const ch = data.channels[cp.channel_id] || cp.channel_id;
-        const messages = cp.messages.map((m) => ({
-          user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
-          text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
-        }));
-        let response;
-        try {
-          response = await new Promise((resolve) =>
-            chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeBotThread`, data: { channel: ch, messages } }, resolve)
-          );
-        } catch { continue; }
-        if (!response?.summary?.summary) continue;
-        cp._botSummary = response.summary.summary;
-        setCachedSummary('bot', cp.channel_id, cp.sort_ts, cp._botSummary);
-      }
-
-      const key = `bot-thread-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
-      const itemEl = document.querySelector(`[data-bot-thread-key="${key}"]`);
-      if (!itemEl) continue;
-
-      // Replace loading content with summary + expandable messages
-      const deepMsgId = `${key}-msgs`;
-      let messagesHtml = '';
-      for (const m of cp.messages) {
-        const _btid = truncateId;
-        const bTextHtml = truncate(m.text, 400, data.users);
-        const bExtras = wrapFilesIfTruncated(_btid, renderFwd(m.fwd, data.users), renderFiles(m.files));
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${bTextHtml}${bExtras}${msgTime(m.ts, cp.channel_id)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
-      }
-      const rightEl = itemEl.querySelector('.item-right');
-      const actionsEl = itemEl.querySelector('.item-actions');
-      const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
-      rightEl.innerHTML = `
-        <div class="msg-row"><div class="msg-content">
-          <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
-          <div style="display:flex;gap:12px;margin-top:6px;">
-            <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
-            <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark read</span>
-          </div>
-        </div></div>
-        <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
-        ${actionsHtml}`;
+  Promise.all(botThreads.map(async (cp) => {
+    // #11: Check persistent cache
+    const cachedBot = getCachedSummary('bot', cp.channel_id, cp.sort_ts);
+    if (cachedBot) {
+      cp._botSummary = cachedBot;
+      console.log(`[fslack] Bot summary cache HIT: ${cp.channel_id}:${cp.sort_ts}`);
+    } else {
+      const ch = data.channels[cp.channel_id] || cp.channel_id;
+      const messages = cp.messages.map((m) => ({
+        user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
+        text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+      }));
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeBotThread`, data: { channel: ch, messages } }, resolve)
+        );
+      } catch { return; }
+      if (!response?.summary?.summary) return;
+      cp._botSummary = response.summary.summary;
+      setCachedSummary('bot', cp.channel_id, cp.sort_ts, cp._botSummary);
     }
-  })();
+
+    const key = `bot-thread-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
+    const itemEl = document.querySelector(`[data-bot-thread-key="${key}"]`);
+    if (!itemEl) return;
+
+    // Replace loading content with summary + expandable messages
+    const deepMsgId = `${key}-msgs`;
+    let messagesHtml = '';
+    for (const m of cp.messages) {
+      const _btid = truncateId;
+      const bTextHtml = truncate(m.text, 400, data.users);
+      const bExtras = wrapFilesIfTruncated(_btid, renderFwd(m.fwd, data.users), renderFiles(m.files));
+      messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${bTextHtml}${bExtras}${msgTime(m.ts, cp.channel_id)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
+    }
+    const rightEl = itemEl.querySelector('.item-right');
+    const actionsEl = itemEl.querySelector('.item-actions');
+    const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
+    rightEl.innerHTML = `
+      <div class="msg-row"><div class="msg-content">
+        <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
+        <div style="display:flex;gap:12px;margin-top:6px;">
+          <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
+          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark read</span>
+        </div>
+      </div></div>
+      <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
+      ${actionsHtml}`;
+  }));
 }
 
 // ── Async when-free channel post summarization ──
@@ -4770,52 +4768,50 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
   );
   if (channels.length === 0) return;
 
-  (async () => {
-    for (const cp of channels) {
-      // #11: Check persistent cache
-      const cachedChPost = getCachedSummary('chpost', cp.channel_id, cp.sort_ts);
-      if (cachedChPost) {
-        cp._channelSummary = cachedChPost;
-        console.log(`[fslack] Channel post summary cache HIT: ${cp.channel_id}:${cp.sort_ts}`);
-      } else {
-        const ch = data.channels[cp.channel_id] || cp.channel_id;
-        const messages = cp.messages.map((m) => ({
-          user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
-          text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
-          ts: m.ts,
-        }));
-        let response;
-        try {
-          response = await new Promise((resolve) =>
-            chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, channelId: cp.channel_id, messages } }, resolve)
-          );
-        } catch { continue; }
-        if (!response?.summary?.summary) continue;
-        cp._channelSummary = response.summary.summary;
-        setCachedSummary('chpost', cp.channel_id, cp.sort_ts, cp._channelSummary);
-      }
-
-      const key = `ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
-      const itemEl = document.querySelector(`[data-channel-summary-key="${key}"]`);
-      if (!itemEl) continue;
-
-      const csMsgId = `${key}-msgs`;
-      let messagesHtml = '';
-      for (const m of cp.messages.slice(0, 10).reverse()) {
-        const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-        messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
-      }
-      const rightEl = itemEl.querySelector('.item-right');
-      const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
-      rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml);
-      // Update compact preview with ALL summary bullets joined
-      const previewEl = itemEl.querySelector('.compact-preview');
-      if (previewEl && cp._channelSummary) {
-        const html = compactBulletsHtml(cp._channelSummary);
-        if (html) previewEl.innerHTML = html;
-      }
+  Promise.all(channels.map(async (cp) => {
+    // #11: Check persistent cache
+    const cachedChPost = getCachedSummary('chpost', cp.channel_id, cp.sort_ts);
+    if (cachedChPost) {
+      cp._channelSummary = cachedChPost;
+      console.log(`[fslack] Channel post summary cache HIT: ${cp.channel_id}:${cp.sort_ts}`);
+    } else {
+      const ch = data.channels[cp.channel_id] || cp.channel_id;
+      const messages = cp.messages.map((m) => ({
+        user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users),
+        text: plainTruncate(textWithFwd(m.text, m.fwd), 400, data.users),
+        ts: m.ts,
+      }));
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({ type: `${FSLACK}:summarizeChannelPost`, data: { channel: ch, channelId: cp.channel_id, messages } }, resolve)
+        );
+      } catch { return; }
+      if (!response?.summary?.summary) return;
+      cp._channelSummary = response.summary.summary;
+      setCachedSummary('chpost', cp.channel_id, cp.sort_ts, cp._channelSummary);
     }
-  })();
+
+    const key = `ch-post-summary-${cp.channel_id}-${(cp.sort_ts || '').replace('.', '_')}`;
+    const itemEl = document.querySelector(`[data-channel-summary-key="${key}"]`);
+    if (!itemEl) return;
+
+    const csMsgId = `${key}-msgs`;
+    let messagesHtml = '';
+    for (const m of cp.messages.slice(0, 10).reverse()) {
+      const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
+      messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
+    }
+    const rightEl = itemEl.querySelector('.item-right');
+    const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
+    rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml);
+    // Update compact preview with ALL summary bullets joined
+    const previewEl = itemEl.querySelector('.compact-preview');
+    if (previewEl && cp._channelSummary) {
+      const html = compactBulletsHtml(cp._channelSummary);
+      if (html) previewEl.innerHTML = html;
+    }
+  }));
 }
 
 // ── Async thread reply summarization (non-DM threads meeting summary criteria) ──
@@ -4825,87 +4821,85 @@ function runThreadReplySummarization(allItems, data) {
 
   const MAX_PAYLOAD_BYTES = 3000;
 
-  (async () => {
-    for (const t of threads) {
-      // #11: Check persistent cache (key by latest unread reply ts)
-      const latestReplyTs = (t.unread_replies || []).slice(-1)[0]?.ts || t.ts;
-      const cachedThread = getCachedSummary('fullthread', t.channel_id, latestReplyTs);
-      if (cachedThread) {
-        t._fullThreadSummary = cachedThread;
-        console.log(`[fslack] Full thread summary cache HIT: ${t.channel_id}:${latestReplyTs}`);
-      } else {
-        const ch = data.channels[t.channel_id] || t.channel_id;
-        const unread = t.unread_replies || [];
-        const replies = [];
-        let bytes = 0;
-        for (const r of unread) {
-          const entry = { user: fullName(r.user, data.fullNames), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
-          const s = JSON.stringify(entry);
-          if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
-          bytes += s.length;
-          replies.push(entry);
-        }
-
-        let response;
-        try {
-          response = await new Promise((resolve) =>
-            chrome.runtime.sendMessage({
-              type: `${FSLACK}:summarizeFullThread`,
-              data: { channel: ch, rootUser: fullName(t.root_user, data.fullNames), rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 400, data.users), replies }
-            }, resolve)
-          );
-        } catch { continue; }
-        if (!response?.summary?.summary) continue;
-        t._fullThreadSummary = response.summary.summary;
-        setCachedSummary('fullthread', t.channel_id, latestReplyTs, t._fullThreadSummary);
+  Promise.all(threads.map(async (t) => {
+    // #11: Check persistent cache (key by latest unread reply ts)
+    const latestReplyTs = (t.unread_replies || []).slice(-1)[0]?.ts || t.ts;
+    const cachedThread = getCachedSummary('fullthread', t.channel_id, latestReplyTs);
+    if (cachedThread) {
+      t._fullThreadSummary = cachedThread;
+      console.log(`[fslack] Full thread summary cache HIT: ${t.channel_id}:${latestReplyTs}`);
+    } else {
+      const ch = data.channels[t.channel_id] || t.channel_id;
+      const unread = t.unread_replies || [];
+      const replies = [];
+      let bytes = 0;
+      for (const r of unread) {
+        const entry = { user: fullName(r.user, data.fullNames), text: plainTruncate(textWithFwd(r.text, r.fwd), 400, data.users) };
+        const s = JSON.stringify(entry);
+        if (bytes + s.length > MAX_PAYLOAD_BYTES) break;
+        bytes += s.length;
+        replies.push(entry);
       }
 
-      const threadKey = `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
-      const loadingEl = document.getElementById(`${threadKey}-loading`);
-      if (!loadingEl) continue;
-
-      // Replace loading text with bullet summary in the root content area
-      const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim()).map(b => b.replace(/^-\s*/, ''));
-      const selfName = (data.users?.[data.selfId] || '').toLowerCase();
-      const rootBullet = bullets[0] || '';
-      const rootNamePart = rootBullet.split(/\s/)[0].toLowerCase();
-      const rootIsSelf = selfName && rootNamePart === selfName;
-      const wrapper = document.createDocumentFragment();
-      const rootDiv = document.createElement('div');
-      rootDiv.className = 'deep-summary' + (rootIsSelf ? ' self-bullet' : '');
-      rootDiv.style.cssText = 'margin:2px 0';
-      rootDiv.textContent = rootBullet;
-      wrapper.appendChild(rootDiv);
-      if (bullets.length > 1) {
-        const ul = document.createElement('ul');
-        ul.className = 'deep-summary deep-replies';
-        ul.innerHTML = bullets.slice(1).map(b => {
-          const namePart = b.split(/\s/)[0].toLowerCase();
-          const isSelf = selfName && namePart === selfName;
-          return `<li${isSelf ? ' class="self-bullet"' : ''}>${escapeHtml(b)}</li>`;
-        }).join('');
-        wrapper.appendChild(ul);
-      }
-      const msgRow = loadingEl.closest('.msg-row.summarized');
-      loadingEl.replaceWith(wrapper);
-      // Update compact preview with first summary bullet
-      const threadItemEl = loadingEl?.closest?.('.item') || msgRow?.closest?.('.item');
-      const threadPreviewEl = threadItemEl?.querySelector('.compact-preview');
-      if (threadPreviewEl && rootBullet) threadPreviewEl.textContent = rootBullet;
-      if (msgRow && !msgRow.querySelector('.thread-orig-root')) {
-        const _ortid = truncateId;
-        const origText = truncate(t.root_text, 400, data.users);
-        const origExtras = wrapFilesIfTruncated(_ortid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
-        const origDiv = document.createElement('div');
-        origDiv.className = 'msg-content item-text thread-orig-root';
-        origDiv.style.display = 'none';
-        origDiv.innerHTML = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${origText}${origExtras}${msgTime(t.ts, t.channel_id)}`;
-        const actionsEl = msgRow.querySelector('.msg-actions');
-        if (actionsEl) msgRow.insertBefore(origDiv, actionsEl);
-        else msgRow.appendChild(origDiv);
-      }
+      let response;
+      try {
+        response = await new Promise((resolve) =>
+          chrome.runtime.sendMessage({
+            type: `${FSLACK}:summarizeFullThread`,
+            data: { channel: ch, rootUser: fullName(t.root_user, data.fullNames), rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 400, data.users), replies }
+          }, resolve)
+        );
+      } catch { return; }
+      if (!response?.summary?.summary) return;
+      t._fullThreadSummary = response.summary.summary;
+      setCachedSummary('fullthread', t.channel_id, latestReplyTs, t._fullThreadSummary);
     }
-  })();
+
+    const threadKey = `thread-summary-${t.channel_id}-${(t.ts || '').replace('.', '_')}`;
+    const loadingEl = document.getElementById(`${threadKey}-loading`);
+    if (!loadingEl) return;
+
+    // Replace loading text with bullet summary in the root content area
+    const bullets = t._fullThreadSummary.split('\n').filter(b => b.trim()).map(b => b.replace(/^-\s*/, ''));
+    const selfName = (data.users?.[data.selfId] || '').toLowerCase();
+    const rootBullet = bullets[0] || '';
+    const rootNamePart = rootBullet.split(/\s/)[0].toLowerCase();
+    const rootIsSelf = selfName && rootNamePart === selfName;
+    const wrapper = document.createDocumentFragment();
+    const rootDiv = document.createElement('div');
+    rootDiv.className = 'deep-summary' + (rootIsSelf ? ' self-bullet' : '');
+    rootDiv.style.cssText = 'margin:2px 0';
+    rootDiv.textContent = rootBullet;
+    wrapper.appendChild(rootDiv);
+    if (bullets.length > 1) {
+      const ul = document.createElement('ul');
+      ul.className = 'deep-summary deep-replies';
+      ul.innerHTML = bullets.slice(1).map(b => {
+        const namePart = b.split(/\s/)[0].toLowerCase();
+        const isSelf = selfName && namePart === selfName;
+        return `<li${isSelf ? ' class="self-bullet"' : ''}>${escapeHtml(b)}</li>`;
+      }).join('');
+      wrapper.appendChild(ul);
+    }
+    const msgRow = loadingEl.closest('.msg-row.summarized');
+    loadingEl.replaceWith(wrapper);
+    // Update compact preview with first summary bullet
+    const threadItemEl = loadingEl?.closest?.('.item') || msgRow?.closest?.('.item');
+    const threadPreviewEl = threadItemEl?.querySelector('.compact-preview');
+    if (threadPreviewEl && rootBullet) threadPreviewEl.textContent = rootBullet;
+    if (msgRow && !msgRow.querySelector('.thread-orig-root')) {
+      const _ortid = truncateId;
+      const origText = truncate(t.root_text, 400, data.users);
+      const origExtras = wrapFilesIfTruncated(_ortid, renderFwd(t.root_fwd, data.users), renderFiles(t.root_files));
+      const origDiv = document.createElement('div');
+      origDiv.className = 'msg-content item-text thread-orig-root';
+      origDiv.style.display = 'none';
+      origDiv.innerHTML = `${userLink(uname(t.root_user, data.users), t.channel_id, t.ts)} ${origText}${origExtras}${msgTime(t.ts, t.channel_id)}`;
+      const actionsEl = msgRow.querySelector('.msg-actions');
+      if (actionsEl) msgRow.insertBefore(origDiv, actionsEl);
+      else msgRow.appendChild(origDiv);
+    }
+  }));
 }
 // ── Root message summarization (truncate long roots — no LLM call needed) ──
 function runRootSummarization(allItems, data) {
@@ -5228,7 +5222,10 @@ function _prioritizeAndRenderInner(data) {
       if (item.channel) lean.channel = item.channel;
       if (item.isPrivate) lean.isPrivate = true;
       if (item.isMentioned) lean.isMentioned = true;
-      if (item.sidebarSection && item.sidebarSection !== 'normal') lean.sidebarSection = item.sidebarSection;
+      if (item.sidebarSection && item.sidebarSection !== 'normal') {
+        const friendlySection = { floor_priority: 'Minimum: Priority', floor_whenfree: 'Minimum: Relevant', high_volume: 'High volume', hard_noise: 'Always noise' };
+        lean.sidebarSection = friendlySection[item.sidebarSection] || item.sidebarSection;
+      }
       if (item.userReplied) lean.userReplied = true;
       if (item.isGroup) lean.isGroup = true;
       if (item.participants) lean.participants = item.participants;

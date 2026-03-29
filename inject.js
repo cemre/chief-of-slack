@@ -15,6 +15,19 @@
   let _threadViewCache = null;  // { data, ts }
   let _dmContextCache = {};     // { [channelId]: { lastRead, context } }
   const FAST_CACHE_TTL = 60 * 1000; // 60s
+  const DM_CONCURRENCY = 5; // parallel DM fetches (well under Slack Tier 3 rate limit)
+  async function pMap(items, fn, concurrency) {
+    const results = [];
+    let index = 0;
+    async function worker() {
+      while (index < items.length) {
+        const i = index++;
+        results[i] = await fn(items[i], i);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+    return results;
+  }
   let _activityFeedMap = {};  // { "channel:thread_ts_or_ts": { type, feed_ts, key } } — for activity.markRead
   // ── Mark-read batching (#5) ──
   let _markReadQueue = [];
@@ -666,7 +679,8 @@
       return null;
     }
 
-    for (const conv of unreadDirects) {
+    const pendingTranscripts = [];
+    await pMap(unreadDirects, async (conv) => {
       const kindLabel = conv.kind === 'mpim' ? 'group DM' : 'DM';
       let historyParams = null;
       try {
@@ -687,9 +701,11 @@
             bot_id: m.bot_id,
             files: extractFiles(m),
           }));
-        // Trigger transcript generation for voice messages without one
+        // Collect voice messages needing transcripts (resolved in batch after all DMs)
         for (const msg of msgs) {
-          if (msg.files) await ensureTranscripts(msg.files);
+          if (msg.files && msg.files.some(f => f.voice && !f.transcript && f.fileId)) {
+            pendingTranscripts.push(msg.files);
+          }
         }
         // Fetch recent context (up to 5 messages before last_read) for LLM summarization
         let recentContext = [];
@@ -731,6 +747,12 @@
         progress(3, `Failed to fetch ${kindLabel} ${conv.id}: ${err?.message || 'unknown error'}`);
       }
       progress(3, `Fetching DMs (incl. group DMs)... ${++dmsDone}/${dmsTotal}`);
+    }, DM_CONCURRENCY);
+
+    // Batch-resolve voice transcripts in parallel (decoupled from DM fetching)
+    if (pendingTranscripts.length > 0) {
+      progress(3, `Fetching ${pendingTranscripts.length} voice transcript(s)...`);
+      await Promise.all(pendingTranscripts.map(files => ensureTranscripts(files)));
     }
 
     const dmDoneDetail = `Done. ${dms.length} direct conversations${unreadMpims.length > 0 ? ' (incl. group DMs)' : ''}.`;
@@ -1100,7 +1122,8 @@
       return null;
     }
 
-    for (const conv of unreadDirects) {
+    const pendingTranscripts = [];
+    await pMap(unreadDirects, async (conv) => {
       try {
         const oldestTs = normalizeTimestamp(conv.last_read) || normalizeTimestamp(conv.last_read_ts) || (conv.kind === 'im' ? '0' : null);
         const historyParams = { channel: conv.id };
@@ -1117,8 +1140,11 @@
             bot_id: m.bot_id,
             files: extractFiles(m),
           }));
+        // Collect voice messages needing transcripts (resolved in batch after all DMs)
         for (const msg of msgs) {
-          if (msg.files) await ensureTranscripts(msg.files);
+          if (msg.files && msg.files.some(f => f.voice && !f.transcript && f.fileId)) {
+            pendingTranscripts.push(msg.files);
+          }
         }
         // #4: Skip DM context fetch if last_read hasn't changed (reuse cached context)
         let recentContext = [];
@@ -1153,6 +1179,12 @@
         }
       } catch {}
       progress(3, `Fetching DMs... ${++dmsDone}/${dmsTotal}`);
+    }, DM_CONCURRENCY);
+
+    // Batch-resolve voice transcripts in parallel (decoupled from DM fetching)
+    if (pendingTranscripts.length > 0) {
+      progress(3, `Fetching ${pendingTranscripts.length} voice transcript(s)...`);
+      await Promise.all(pendingTranscripts.map(files => ensureTranscripts(files)));
     }
     progress(3, `Done. ${dms.length} DMs.`);
 

@@ -118,9 +118,9 @@ ${identity.nameClause}${identity.userContextClause}
 ${vipList ? `VIPs (messages from these people get higher priority): ${vipList}` : ''}
 
 SIDEBAR RULES: Items may include a "sidebarSection" field indicating the channel's priority rule:
-- "floor_priority" = important channel — classify at least as priority
-- "floor_whenfree" = moderately important — classify at least as when_free
-- "normal" = no special rule — use your judgment
+- "Minimum: Priority" = important channel — classify at least as priority
+- "Minimum: Relevant" = moderately important — classify at least as when_free
+- No sidebarSection = no special rule — use your judgment
 
 CONTEXT:
 - If I posted or replied in a thread (userReplied=true) and someone asks a question or needs something — treat it as directed at me.
@@ -145,7 +145,7 @@ e.g. ["act_now", "josh asked you to confirm the deploy", "josh is blocked waitin
 ["priority", "rosey asks you to come to bug bash", "direct invite to team event"],
 ["noise", "brahm shared windows alpha status update", "status update, no action needed"].
 The reason should explain WHY you chose this category — what signal drove the decision.
-For when_free: explain why it's worth reading (what makes it relevant), not why it's not urgent.
+For when_free: explain what CHANGED vs the item's natural priority. DMs and @mentions naturally belong in priority — if you put them in when_free, explain why they were demoted (e.g. "FYI mention, no action needed from you"). Channel messages naturally belong in noise — if you put them in when_free, explain why they were promoted (e.g. "discusses a customer you're tracking").
 For noise: explain why it doesn't need attention.
 The summary must justify the category — if you can't describe someone waiting on me, it's not act_now.
 
@@ -264,7 +264,18 @@ const RETRY_DELAYS = [1500, 3000]; // ms
 
 async function fetchWithRetry(url, options) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    const resp = await fetch(url, options);
+    let resp;
+    try {
+      resp = await fetch(url, options);
+    } catch (err) {
+      // Network-level failure (e.g. "Failed to fetch") — retry if attempts remain
+      if (attempt < MAX_RETRIES) {
+        console.warn(`[fslack bg] fetch error (attempt ${attempt + 1}/${MAX_RETRIES + 1}): ${err.message}`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+        continue;
+      }
+      throw err;
+    }
     if (resp.ok) return resp;
     if ((resp.status === 529 || resp.status === 429) && attempt < MAX_RETRIES) {
       await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
