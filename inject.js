@@ -908,17 +908,33 @@
       if (mp.last_read) lastRead[mp.id] = mp.last_read;
     }
 
-    // 7. Custom emoji
-    progress(7, 'Loading custom emoji...');
+    // 7. Custom emoji — use cache if available, fetch async later
     let emoji = cachedEmoji;
-    if (!emoji) emoji = await fetchEmojiList().catch(() => ({}));
+    const needsEmojiRefresh = !emoji;
+    if (needsEmojiRefresh) {
+      // No cache at all — must fetch now
+      progress(7, 'Loading custom emoji...');
+      emoji = await fetchEmojiList().catch(() => ({}));
+    }
 
-    // 8. Sidebar sections
-    progress(8, 'Loading sidebar sections...');
-    const sidebarSections = await fetchSidebarSections().catch(() => ({}));
+    // 8. Sidebar sections — use localStorage cache if available, fetch async later
+    let sidebarSections;
+    let needsSidebarRefresh = false;
+    try {
+      const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
+      if (cached?.data && cached.ts) {
+        sidebarSections = cached.data;
+        needsSidebarRefresh = Date.now() - cached.ts > 60 * 60 * 1000; // refresh if >1h old
+      }
+    } catch {}
+    if (!sidebarSections) {
+      // No cache at all — must fetch now
+      progress(8, 'Loading sidebar sections...');
+      sidebarSections = await fetchSidebarSections().catch(() => ({}));
+    }
 
     progress(9, 'Preparing results...');
-    return {
+    const result = {
       selfId,
       selfHandle,
       vipUserIds,
@@ -937,7 +953,28 @@
       userMentionHints: mentionHints,
       sidebarSections,
       sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
+      _deferredRefresh: needsSidebarRefresh || (cachedEmoji && !needsEmojiRefresh),
     };
+    return result;
+  }
+
+  // Background refresh for emoji + sidebar after initial results are shown
+  async function refreshDeferredData() {
+    const updates = {};
+    try {
+      const emoji = await fetchEmojiList().catch(() => null);
+      if (emoji) updates.emoji = emoji;
+    } catch {}
+    try {
+      const sidebar = await fetchSidebarSections().catch(() => null);
+      if (sidebar) {
+        updates.sidebarSections = sidebar;
+        updates.sidebarSectionNames = JSON.parse(localStorage.getItem('fslackSectionNames') || '[]');
+      }
+    } catch {}
+    if (Object.keys(updates).length > 0) {
+      window.postMessage({ type: `${FSLACK}:deferredUpdate`, data: updates }, '*');
+    }
   }
 
   async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
@@ -1206,14 +1243,23 @@
     for (const im of (counts.ims || [])) { if (im.last_read) lastRead[im.id] = im.last_read; }
     for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
 
-    // 7. Custom emoji
-    progress(7, 'Loading custom emoji...');
+    // 7. Custom emoji — use cache if available
     let emoji = cachedEmoji;
-    if (!emoji) emoji = await fetchEmojiList().catch(() => ({}));
+    if (!emoji) {
+      progress(7, 'Loading custom emoji...');
+      emoji = await fetchEmojiList().catch(() => ({}));
+    }
 
-    // 8. Sidebar sections
-    progress(8, 'Loading sidebar sections...');
-    const sidebarSections = await fetchSidebarSections().catch(() => ({}));
+    // 8. Sidebar sections — use localStorage cache if available
+    let sidebarSections;
+    try {
+      const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
+      if (cached?.data) sidebarSections = cached.data;
+    } catch {}
+    if (!sidebarSections) {
+      progress(8, 'Loading sidebar sections...');
+      sidebarSections = await fetchSidebarSections().catch(() => ({}));
+    }
 
     progress(9, 'Preparing results...');
     return {
@@ -1345,6 +1391,8 @@
         const stats = resetApiCounter();
         console.log(`[fslack] FULL FETCH: ${stats.count} Slack API calls`, stats.log);
         window.postMessage({ type: `${FSLACK}:result`, data: result }, '*');
+        // Refresh emoji + sidebar in background after results are delivered
+        refreshDeferredData();
       } catch (err) {
         window.postMessage(
           { type: `${FSLACK}:error`, error: err.message },

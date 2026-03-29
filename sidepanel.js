@@ -487,6 +487,7 @@ window._fslackDebug = function(channelId) {
 let cachedView = null; // { data, popular, prioritized, ts }
 let persistedFetchTs = 0; // lightweight timestamp that always persists to storage
 let sidebarSections = {};    // { [channelId]: 'floor_priority'|'floor_whenfree'|'hard_noise'|'skip'|'normal' }
+let priorityRules = {};      // { vipDm, dm, mention, publicChannel, hardGate } from settings
 let savedMsgKeys = new Set(); // Set of "channel:ts" strings for saved messages
 let myReactionsMap = {};     // { "channel:ts": ["+1", "yellow_heart", ...] }
 let vipSeenTimestamps = {};   // { [vipName]: latestSeenTs } — messages at or before this ts are hidden
@@ -2793,6 +2794,12 @@ function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
   return items;
 }
 
+// Category rank for floor comparisons: higher = more urgent
+const CAT_RANK = { drop: 0, noise: 1, when_free: 2, priority: 3, act_now: 4 };
+function floorCategory(current, floor) {
+  return (CAT_RANK[current] || 0) >= (CAT_RANK[floor] || 0) ? current : floor;
+}
+
 // ── Map LLM priorities back to original data objects ──
 function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data, reasons = {}) {
   const actNow = [];
@@ -2807,25 +2814,29 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     const isMentioned = item._isMentioned || false;
     const mentionInRoot = item._mentionInRoot || false;
     const isImportantChannel = item._sidebarSection === 'floor_priority' || item._sidebarSection === 'floor_whenfree';
-    const isQualified = isDm || isPrivate || isMentioned || mentionInRoot;
     const userReplied = item._userReplied || false;
     const llmCat = cat; // original LLM classification before overrides
     const chLabel = data.channels?.[item.channel_id] || item.channel_id;
 
-    // DM overrides: VIP DMs → act_now, all other DMs → at least priority
+    // DM overrides (configurable via Settings > Priority Rules)
+    const dmRule = priorityRules.dm || 'priority';       // default: at least priority
+    const vipDmRule = priorityRules.vipDm || 'act_now';  // default: act_now
     if (isDm) {
       const vipSet = new Set(data.vipUserIds || []);
       const senderIds = (item.messages || item.unread_replies || []).map((m) => m.user).filter(Boolean);
       const isVipDm = senderIds.some((uid) => vipSet.has(uid));
-      if (isVipDm) cat = 'act_now';
-      else if (cat !== 'act_now') cat = 'priority';
+      if (isVipDm && vipDmRule !== 'ai') {
+        cat = floorCategory(cat, vipDmRule);
+      } else if (!isVipDm && dmRule !== 'ai') {
+        cat = floorCategory(cat, dmRule);
+      }
     }
 
-    // Floor: direct @mentions are at least priority (LLM can upgrade to act_now but not below priority)
-    if (isMentioned && cat !== 'act_now') cat = 'priority';
-
-    // Hard gate: only DMs, private channels, @mentions, or important sidebar channels can reach act_now/priority
-    if (!isQualified && !isImportantChannel && (cat === 'act_now' || cat === 'priority')) cat = 'when_free';
+    // @mention floor (configurable)
+    const mentionRule = priorityRules.mention || 'priority'; // default: at least priority
+    if (isMentioned && mentionRule !== 'ai') {
+      cat = floorCategory(cat, mentionRule);
+    }
 
     // Floor rules from sidebar section config
     if (item._sidebarSection === 'floor_priority' && cat !== 'act_now') cat = 'priority';
@@ -2867,8 +2878,11 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     if (cat === 'act_now') { actNow.push(item); return; }
     if (cat === 'priority') { priority.push(item); return; }
 
-    // Public channel posts without @mention go to noise — unless in Top/Daily sidebar section
-    if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel) { noise.push(item); return; }
+    // Public channel posts without @mention — cap rule (configurable)
+    const publicRule = priorityRules.publicChannel || 'cap_whenfree'; // default: can't reach priority
+    if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel && publicRule === 'cap_whenfree') {
+      if (cat === 'act_now' || cat === 'priority') cat = 'when_free';
+    }
 
     if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
     if (cat === 'drop') return;
@@ -6107,6 +6121,23 @@ function handlePortMessage(msg) {
     return;
   }
 
+  if (msg.type === `${FSLACK}:deferredUpdate`) {
+    // Background refresh of emoji + sidebar after initial results shown
+    const d = msg.data || {};
+    if (d.emoji) {
+      customEmojiMap = d.emoji;
+      chrome.storage.local.set({ fslackEmoji: d.emoji, fslackEmojiTs: Date.now() });
+    }
+    if (d.sidebarSections) {
+      sidebarSections = d.sidebarSections;
+    }
+    if (d.sidebarSectionNames) {
+      chrome.storage.local.set({ sidebarSectionNames: d.sidebarSectionNames });
+    }
+    console.log('[fslack] deferred update applied:', Object.keys(d));
+    return;
+  }
+
   if (msg.type === `${FSLACK}:popularResult`) {
     pendingPopular = msg.data || [];
     gotPopular = true;
@@ -6197,7 +6228,8 @@ function handlePortMessage(msg) {
 
 // ── Initialization ──
 // Load persisted cache, then connect port
-chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', 'claudeApiKey', DRAFT_KEY], (result) => {
+chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', 'claudeApiKey', DRAFT_KEY, 'priorityRules'], (result) => {
+  if (result.priorityRules) priorityRules = result.priorityRules;
   _drafts = result[DRAFT_KEY] || {};
   if (result.fslackViewCache && !cachedView) {
     cachedView = result.fslackViewCache;

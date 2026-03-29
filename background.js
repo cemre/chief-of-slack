@@ -191,8 +191,8 @@ async function trackUsage(type, usage) {
 }
 
 // ── Shared Claude API caller with token tracking ──
-const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
-const MODEL_SONNET = 'claude-sonnet-4-5-latest';
+const MODEL_HAIKU = 'claude-haiku-4-5';
+const MODEL_SONNET = 'claude-sonnet-4-5';
 
 // Model per call type: summarization uses Sonnet (signal preservation matters most), rest use Haiku
 const MODEL_FOR = {
@@ -583,7 +583,7 @@ async function handleAnonymize(data) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: MODEL_HAIKU,
         // ~10 tokens per replacement entry + 50 buffer for JSON overhead
         max_tokens: Math.max(1000, ((data.names?.length || 0) + (data.channels?.length || 0) + (data.snippets?.length || 0)) * 10 + 50),
         messages: [{ role: 'user', content: `Generate a find-and-replace map to anonymize a workplace chat dashboard for demos.

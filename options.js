@@ -43,7 +43,7 @@ const RULE_GROUPS = [
   ]},
 ];
 
-chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog'], (result) => {
+chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog', 'priorityRules'], (result) => {
   if (result.claudeApiKey) apiKeyInput.value = result.claudeApiKey;
   if (result.userContext) userContextInput.value = result.userContext;
   charCount.textContent = `${(result.userContext || '').length}/400`;
@@ -54,6 +54,13 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   const names = result.vipNames || [];
   if (names.length) {
     vipList.innerHTML = names.map((n) => `<span class="vip-chip">${n}</span>`).join('');
+  }
+
+  // Restore priority rules
+  const savedPriorityRules = result.priorityRules || {};
+  for (const select of document.querySelectorAll('#priority-rules select[data-rule]')) {
+    const saved = savedPriorityRules[select.dataset.rule];
+    if (saved) select.value = saved;
   }
 
   // Render sidebar section rules
@@ -140,6 +147,12 @@ saveBtn.addEventListener('click', () => {
   const key = apiKeyInput.value.trim();
   const context = userContextInput.value.trim();
 
+  // Collect priority rules
+  const priorityRules = {};
+  for (const select of document.querySelectorAll('#priority-rules select[data-rule]')) {
+    priorityRules[select.dataset.rule] = select.value;
+  }
+
   // Collect sidebar tier mapping
   const sidebarTierMap = {};
   for (const select of document.querySelectorAll('#tier-map select[data-section]')) {
@@ -157,6 +170,7 @@ saveBtn.addEventListener('click', () => {
     claudeApiKey: key,
     userContext: context,
     openInBrowser: openInBrowserCheckbox.checked,
+    priorityRules,
     sidebarTierMap,
     tokenLimits,
   }, () => {

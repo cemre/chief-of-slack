@@ -32,8 +32,47 @@
     </section>
 
     <section>
-      <h2>Prioritize Sections</h2>
-      <p class="hint">Everything is AI-prioritized by default. Set a minimum on any Slack sidebar section so its channels never drop below a certain priority level. Sections sync from Slack on refresh.</p>
+      <h2>Rules by Message Type</h2>
+      <p class="hint">Set minimum priority floors for DMs, @mentions, etc. The AI can always upgrade, but can't go below the floor. "AI decides" removes the floor entirely.</p>
+      <div id="priority-rules" class="tier-map">
+        <div class="tier-row">
+          <span class="section-name">VIP DMs</span>
+          <select data-rule="vipDm">
+            <option value="act_now">Priority (red)</option>
+            <option value="priority">At least Priority</option>
+            <option value="when_free">At least Relevant</option>
+            <option value="ai">AI decides</option>
+          </select>
+        </div>
+        <div class="tier-row">
+          <span class="section-name">Other DMs</span>
+          <select data-rule="dm">
+            <option value="priority">At least Priority</option>
+            <option value="when_free">At least Relevant</option>
+            <option value="ai">AI decides</option>
+          </select>
+        </div>
+        <div class="tier-row">
+          <span class="section-name">@mentions</span>
+          <select data-rule="mention">
+            <option value="priority">At least Priority</option>
+            <option value="when_free">At least Relevant</option>
+            <option value="ai">AI decides</option>
+          </select>
+        </div>
+        <div class="tier-row">
+          <span class="section-name">Public channels (no mention)</span>
+          <select data-rule="publicChannel">
+            <option value="cap_whenfree">Can't reach Priority</option>
+            <option value="ai">AI decides</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Rules by Sidebar Section</h2>
+      <p class="hint">Set rules per Slack sidebar section. Channels in a section inherit its rule. Sections sync from Slack on refresh.</p>
       <div id="tier-map" class="tier-map"><span class="vip-empty">No sidebar sections synced yet — open Slack and refresh to sync.</span></div>
     </section>
 
