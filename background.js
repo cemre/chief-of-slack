@@ -154,8 +154,8 @@ Respond with ONLY a JSON object mapping each item's "id" to its [category, summa
 
 // ── Token limit defaults ──
 const TOKEN_DEFAULTS = {
-  batchSummarize: 2048,
-  prioritize: 4096,
+  batchSummarize: 4096,
+  prioritize: 8192,
   channelSummary: 150,
   vipSummary: 300,
   threadReply: 200,
@@ -191,7 +191,16 @@ async function trackUsage(type, usage) {
 }
 
 // ── Shared Claude API caller with token tracking ──
+const MODEL_HAIKU = 'claude-haiku-4-5-20251001';
+const MODEL_SONNET = 'claude-sonnet-4-5-latest';
+
+// Model per call type: summarization uses Sonnet (signal preservation matters most), rest use Haiku
+const MODEL_FOR = {
+  batchSummarize: MODEL_SONNET,
+};
+
 async function callClaude(apiKey, prompt, limitKey, limits) {
+  const model = MODEL_FOR[limitKey] || MODEL_HAIKU;
   const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -200,7 +209,7 @@ async function callClaude(apiKey, prompt, limitKey, limits) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model,
       max_tokens: limits[limitKey] || TOKEN_DEFAULTS[limitKey],
       messages: [{ role: 'user', content: prompt }],
     }),
@@ -267,17 +276,18 @@ async function fetchWithRetry(url, options) {
 function buildBatchSummarizePrompt(items, identity) {
   const serialized = JSON.stringify(items, null, 0);
   return `${identity.nameClause}
-You are summarizing Slack items so they can be prioritized. For each item, write a single terse summary (under 25 words) that preserves signals needed for prioritization:
+You are summarizing Slack items so they can be prioritized. For each item, write a 2-3 sentence summary that preserves ALL signals needed for prioritization. Be specific — names, asks, blockers, and deadlines matter. Do not generalize.
 
-- WHO is talking and who they're addressing
-- Whether someone is BLOCKED on me, asking me a question, or requesting action
-- Whether I'm @mentioned and what the mention asks for
-- Whether someone answered a question I asked (if userReplied=true)
-- The topic/subject
-- If isMentioned=true: what the thread/channel is broadly about AND specifically why/where I was @mentioned
+Capture:
+- WHO is talking, who they're addressing, and the relationship (teammate, manager, external)
+- WHAT they need: are they blocked on me, asking a question, requesting review/approval, sharing info, or just chatting?
+- WHETHER I'm @mentioned and what specifically the mention asks for
+- WHETHER someone answered a question I asked (if userReplied=true) and what the answer was
+- The TOPIC and any urgency signals (deadlines, "ASAP", "blocking", "waiting on")
+- If isMentioned=true in a long thread: what the thread is about AND specifically why/where I was tagged
 
 "recentContext" = messages I already read (for conversation flow). "newReplies" / "messages" = the unread messages.
-Focus the summary on the UNREAD messages, referencing context only to explain what they're responding to.
+Focus on the UNREAD messages, referencing context only to explain what they're responding to.
 
 ITEMS:
 ${serialized}

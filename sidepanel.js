@@ -558,6 +558,173 @@ chrome.storage.local.get(['fslackEmoji', 'fslackEmojiTs', 'fslackChannels', 'fsl
   }
 });
 
+// ── Assessment mode (AI quality evaluation) ──
+let _lastPipelineData = null; // { rawItems, summaries, leanItems, priorities, reasons }
+let _assessMode = false;
+let _assessLog = []; // persisted array of { ts, itemId, llmCategory, userCategory, summary, reason, leanItem }
+const ASSESS_KEY = 'fslackAssessLog';
+chrome.storage.local.get([ASSESS_KEY], (r) => { if (r[ASSESS_KEY]) _assessLog = r[ASSESS_KEY]; });
+
+function _persistAssessLog() {
+  chrome.storage.local.set({ [ASSESS_KEY]: _assessLog });
+}
+
+function _getCategoryForItem(itemEl) {
+  if (itemEl.closest('.priority-section')?.querySelector('.priority-header')) {
+    return itemEl.classList.contains('act-now') ? 'act_now' : 'priority';
+  }
+  if (itemEl.closest('#when-free-items')) return 'when_free';
+  return 'noise';
+}
+
+function _injectAssessButtons() {
+  // Add a small ✗ button to every .item that doesn't already have one
+  for (const item of bodyEl.querySelectorAll('.item:not(.interesting):not(.vip-item)')) {
+    if (item.querySelector('.assess-btn')) continue;
+    const btn = document.createElement('button');
+    btn.className = 'assess-btn';
+    btn.textContent = '👎';
+    btn.title = 'Wrong bucket? Click to log disagreement';
+    // Position it at the top-right of the item
+    item.style.position = 'relative';
+    btn.style.position = 'absolute';
+    btn.style.right = '4px';
+    btn.style.top = '4px';
+    item.appendChild(btn);
+  }
+}
+
+function _showAssessPicker(btn, itemEl) {
+  // Remove any existing picker
+  document.querySelector('.assess-picker')?.remove();
+  const currentCat = _getCategoryForItem(itemEl);
+  const cats = ['act_now', 'priority', 'when_free', 'noise'];
+  const labels = { act_now: 'Act Now', priority: 'Priority', when_free: 'Relevant', noise: 'Noise' };
+  const picker = document.createElement('div');
+  picker.className = 'assess-picker';
+  for (const cat of cats) {
+    if (cat === currentCat) continue; // skip current category
+    const b = document.createElement('button');
+    b.textContent = labels[cat];
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _logAssessment(itemEl, currentCat, cat);
+      btn.classList.add('assessed');
+      btn.textContent = '👎 → ' + labels[cat];
+      picker.remove();
+    });
+    picker.appendChild(b);
+  }
+  btn.parentElement.appendChild(picker);
+  // Close on outside click
+  setTimeout(() => {
+    const close = (e) => { if (!picker.contains(e.target)) { picker.remove(); document.removeEventListener('click', close); } };
+    document.addEventListener('click', close);
+  }, 0);
+}
+
+function _logAssessment(itemEl, llmCategory, userCategory) {
+  // Find the item's data from cachedView
+  const reasonEl = itemEl.querySelector('.reason-text');
+  const summaryEl = itemEl.querySelector('.deep-summary') || itemEl.querySelector('.compact-preview');
+  const channelEl = itemEl.querySelector('.item-channel');
+  const entry = {
+    ts: new Date().toISOString(),
+    llmCategory,
+    userCategory,
+    channel: channelEl?.textContent?.trim() || '',
+    summary: reasonEl?.textContent?.replace(' ↓', '')?.trim() || summaryEl?.textContent?.trim() || '',
+    itemText: itemEl.querySelector('.item-text')?.textContent?.trim()?.slice(0, 200) || '',
+  };
+  // Try to find the matching item in cachedView for richer data
+  if (cachedView?.prioritized) {
+    const allItems = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []),
+                      ...(cachedView.prioritized.whenFree || []), ...(cachedView.prioritized.noise || [])];
+    // Match by channel text + rough position
+    const markReadEl = itemEl.querySelector('.mark-all-read[data-channel]');
+    if (markReadEl) {
+      const ch = markReadEl.dataset.channel;
+      const ts = markReadEl.dataset.threadTs || markReadEl.dataset.ts;
+      const match = allItems.find(i => i.channel_id === ch && (i.ts === ts || i.sort_ts === ts));
+      if (match) {
+        entry.itemId = match._llmId || '';
+        entry.reason = match._reasonWhy || match._reason || '';
+      }
+    }
+  }
+  _assessLog.push(entry);
+  _persistAssessLog();
+  console.log('[fslack] assessment logged:', entry);
+}
+
+function exportAssessmentData() {
+  // Export assessment log + current inbox snapshot for offline eval
+  const snapshot = {
+    exportedAt: new Date().toISOString(),
+    assessLog: _assessLog,
+    stats: _computeAssessStats(),
+  };
+  // Include full pipeline chain: raw text → summary → classification
+  if (_lastPipelineData) {
+    const { rawItems, summaries, leanItems, priorities, reasons } = _lastPipelineData;
+    snapshot.pipeline = rawItems.map((raw) => ({
+      id: raw.id,
+      type: raw.type,
+      channel: raw.channel || raw.participants?.join(', ') || '',
+      isMentioned: raw.isMentioned || false,
+      userReplied: raw.userReplied || false,
+      sidebarSection: raw.sidebarSection || 'normal',
+      rawText: raw.rootText || raw.messages?.map(m => `${m.user}: ${m.text}`).join(' | ') || '',
+      rawReplies: raw.newReplies?.map(r => `${r.user}: ${r.text}`).join(' | ') || '',
+      summary: summaries[raw.id] || '',
+      classification: priorities?.[raw.id] || 'unknown',
+      reason: reasons?.[raw.id] || '',
+    }));
+  }
+  // Also include final bucket assignments (after deterministic overrides)
+  if (cachedView) {
+    const p = cachedView.prioritized || {};
+    snapshot.finalBuckets = [];
+    const addItems = (items, cat) => {
+      for (const item of (items || [])) {
+        snapshot.finalBuckets.push({
+          llmId: item._llmId,
+          type: item._type,
+          channel: item.channel_id,
+          finalCategory: cat,
+          reason: item._reason || '',
+          reasonWhy: item._reasonWhy || '',
+        });
+      }
+    };
+    addItems(p.actNow, 'act_now');
+    addItems(p.priority, 'priority');
+    addItems(p.whenFree, 'when_free');
+    addItems(p.noise, 'noise');
+  }
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `fslack-eval-${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  console.log(`[fslack] eval data exported: ${_assessLog.length} assessments, ${snapshot.currentItems?.length || 0} items`);
+}
+
+function _computeAssessStats() {
+  if (_assessLog.length === 0) return { total: 0 };
+  const total = _assessLog.length;
+  const criticalMisses = _assessLog.filter(a => (a.userCategory === 'act_now' || a.userCategory === 'priority') && a.llmCategory === 'noise').length;
+  const falseUrgency = _assessLog.filter(a => (a.llmCategory === 'act_now' || a.llmCategory === 'priority') && (a.userCategory === 'noise' || a.userCategory === 'when_free')).length;
+  const byCat = {};
+  for (const a of _assessLog) {
+    const key = `${a.llmCategory} → ${a.userCategory}`;
+    byCat[key] = (byCat[key] || 0) + 1;
+  }
+  return { total, criticalMisses, falseUrgency, transitions: byCat };
+}
+
 // Load standard emoji map (bundled JSON) async
 fetch(chrome.runtime.getURL('standard-emoji.json'))
   .then(r => r.json())
@@ -2864,6 +3031,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   bodyEl.innerHTML = html;
+  if (_assessMode) _injectAssessButtons();
   focusedItemIndex = -1;
   resetThreadUnreadIndex();
   lastRenderData = data;
@@ -3130,6 +3298,21 @@ function countNewerThreadReplies(data, channelId, threadTs, afterTs) {
   return count;
 }
 let replyRequestId = 0;
+
+// ── Assessment mode: delegated click handler for assess buttons ──
+bodyEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.assess-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  const itemEl = btn.closest('.item');
+  if (!itemEl) return;
+  // If already has a picker open, close it
+  if (btn.parentElement.querySelector('.assess-picker')) {
+    btn.parentElement.querySelector('.assess-picker').remove();
+    return;
+  }
+  _showAssessPicker(btn, itemEl);
+});
 
 bodyEl.addEventListener('click', (e) => {
   // Compact mode: click to expand items in when-free and noise sections
@@ -4781,7 +4964,7 @@ function warmSummaryCache(data) {
   if (totalItems === 0) return;
 
   const allItems = serializeForLlm(forLlm, data, 0);
-  const ITEMS_PER_BATCH = 50;
+  const ITEMS_PER_BATCH = 30;
   const now = Date.now();
   const uncachedItems = [];
   for (const item of allItems) {
@@ -4905,7 +5088,7 @@ function _prioritizeAndRenderInner(data) {
   const allHash = djb2Hash(JSON.stringify(allItems));
 
   // ── Batch summarize → lean prioritize pipeline ──
-  const ITEMS_PER_BATCH = 50; // ~30 tokens output per summary, 50 * 30 = 1500 < 2048 limit
+  const ITEMS_PER_BATCH = 30; // ~80 tokens output per summary, 30 * 80 = 2400 < 4096 limit
 
   function sendBatchSummarize(batch) {
     return new Promise((resolve) => {
@@ -5046,6 +5229,9 @@ function _prioritizeAndRenderInner(data) {
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
+
+      // Stash full pipeline data for eval export
+      _lastPipelineData = { rawItems: allItems, summaries, leanItems, priorities: resp.priorities, reasons: resp.reasons };
 
       // Cache the full pipeline result
       _prioritizationCache = { allHash, result: resp };
@@ -6055,6 +6241,26 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   // ── Snapshot export/import buttons ──
   document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
+
+  // ── Assessment mode checkbox ──
+  const assessCheckbox = document.getElementById('assess-checkbox');
+  if (assessCheckbox) {
+    assessCheckbox.addEventListener('change', () => {
+      _assessMode = assessCheckbox.checked;
+      document.body.classList.toggle('assess-mode', _assessMode);
+      if (_assessMode) _injectAssessButtons();
+    });
+  }
+
+  // ── Shift+E: export eval data ──
+  document.addEventListener('keydown', (e) => {
+    if (e.shiftKey && e.key === 'E' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      e.preventDefault();
+      exportAssessmentData();
+    }
+  });
 });
 
 // ── Auto-detect API key saved from Settings page ──
