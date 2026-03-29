@@ -2887,11 +2887,17 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
       if (isVipDm && vipDmRule !== 'ai') {
         const before = cat;
         cat = floorCategory(cat, vipDmRule);
-        if (cat !== before) item._ruleOverride = `VIP DM → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
+        const floorLabel = CAT_LABEL[vipDmRule] || vipDmRule;
+        if (cat !== before) item._ruleOverride = `VIP DM (Minimum: ${floorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
+        else if (cat === before && CAT_RANK[cat] > CAT_RANK[vipDmRule]) item._ruleOverride = `VIP DM (Minimum: ${floorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
+        else item._ruleOverride = `VIP DM (Minimum: ${floorLabel})`;
       } else if (!isVipDm && dmRule !== 'ai') {
         const before = cat;
         cat = floorCategory(cat, dmRule);
-        if (cat !== before) item._ruleOverride = `DM → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
+        const floorLabel = CAT_LABEL[dmRule] || dmRule;
+        if (cat !== before) item._ruleOverride = `DM (Minimum: ${floorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
+        else if (cat === before && CAT_RANK[cat] > CAT_RANK[dmRule]) item._ruleOverride = `DM (Minimum: ${floorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
+        else item._ruleOverride = `DM (Minimum: ${floorLabel})`;
       }
     }
 
@@ -2900,24 +2906,42 @@ function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhen
     if (isMentioned && mentionRule !== 'ai') {
       const before = cat;
       cat = floorCategory(cat, mentionRule);
-      if (cat !== before) item._ruleOverride = `@mention → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
+      const floorLabel = CAT_LABEL[mentionRule] || mentionRule;
+      if (cat !== before) item._ruleOverride = `@mention (Minimum: ${floorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
+      else if (cat === before && CAT_RANK[cat] > CAT_RANK[mentionRule]) item._ruleOverride = `@mention (Minimum: ${floorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
+      else item._ruleOverride = `@mention (Minimum: ${floorLabel})`;
     }
 
-    // Floor rules from sidebar section config
+    // Floor rules from sidebar section config — always show the floor in the override
     const sectionName = item._sidebarSectionName;
     const sectionFloorLabel = item._sidebarSection === 'floor_priority' ? 'Minimum: Priority'
       : item._sidebarSection === 'floor_whenfree' ? 'Minimum: Relevant' : '';
-    if (item._sidebarSection === 'floor_priority' && cat !== 'act_now') {
-      if (cat !== 'priority') item._ruleOverride = sectionName
-        ? `"${sectionName}" section (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`
-        : `${sectionFloorLabel} — AI said ${CAT_LABEL[llmCat]}`;
-      cat = 'priority';
+    const sectionPrefix = sectionName ? `"${sectionName}" section` : 'Channel';
+    if (item._sidebarSection === 'floor_priority') {
+      if (cat === 'act_now') {
+        // Above floor — explain why AI elevated it
+        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI elevated to urgent`;
+      } else if (cat !== 'priority') {
+        // Below floor — floor kicks in
+        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
+        cat = 'priority';
+      } else {
+        // Matches floor
+        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel})`;
+      }
     }
-    if (item._sidebarSection === 'floor_whenfree' && (cat === 'noise' || cat === 'drop')) {
-      item._ruleOverride = sectionName
-        ? `"${sectionName}" section (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`
-        : `${sectionFloorLabel} — AI said ${CAT_LABEL[llmCat]}`;
-      cat = 'when_free';
+    if (item._sidebarSection === 'floor_whenfree') {
+      if (cat === 'act_now' || cat === 'priority') {
+        // Above floor — explain why AI elevated it
+        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
+      } else if (cat === 'noise' || cat === 'drop') {
+        // Below floor — floor kicks in
+        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
+        cat = 'when_free';
+      } else {
+        // Matches floor
+        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel})`;
+      }
     }
 
     // Always store the AI's reasoning (used by eval mode and priority display)
@@ -6381,22 +6405,25 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   document.getElementById('snapshot-export')?.addEventListener('click', exportSnapshot);
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
 
-  // ── Nuke AI caches button ──
+  // ── Nuke ALL caches button ──
   document.getElementById('nuke-cache')?.addEventListener('click', (e) => {
-    const deep = e.shiftKey; // Shift+click: also clear sidebar sections & emoji
+    // Clear every in-memory cache
     _prioritizationCache = null;
+    _lastPipelineData = null;
     _summaryCache = {};
     _vipSummaryCache = {};
     _allSummaryCache = {};
     _itemSummaryCache = {};
+    cachedView = null;
     chrome.storage.local.remove([
       'fslackPrioritizationCache', 'fslackSummaryCache',
       'fslackVipSummaryCache', 'fslackAllSummaryCache',
-      'fslackItemSummaryCache', 'sidebarSectionChannels',
+      'fslackItemSummaryCache', 'fslackViewCache',
+      'sidebarSectionChannels',
     ], () => {
-      console.log(`[fslack] AI caches nuked${deep ? ' (deep — including sidebar/emoji)' : ''}`);
-      // Also clear inject.js localStorage caches via content script
-      sendToInject({ type: `${FSLACK}:nukeLocalStorage`, preserveSidebar: !deep });
+      console.log('[fslack] All caches nuked');
+      // Also clear inject.js localStorage caches
+      sendToInject({ type: `${FSLACK}:nukeLocalStorage`, preserveSidebar: false });
       // Trigger a fresh fetch
       document.getElementById('refresh-link')?.click();
     });

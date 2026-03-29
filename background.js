@@ -113,45 +113,43 @@ function buildPrompt(items, selfName, identity, vipNames) {
 
   const serialized = JSON.stringify(items, null, 0);
 
-  return `You are a Slack message prioritizer for a busy engineer. Each item has a pre-generated summary. Classify each into exactly one category.
+  return `Slack prioritizer for a busy engineer. Classify each item.
 ${identity.nameClause}${identity.userContextClause}
-${vipList ? `VIPs (messages from these people get higher priority): ${vipList}` : ''}
-
-SIDEBAR RULES: Items may include a "sidebarSection" field indicating the channel's priority rule:
-- "Minimum: Priority" = important channel — classify at least as priority
-- "Minimum: Relevant" = moderately important — classify at least as when_free
-- No sidebarSection = no special rule — use your judgment
-
-CONTEXT:
-- If I posted or replied in a thread (userReplied=true) and someone asks a question or needs something — treat it as directed at me.
-- If userReplied=true and someone answers a question I asked, classify as at least when_free.
-- A bare @mention with no question or request should NOT become act_now. Only treat a mention as act_now when it includes a clear ask.
+${vipList ? `VIPs: ${vipList}` : ''}
 
 CATEGORIES:
-- "drop": I already replied (userReplied=true) AND the new messages are just acknowledgments or chatter not needing me. Do NOT drop if someone asks a question, needs me to unblock something, or answers my question.
-- "act_now": Someone is BLOCKED on me or explicitly waiting — direct question, review/approval request, can't proceed without my input.
-- "priority": Needs my attention soon — warrants a response but nobody is stuck right now. Use for informational @mentions (FYI, CC).
-- "when_free": Something I could usefully respond to or should be aware of, but not urgent.
-- "noise": Chatter not directed at me, announcements, automated posts, things that don't need a response.
+- "act_now": someone is blocked on me or waiting for my input
+- "priority": needs my attention soon, but nobody is stuck
+- "when_free": worth reading — relevant to my work
+- "noise": doesn't need my attention
+- "drop": ONLY when userReplied=true and new messages are just acks/chatter
 
-IMPORTANT: Only use "drop" when userReplied is true. If userReplied is false, classify as one of the other categories.
+If isMentioned=true without a clear ask → priority (not act_now).
+If userReplied=true and someone asks a question → treat as directed at me.
+If sidebarSection="Minimum: Priority" → classify at least as priority.
+If sidebarSection="Minimum: Relevant" → classify at least as when_free.
 
 ITEMS:
 ${serialized}
 
-For EVERY item, respond with a [category, summary, reason] triple. The summary is a terse
-description (under 10 words, lowercase, no period) as "[person] [verb] [thing]" —
-e.g. ["act_now", "josh asked you to confirm the deploy", "josh is blocked waiting for deploy confirmation"],
-["priority", "rosey asks you to come to bug bash", "direct invite to team event"],
-["noise", "brahm shared windows alpha status update", "status update, no action needed"].
-The reason should explain WHY you chose this category — what signal drove the decision.
-For when_free: explain what CHANGED vs the item's natural priority. DMs and @mentions naturally belong in priority — if you put them in when_free, explain why they were demoted (e.g. "FYI mention, no action needed from you"). Channel messages naturally belong in noise — if you put them in when_free, explain why they were promoted (e.g. "discusses a customer you're tracking").
-For noise: explain why it doesn't need attention.
-The summary must justify the category — if you can't describe someone waiting on me, it's not act_now.
+Output a JSON object mapping each "id" to a [reason, category, summary] triple.
 
-MENTION RULE: When isMentioned=true and it's a long thread, the summary must cover BOTH what the thread is about AND why I was tagged — e.g. "auth refactor discussion, josh tagged you for review" not just "josh started an auth refactor". The mention is the reason it's elevated, so surface it.
+REASON comes first — it drives the classification. Write the reason, then pick the category that follows.
 
-Respond with ONLY a JSON object mapping each item's "id" to its [category, summary, reason] triple, plus a "_noiseOrder" key (array of noise/drop IDs sorted from MOST work-relevant first to LEAST work-relevant last — e.g. engineering discussions before social chatter). No explanation, no markdown fences, just the JSON object.`;
+The reason must answer: "why does this belong here?" Be specific to my work.
+- when_free reasons must name the specific connection to my work. NOT "relevant to your area" — instead "Atlassian signup analysis, directly comparable to Dia signup flow".
+- If isMentioned in a long thread, the summary must say what the thread is about AND why I was tagged.
+
+Summary: under 10 words, lowercase, no period, "[person] [verb] [thing]".
+
+Examples:
+["josh waiting for my deploy confirmation", "act_now", "josh asked to confirm the deploy"],
+["direct invite to team event requiring response", "priority", "rosey asks to come to bug bash"],
+["pod teammate shipped menu bar redesign I'll review", "when_free", "matthew merged menu bar redesign PR"],
+["windows team update, different product area", "noise", "brahm shared windows alpha status update"]
+
+Also include "_noiseOrder": array of noise/drop IDs sorted most-relevant-first.
+Return ONLY the JSON object, no markdown fences.`;
 }
 
 // ── Token limit defaults ──
@@ -350,12 +348,14 @@ async function handlePrioritize(payload, selfName) {
     const reasons = {};
     for (const [key, val] of Object.entries(parsed)) {
       if (Array.isArray(val) && val.length >= 3) {
-        priorities[key] = val[0];
-        reasons[key] = val[1];
-        reasons[key + '_why'] = val[2];
+        // New format: [reason, category, summary]
+        reasons[key + '_why'] = val[0];
+        priorities[key] = val[1];
+        reasons[key] = val[2];
       } else if (Array.isArray(val) && val.length >= 2) {
-        priorities[key] = val[0];
-        reasons[key] = val[1];
+        // Fallback: [reason, category] (no summary)
+        reasons[key + '_why'] = val[0];
+        priorities[key] = val[1];
       } else {
         priorities[key] = val;
       }
