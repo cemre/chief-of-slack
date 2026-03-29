@@ -56,6 +56,12 @@ Powered by Claude, it reads your messages and understands context — not keywor
 - [Slack web app](https://app.slack.com) (not the desktop app)
 - [Anthropic API key](https://console.anthropic.com/settings/keys) (uses Claude Haiku)
 
+## Privacy
+
+Chief of Slack processes your Slack messages locally in your browser and sends them to the Anthropic API for AI classification. There is no middleman server, no account, and no data collected. Your API key and all settings stay in your browser.
+
+[Full privacy policy](https://www.notion.so/gemray/Chief-of-Slack-Extension-331fa90261ef80f4b12fcfa1b7b4ac94)
+
 ## License
 
 [GPL-3.0](LICENSE)
