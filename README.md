@@ -38,7 +38,7 @@ Powered by Claude, it reads your messages and understands context — not keywor
 | Key | Action |
 |-----|--------|
 | `↑` / `↓` | Navigate |
-| `→` / | `←` | Expand / collapse |
+| `→` / `←` | Expand / collapse |
 | `m` | Mark as read (advances to next) |
 | `Shift+m` | Mark unread |
 | `o` | Open in Slack |
