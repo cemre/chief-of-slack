@@ -55,3 +55,7 @@ Powered by Claude, it reads your messages and understands context — not keywor
 - Chromium based browser
 - [Slack web app](https://app.slack.com) (not the desktop app)
 - [Anthropic API key](https://console.anthropic.com/settings/keys) (uses Claude Haiku)
+
+## License
+
+[GPL-3.0](LICENSE)
