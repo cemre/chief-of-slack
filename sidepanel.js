@@ -5887,7 +5887,9 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   const hadCache = showFromCache();
   if (!hadCache && !hasApiKey) {
     showWelcomeScreen();
-  } else if (!hadCache) {
+    return;
+  }
+  if (!hadCache) {
     bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
   }
 
