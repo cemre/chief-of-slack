@@ -608,8 +608,9 @@ ul.slack-list, ol.slack-list {
   color: var(--text-primary);
   line-height: 1.5;
 }
-.education-banner.edu-bottom { position: fixed; bottom: 12px; left: 12px; right: 12px; margin: 0; }
-.edu-help-ref { font-weight: 600; color: var(--text-bright); }
+.education-banner.edu-bottom { position: fixed; bottom: 12px; left: 12px; right: 12px; margin: 0; padding: 10px 14px; }
+.education-banner.edu-bottom .edu-tip { margin-top: 0; font-style: normal; }
+.edu-help-icon { vertical-align: -2px; color: var(--text-bright); }
 .education-banner .edu-section {
   color: var(--text-secondary);
   margin-bottom: 4px;

@@ -4156,12 +4156,12 @@ const eduBannerHtml = `
 
 function showEducationBanner(bottom = false) {
   if (bottom) {
-    // Fixed tip pinned to bottom of sidebar — lives on #overlay so innerHTML changes don't destroy it
+    // Fixed tip pinned to bottom of sidebar — lives on body so innerHTML changes don't destroy it
     if (document.querySelector('.education-banner.edu-bottom')) return;
     const banner = document.createElement('div');
     banner.className = 'education-banner edu-bottom';
-    banner.innerHTML = `<div class="edu-tip">Tip: Use your keyboard to navigate! Click <span class="edu-help-ref">?</span> to see what all you can do.</div>`;
-    document.getElementById('overlay').appendChild(banner);
+    banner.innerHTML = `<div class="edu-tip">Tip: Use your keyboard to navigate! Click <svg class="edu-help-icon" width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg> to see what all you can do.</div>`;
+    document.body.appendChild(banner);
   } else {
     // Inline banner at top of body — toggled via (?)
     if (bodyEl.querySelector('.education-banner')) return;
