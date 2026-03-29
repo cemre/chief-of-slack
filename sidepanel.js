@@ -614,23 +614,7 @@ function _injectAssessButtons() {
         if (match) {
           const cat = _getCategoryForItem(item);
           const aiReason = match._reasonWhy || '';
-          // Check if a hard rule overrode the AI's classification
-          let rule = '';
-          const llmCat = _lastPipelineData?.priorities?.[match._llmId];
-          const overridden = llmCat && llmCat !== cat;
-          if (overridden) {
-            const isDm = match._type === 'dm' || match._isDmThread;
-            const isPriv = !isDm && (cachedView.data?.channelMeta?.[match.channel_id]?.isPrivate);
-            if (isDm) rule = 'Rule: DM (AI said ' + llmCat + ')';
-            else if (match._isMentioned) rule = 'Rule: @mention (AI said ' + llmCat + ')';
-            else if (isPriv) rule = 'Rule: private channel (AI said ' + llmCat + ')';
-            else if (match._sidebarSection && match._sidebarSection !== 'normal') {
-              const secName = match._sidebarSectionName;
-              const secFloor = match._sidebarSection === 'floor_priority' ? 'Minimum: Priority'
-                : match._sidebarSection === 'floor_whenfree' ? 'Minimum: Relevant' : match._sidebarSection;
-              rule = secName ? `Rule: "${secName}" section (${secFloor}) — AI said ${llmCat}` : `Rule: ${secFloor} — AI said ${llmCat}`;
-            }
-          }
+          const rule = match._ruleOverride || '';
           // Combine: rule first, then AI reason
           if (rule && aiReason) reasonWhy = rule + '\nAI: ' + aiReason;
           else if (rule) reasonWhy = rule;
@@ -641,8 +625,7 @@ function _injectAssessButtons() {
 
     const wrap = document.createElement('span');
     wrap.className = 'assess-wrap';
-    const hasInlineOverride = item.querySelector('.assess-info');
-    if (reasonWhy && !hasInlineOverride) {
+    if (reasonWhy) {
       const info = document.createElement('span');
       info.className = 'assess-info';
       info.title = reasonWhy;
@@ -2001,11 +1984,6 @@ function gutterCheck(channel, markTs, threadTs, hasMention) {
   return `<span class="gutter-check mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}" title="Mark read">✓</span>`;
 }
 
-function ruleOverrideIcon(item) {
-  if (typeof _assessMode === 'undefined' || !_assessMode) return '';
-  if (!item._ruleOverride) return '';
-  return ` <span class="assess-info" title="${escapeHtml(item._ruleOverride)}"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg></span>`;
-}
 
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
@@ -2082,7 +2060,6 @@ function renderThreadItem(t, data, cssClass) {
       html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
     }
     html += ` <span class="item-sep">·</span> ${headerExpandHtml(repliesMsgId, unread.length, unread.length === 1 ? 'new reply' : 'new replies')}`;
-    html += ruleOverrideIcon(t);
     html += `</div>`;
   } else {
     let leftInner = `<span class="item-channel">${channelLabel}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
@@ -2092,7 +2069,6 @@ function renderThreadItem(t, data, cssClass) {
     if (unread.length > 0) {
       leftInner += ` <span class="item-sep">·</span> <span class="item-replied">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'}</span>`;
     }
-    leftInner += ruleOverrideIcon(t);
     html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}</div>`;
   }
   // Compact preview for when-free threads: show latest reply, not root post
@@ -2234,7 +2210,7 @@ function renderDmItem(dm, data, cssClass) {
   let html = `<div class="item ${cssClass}">${reasonBadge(dm, cssClass)}
     ${collapsible ? '<div class="item-details">' : ''}
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}${ruleOverrideIcon(dm)}
+      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
     </div>
     ${cssClass === 'when-free' && latest.text ? `<div class="compact-preview">${escapeHtml(latest.text.slice(0, 120).replace(/\n/g, ' '))}</div>` : ''}
     <div class="item-right">`;
@@ -2319,7 +2295,6 @@ function renderChannelItem(cp, data, cssClass) {
     if (cssClass === 'noise-item') {
       html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
     }
-    html += ruleOverrideIcon(cp);
     html += `</div>`;
     // Compact preview for when-free items: ALL summary bullets joined, or first message fallback
     if (cssClass === 'when-free' || cssClass === 'noise-item') {
@@ -2349,7 +2324,6 @@ function renderChannelItem(cp, data, cssClass) {
       const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
       chLeftInner += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
     }
-    chLeftInner += ruleOverrideIcon(cp);
     html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
   }
   html += `<div class="item-right">`;
@@ -2543,7 +2517,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   const botOpenHref = slackPermalink(cp.channel_id, botOpenTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}${ruleOverrideIcon(cp)}
+      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
       ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
     </div>
     <div class="item-right">

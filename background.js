@@ -145,6 +145,8 @@ e.g. ["act_now", "josh asked you to confirm the deploy", "josh is blocked waitin
 ["priority", "rosey asks you to come to bug bash", "direct invite to team event"],
 ["noise", "brahm shared windows alpha status update", "status update, no action needed"].
 The reason should explain WHY you chose this category — what signal drove the decision.
+For when_free: explain why it's worth reading (what makes it relevant), not why it's not urgent.
+For noise: explain why it doesn't need attention.
 The summary must justify the category — if you can't describe someone waiting on me, it's not act_now.
 
 MENTION RULE: When isMentioned=true and it's a long thread, the summary must cover BOTH what the thread is about AND why I was tagged — e.g. "auth refactor discussion, josh tagged you for review" not just "josh started an auth refactor". The mention is the reason it's elevated, so surface it.
