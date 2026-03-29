@@ -1532,6 +1532,11 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+const LOCK_ICON = '<svg class="lock-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M12 7h1a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1h1V5a4 4 0 118 0v2zm-2 0V5a2 2 0 10-4 0v2h4z"/></svg>';
+function chPrefix(channelId, data) {
+  return data?.channelMeta?.[channelId]?.isPrivate ? LOCK_ICON : '#';
+}
+
 function compactBullets(summary) {
   return summary.split('\n').filter(b => b.trim())
     .map(b => b.replace(/^-\s*/, '').replace(/^\[\d+\.\d+\]\s*/, '').split(/\s+/).slice(0, 12).join(' '))
@@ -2039,7 +2044,7 @@ function renderThreadItem(t, data, cssClass) {
     channelLabel = escapeHtml(uname(partner, data.users));
   } else {
     const ch = data.channels[t.channel_id] || t.channel_id;
-    channelLabel = `#${ch}`;
+    channelLabel = `${chPrefix(t.channel_id, data)}${escapeHtml(ch)}`;
   }
 
   const markAllTs = lastUnread?.ts || t.ts;
@@ -2283,7 +2288,7 @@ function renderChannelItem(cp, data, cssClass) {
   if (needsChannelSummary || cssClass === 'noise-item') {
     // Split header: channel link + metadata + expand toggle
     html += `<div class="item-left">`;
-    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
     if (cp._repliers?.length) {
       const names = cp._repliers.map(escapeHtml).join(', ');
@@ -2318,7 +2323,7 @@ function renderChannelItem(cp, data, cssClass) {
       }
     }
   } else {
-    let chLeftInner = `<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
+    let chLeftInner = `<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
     if (cp._repliers?.length) {
       const names = cp._repliers.map(escapeHtml).join(', ');
       const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
@@ -2436,7 +2441,7 @@ function renderDeepSummarizedItem(cp, data) {
   const deepOpenHref = slackPermalink(cp.channel_id, newestTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
-      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
+      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
       <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
@@ -2517,7 +2522,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   const botOpenHref = slackPermalink(cp.channel_id, botOpenTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">#${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
+      ${itemLeftLink(`<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
       ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
     </div>
     <div class="item-right">
@@ -4639,7 +4644,7 @@ async function kickoffVipSection(data) {
     let messagesHtml = '';
     for (const [chId, ch] of byChannel) {
       const chHref = ch.permalink ? escapeHtml(ch.permalink.replace(/\/p\d+$/, '')) : '#';
-      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">#${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">${chPrefix(chId, data)}${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
       messagesHtml += `<div class="vip-channel-group">${channelLabel}<ul class="vip-msg-list">`;
       for (const m of ch.messages) {
         const msgLink = m.permalink ? `<a class="vip-msg-slack-link" href="${escapeHtml(m.permalink)}" target="_blank">open in Slack ↗</a>` : '';
@@ -5177,8 +5182,10 @@ function _prioritizeAndRenderInner(data) {
     return;
   }
 
-  // Show loading while LLM works
-  bodyEl.innerHTML = statusHtml(null, 'Summarizing messages...');
+  // Show loading while LLM works — reuse existing snake if present
+  const _sumDetail = bodyEl.querySelector('#status .detail');
+  if (_sumDetail && _snakeTimer) { _sumDetail.textContent = 'Summarizing messages...'; }
+  else { bodyEl.innerHTML = statusHtml(null, 'Summarizing messages...'); }
 
   const selfName = data.users?.[data.selfId] || '';
 
@@ -5328,8 +5335,10 @@ function _prioritizeAndRenderInner(data) {
 
     console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
 
-    // Step 2: Single lean prioritize call
-    bodyEl.innerHTML = statusHtml(null, 'Prioritizing...');
+    // Step 2: Single lean prioritize call — reuse existing snake
+    const _priDetail = bodyEl.querySelector('#status .detail');
+    if (_priDetail && _snakeTimer) { _priDetail.textContent = 'Prioritizing...'; }
+    else { bodyEl.innerHTML = statusHtml(null, 'Prioritizing...'); }
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
@@ -6373,7 +6382,8 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   document.getElementById('snapshot-import')?.addEventListener('click', importSnapshot);
 
   // ── Nuke AI caches button ──
-  document.getElementById('nuke-cache')?.addEventListener('click', () => {
+  document.getElementById('nuke-cache')?.addEventListener('click', (e) => {
+    const deep = e.shiftKey; // Shift+click: also clear sidebar sections & emoji
     _prioritizationCache = null;
     _summaryCache = {};
     _vipSummaryCache = {};
@@ -6384,9 +6394,9 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
       'fslackVipSummaryCache', 'fslackAllSummaryCache',
       'fslackItemSummaryCache', 'sidebarSectionChannels',
     ], () => {
-      console.log('[fslack] AI caches nuked');
+      console.log(`[fslack] AI caches nuked${deep ? ' (deep — including sidebar/emoji)' : ''}`);
       // Also clear inject.js localStorage caches via content script
-      sendToInject({ type: `${FSLACK}:nukeLocalStorage` });
+      sendToInject({ type: `${FSLACK}:nukeLocalStorage`, preserveSidebar: !deep });
       // Trigger a fresh fetch
       document.getElementById('refresh-link')?.click();
     });
