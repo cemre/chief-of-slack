@@ -314,6 +314,13 @@ const lastUpdatedEl = document.getElementById('last-updated');
 let lastFetchTime = null;
 let lastUpdatedTimer = null;
 
+// Auto start/stop snake animation when status appears/disappears
+new MutationObserver(() => {
+  const el = bodyEl.querySelector('.snake-game');
+  if (el && el !== _snakeEl) startSnakeAnim(el);
+  else if (!el && _snakeTimer) stopSnakeAnim();
+}).observe(bodyEl, { childList: true, subtree: true });
+
 function updateLastUpdated() {
   if (!lastFetchTime) return;
   const secs = Math.floor((Date.now() - lastFetchTime) / 1000);
@@ -633,7 +640,7 @@ function startFetch(background = false) {
   if (!background) {
     fetchBtn.textContent = 'Fetching...';
     if (!keepVisible) {
-      bodyEl.innerHTML = statusHtml(FACE_FETCHING, 'Starting fetch...');
+      bodyEl.innerHTML = statusHtml(null, 'Starting fetch...');
       showEducationBanner(true);
     } else {
       // Show inline loading indicator without wiping current view
@@ -712,7 +719,7 @@ function startFullFetch() {
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
-  bodyEl.innerHTML = statusHtml(FACE_FETCHING, 'Starting full fetch...');
+  bodyEl.innerHTML = statusHtml(null, 'Starting full fetch...');
   showEducationBanner(true);
   resetFetchState();
   isFastFetch = false;
@@ -1185,14 +1192,85 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 
-// ── Loading stage faces ──
-const FACE_WAITING     = '(• _ •)';
-const FACE_FETCHING    = 'ε=ε=┏( >_<)┛';
-const FACE_SUMMARIZING = '( •̀ᄇ• ́)ﻭ✧';
-const FACE_PRIORITIZING = '(⌐■_■)';
+// ── Nokia Snake loading animation ──
+const SNAKE_COLS = 20, SNAKE_ROWS = 10, SNAKE_TICK = 150, SNAKE_MAX = 15;
+const DIRS = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1}];
 
-function statusHtml(face, detail) {
-  return `<div id="status"><div class="status-face">${face}</div><div class="detail">${detail}</div></div>`;
+class SnakeGame {
+  constructor() { this.reset(); }
+  reset() {
+    const cy = Math.floor(SNAKE_ROWS / 2);
+    this.snake = [{x:5,y:cy},{x:4,y:cy},{x:3,y:cy}];
+    this.dir = {dx:1,dy:0};
+    this.placeFood();
+  }
+  placeFood() {
+    const occ = new Set(this.snake.map(s => s.x+','+s.y));
+    const free = [];
+    for (let y=0;y<SNAKE_ROWS;y++) for (let x=0;x<SNAKE_COLS;x++)
+      if (!occ.has(x+','+y)) free.push({x,y});
+    this.food = free.length ? free[Math.floor(Math.random()*free.length)] : {x:0,y:0};
+  }
+  tick() {
+    const head = this.snake[0];
+    // rank directions by distance to food, filter safe moves
+    const ranked = DIRS
+      .map(d => ({d, nx:head.x+d.dx, ny:head.y+d.dy}))
+      .filter(({nx,ny}) => nx>=0 && nx<SNAKE_COLS && ny>=0 && ny<SNAKE_ROWS
+        && !this.snake.some(s => s.x===nx && s.y===ny))
+      .sort((a,b) => (Math.abs(a.nx-this.food.x)+Math.abs(a.ny-this.food.y))
+                    - (Math.abs(b.nx-this.food.x)+Math.abs(b.ny-this.food.y)));
+    if (!ranked.length) { this.reset(); return; }
+    const {d,nx,ny} = ranked[0];
+    this.dir = d;
+    this.snake.unshift({x:nx,y:ny});
+    if (nx===this.food.x && ny===this.food.y) {
+      if (this.snake.length >= SNAKE_MAX) { this.reset(); return; }
+      this.placeFood();
+    } else {
+      this.snake.pop();
+    }
+  }
+}
+
+function renderSnake(game) {
+  const border = '+' + '-'.repeat(SNAKE_COLS) + '+';
+  const headKey = game.snake[0].x+','+game.snake[0].y;
+  const bodySet = new Set(game.snake.slice(1).map(s => s.x+','+s.y));
+  const foodKey = game.food.x+','+game.food.y;
+  const rows = [border];
+  for (let y=0;y<SNAKE_ROWS;y++) {
+    let row = '|';
+    for (let x=0;x<SNAKE_COLS;x++) {
+      const k = x+','+y;
+      row += k===headKey ? '@' : bodySet.has(k) ? 'o' : k===foodKey ? '*' : ' ';
+    }
+    rows.push(row + '|');
+  }
+  rows.push(border);
+  return rows.join('\n');
+}
+
+let _snakeTimer = null, _snakeGame = null, _snakeEl = null;
+function startSnakeAnim(el) {
+  stopSnakeAnim();
+  _snakeEl = el;
+  _snakeGame = new SnakeGame();
+  el.textContent = renderSnake(_snakeGame);
+  _snakeTimer = setInterval(() => {
+    _snakeGame.tick();
+    el.textContent = renderSnake(_snakeGame);
+  }, SNAKE_TICK);
+}
+function stopSnakeAnim() {
+  if (_snakeTimer) { clearInterval(_snakeTimer); _snakeTimer = null; }
+  _snakeGame = null;
+  _snakeEl = null;
+}
+
+function statusHtml(_face, detail) {
+  const game = new SnakeGame();
+  return `<div id="status"><div class="status-face snake-game">${renderSnake(game)}</div><div class="detail">${detail}</div></div>`;
 }
 
 function formatErrorTwoLines(err) {
@@ -2731,7 +2809,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
 
   // Loading indicator while LLM is working
   if (loading) {
-    html += statusHtml(FACE_SUMMARIZING, 'Analyzing remaining messages with AI...');
+    html += statusHtml(null, 'Analyzing remaining messages with AI...');
   }
 
   // Channel Messages (noise)
@@ -4042,7 +4120,7 @@ function restoreMainView() {
     return;
   }
   if (!showFromCache()) {
-    bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
+    bodyEl.innerHTML = statusHtml(null, 'Waiting for Slack tab...');
   }
 }
 
@@ -4812,7 +4890,7 @@ function _prioritizeAndRenderInner(data) {
   }
 
   // Show loading while LLM works
-  bodyEl.innerHTML = statusHtml(FACE_SUMMARIZING, 'Summarizing messages...');
+  bodyEl.innerHTML = statusHtml(null, 'Summarizing messages...');
 
   const selfName = data.users?.[data.selfId] || '';
 
@@ -4960,7 +5038,7 @@ function _prioritizeAndRenderInner(data) {
     console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
 
     // Step 2: Single lean prioritize call
-    bodyEl.innerHTML = statusHtml(FACE_PRIORITIZING, 'Prioritizing...');
+    bodyEl.innerHTML = statusHtml(null, 'Prioritizing...');
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
@@ -5766,7 +5844,9 @@ function handlePortMessage(msg) {
     clearFetchTimeout(); // got a response, fetch is alive — restart timeout
     startFetchTimeout(30000); // allow more time for in-progress fetches
     if (!isBackgroundFetch) {
-      bodyEl.innerHTML = statusHtml(FACE_FETCHING, msg.detail || '');
+      const d = bodyEl.querySelector('#status .detail');
+      if (d && _snakeTimer) { d.textContent = msg.detail || ''; }
+      else { bodyEl.innerHTML = statusHtml(null, msg.detail || ''); }
     }
     return;
   }
@@ -5946,7 +6026,7 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
     return;
   }
   if (!hadCache) {
-    bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
+    bodyEl.innerHTML = statusHtml(null, 'Waiting for Slack tab...');
     showEducationBanner(true);
   }
 
@@ -5986,7 +6066,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const nowSet = !!changes.claudeApiKey.newValue;
   _hasApiKey = nowSet;
   if (nowSet && bodyEl.querySelector('.welcome-screen')) {
-    bodyEl.innerHTML = statusHtml(FACE_WAITING, 'Waiting for Slack tab...');
+    bodyEl.innerHTML = statusHtml(null, 'Waiting for Slack tab...');
     if (!port) connectPort();
   }
 });
