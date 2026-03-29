@@ -365,6 +365,7 @@ ul.slack-list, ol.slack-list {
 .msg-thread-badge {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 3px;
   font-size: 12px;
   font-weight: 600;
