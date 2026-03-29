@@ -715,7 +715,11 @@ function scheduleBackgroundPoll() {
 }
 
 function startFullFetch() {
-  if (fetchBtn.disabled) return;
+  // Cancel any in-flight fetch — explicit user action always wins
+  clearFetchTimeout();
+  isBackgroundFetch = false;
+  _pendingInlineRefresh = false;
+  document.getElementById('refresh-bar')?.remove();
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
@@ -1754,7 +1758,7 @@ function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused 
   const replyTs = threadTs || markTs;
   return `<div class="item-actions">
     <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}${hasMention ? ' data-has-mention="1"' : ''}><kbd>M</kbd> mark read</span>
-    ${showReply ? `<span class="action-reply" data-channel="${channel}" data-ts="${replyTs}"${isDm ? ' data-dm="true"' : ''}>${replyLabel}</span>` : ''}
+    ${showReply ? `<span class="action-reply" data-channel="${channel}" data-ts="${replyTs}"${isDm ? ' data-dm="true"' : ''}><kbd>R</kbd> ${replyLabel}</span>` : ''}
     ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
     ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
   </div>`;
