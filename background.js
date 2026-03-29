@@ -20,6 +20,9 @@ async function getIdentity() {
       : (name
         ? `You are summarizing a Slack thread for ${name}.`
         : 'You are summarizing a Slack thread.'),
+    userContextClause: userContext
+      ? `\nABOUT ME: ${userContext}\nUse my role and background above to judge what's relevant or urgent to me.\n`
+      : '',
   };
 }
 
@@ -111,7 +114,7 @@ function buildPrompt(items, selfName, identity, vipNames) {
   const serialized = JSON.stringify(items, null, 0);
 
   return `You are a Slack message prioritizer for a busy engineer. Each item has a pre-generated summary. Classify each into exactly one category.
-${identity.nameClause}
+${identity.nameClause}${identity.userContextClause}
 ${vipList ? `VIPs (messages from these people get higher priority): ${vipList}` : ''}
 
 SIDEBAR RULES: Items may include a "sidebarSection" field indicating the channel's priority rule:
