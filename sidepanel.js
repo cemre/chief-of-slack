@@ -1544,6 +1544,12 @@ function statusHtml(_face, detail) {
   return `<div id="status"><div class="status-face snake-game">${renderSnake(game)}</div><div class="detail">${detail}</div></div>`;
 }
 
+function showStatusText(text) {
+  const d = bodyEl.querySelector('#status .detail');
+  if (d && _snakeTimer) d.textContent = text;
+  else bodyEl.innerHTML = statusHtml(null, text);
+}
+
 function formatErrorTwoLines(err) {
   return err.replace(/\. ([A-Z])/, '.<br>$1');
 }
@@ -5213,15 +5219,15 @@ function warmSummaryCache(data) {
   });
 }
 
-function prioritizeAndRender(data) {
+function prioritizeAndRender(data, background = false) {
   // No API key → show welcome screen immediately, don't attempt any LLM calls
   chrome.storage.local.get('claudeApiKey', (result) => {
     if (!result.claudeApiKey) { showWelcomeScreen(); return; }
-    _prioritizeAndRenderInner(data);
+    _prioritizeAndRenderInner(data, background);
   });
 }
 
-function _prioritizeAndRenderInner(data) {
+function _prioritizeAndRenderInner(data, background = false) {
   // Build self-mention regex from Slack handle and cache handle for Claude prompts
   if (data.selfHandle) {
     const escaped = data.selfHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -5274,10 +5280,8 @@ function _prioritizeAndRenderInner(data) {
     return;
   }
 
-  // Show loading while LLM works — reuse existing snake if present
-  const _sumDetail = bodyEl.querySelector('#status .detail');
-  if (_sumDetail && _snakeTimer) { _sumDetail.textContent = 'Summarizing messages...'; }
-  else { bodyEl.innerHTML = statusHtml(null, 'Summarizing messages...'); }
+  // Show loading while LLM works
+  if (!background) showStatusText('Summarizing messages...');
 
   const selfName = data.users?.[data.selfId] || '';
 
@@ -5427,10 +5431,8 @@ function _prioritizeAndRenderInner(data) {
 
     console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
 
-    // Step 2: Single lean prioritize call — reuse existing snake
-    const _priDetail = bodyEl.querySelector('#status .detail');
-    if (_priDetail && _snakeTimer) { _priDetail.textContent = 'Prioritizing...'; }
-    else { bodyEl.innerHTML = statusHtml(null, 'Prioritizing...'); }
+    // Step 2: Single lean prioritize call
+    if (!background) showStatusText('Prioritizing...');
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
@@ -5891,7 +5893,7 @@ function runPrioritize() {
       if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
       lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
       fetchBtn.textContent = 'Fetch Unreads';
-      prioritizeAndRender(data);
+      prioritizeAndRender(data, true);
       scheduleBackgroundPoll();
       return;
     }
@@ -6237,11 +6239,7 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:progress`) {
     clearFetchTimeout(); // got a response, fetch is alive — restart timeout
     startFetchTimeout(30000); // allow more time for in-progress fetches
-    if (!isBackgroundFetch) {
-      const d = bodyEl.querySelector('#status .detail');
-      if (d && _snakeTimer) { d.textContent = msg.detail || ''; }
-      else { bodyEl.innerHTML = statusHtml(null, msg.detail || ''); }
-    }
+    if (!isBackgroundFetch) showStatusText(msg.detail || '');
     return;
   }
 
