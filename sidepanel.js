@@ -645,33 +645,82 @@ function _injectAssessButtons() {
 }
 
 function _showAssessPicker(btn, itemEl) {
-  // Remove any existing picker
-  document.querySelector('.assess-picker')?.remove();
+  // Remove any existing feedback panel
+  document.querySelectorAll('.assess-feedback-panel').forEach(p => p.remove());
   const currentCat = _getCategoryForItem(itemEl);
   const cats = ['act_now', 'priority', 'when_free', 'noise'];
   const labels = { act_now: 'Priority (red)', priority: 'Priority', when_free: 'Relevant', noise: 'Noise' };
-  const picker = document.createElement('div');
-  picker.className = 'assess-picker';
+  const wrap = btn.closest('.assess-wrap') || btn.parentElement;
+
+  // Build feedback panel that goes BELOW the assess-wrap row
+  const panel = document.createElement('div');
+  panel.className = 'assess-feedback-panel';
+
+  // Show the AI reason
+  const infoEl = wrap.querySelector('.assess-info');
+  const reasonWhy = infoEl?.title || '';
+  if (reasonWhy) {
+    const reasonDiv = document.createElement('div');
+    reasonDiv.className = 'assess-reason-text';
+    reasonDiv.textContent = reasonWhy;
+    panel.appendChild(reasonDiv);
+  }
+
+  // Comment text box
+  const comment = document.createElement('textarea');
+  comment.className = 'assess-comment';
+  comment.placeholder = 'What was wrong? (optional)';
+  comment.rows = 2;
+  comment.addEventListener('click', (e) => e.stopPropagation());
+  comment.addEventListener('keydown', (e) => e.stopPropagation());
+  panel.appendChild(comment);
+
+  // Action row: submit button + category picker
+  const actionRow = document.createElement('div');
+  actionRow.className = 'assess-action-row';
+
+  // Submit comment only (keep current category)
+  const submitBtn = document.createElement('button');
+  submitBtn.className = 'assess-submit';
+  submitBtn.textContent = 'Submit';
+  submitBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _logAssessment(itemEl, currentCat, currentCat, comment.value.trim());
+    btn.classList.add('assessed');
+    btn.textContent = '👎 ✓';
+    const upBtn = wrap.querySelector('.assess-up');
+    if (upBtn) upBtn.style.display = 'none';
+    panel.remove();
+  });
+  actionRow.appendChild(submitBtn);
+
+  // Category picker
+  const pickerLabel = document.createElement('span');
+  pickerLabel.className = 'assess-picker-label';
+  pickerLabel.textContent = 'or move to:';
+  actionRow.appendChild(pickerLabel);
   for (const cat of cats) {
-    if (cat === currentCat) continue; // skip current category
+    if (cat === currentCat) continue;
     const b = document.createElement('button');
     b.textContent = labels[cat];
     b.addEventListener('click', (e) => {
       e.stopPropagation();
-      _logAssessment(itemEl, currentCat, cat);
+      _logAssessment(itemEl, currentCat, cat, comment.value.trim());
       btn.classList.add('assessed');
       btn.textContent = '👎 → ' + labels[cat];
       const upBtn = wrap.querySelector('.assess-up');
       if (upBtn) upBtn.style.display = 'none';
-      picker.remove();
+      panel.remove();
     });
-    picker.appendChild(b);
+    actionRow.appendChild(b);
   }
-  const wrap = btn.closest('.assess-wrap') || btn.parentElement;
-  wrap.appendChild(picker);
+  panel.appendChild(actionRow);
+
+  // Insert panel after the assess-wrap
+  wrap.after(panel);
 }
 
-function _logAssessment(itemEl, llmCategory, userCategory) {
+function _logAssessment(itemEl, llmCategory, userCategory, comment) {
   // Find the item's data from cachedView
   const reasonEl = itemEl.querySelector('.reason-text');
   const summaryEl = itemEl.querySelector('.deep-summary') || itemEl.querySelector('.compact-preview');
@@ -683,6 +732,7 @@ function _logAssessment(itemEl, llmCategory, userCategory) {
     channel: channelEl?.textContent?.trim() || '',
     summary: reasonEl?.textContent?.replace(' ↓', '')?.trim() || summaryEl?.textContent?.trim() || '',
     itemText: itemEl.querySelector('.item-text')?.textContent?.trim()?.slice(0, 200) || '',
+    comment: comment || '',
   };
   // Try to find the matching item in cachedView for richer data
   if (cachedView?.prioritized) {
@@ -3430,16 +3480,20 @@ let replyRequestId = 0;
 /* DEV_ONLY_START */
 // ── Assessment mode: delegated click handler for assess buttons ──
 bodyEl.addEventListener('click', (e) => {
-  const btn = e.target.closest('.assess-btn, .assess-info, .assess-picker button');
+  const btn = e.target.closest('.assess-btn, .assess-info, .assess-picker button, .assess-feedback-panel');
   if (!btn) return;
+  // Let clicks inside the feedback panel (textarea, picker buttons) propagate naturally
+  if (e.target.closest('.assess-feedback-panel') && !e.target.closest('.assess-btn')) return;
   e.stopImmediatePropagation();
-  if (!btn.classList.contains('assess-btn')) return; // info/picker handled elsewhere
+  if (!btn.classList.contains('assess-btn') || btn.classList.contains('assess-up')) return;
   const itemEl = btn.closest('.item');
   if (!itemEl) return;
   const wrap = btn.closest('.assess-wrap') || btn.parentElement;
-  // If already has a picker open, close it
-  if (wrap.querySelector('.assess-picker')) {
-    wrap.querySelector('.assess-picker').remove();
+  // If already has a feedback panel open, close it
+  const existingPanel = wrap.nextElementSibling?.classList?.contains('assess-feedback-panel')
+    ? wrap.nextElementSibling : null;
+  if (existingPanel) {
+    existingPanel.remove();
     return;
   }
   _showAssessPicker(btn, itemEl);
@@ -3449,7 +3503,7 @@ bodyEl.addEventListener('click', (e) => {
 bodyEl.addEventListener('click', (e) => {
   // Compact mode: click to expand items in when-free and noise sections
   const compactItem = e.target.closest('.when-free-items .item:not(.detail-expanded), .noise-items .item:not(.detail-expanded)');
-  if (compactItem && !e.target.closest('a, button:not(.assess-btn), .mark-all-read, .action-mute-channel, .assess-picker')) {
+  if (compactItem && !e.target.closest('a, button:not(.assess-btn), .mark-all-read, .action-mute-channel, .assess-picker, .assess-feedback-panel')) {
     compactItem.classList.add('detail-expanded');
     return;
   }

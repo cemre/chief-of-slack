@@ -79,26 +79,68 @@ body.assess-mode .assess-wrap { display: flex; }
 .assess-btn:hover { opacity: 1; background: none; }
 .assess-btn.assessed { opacity: 0.8; }
 
-/* Category picker popover */
-.assess-picker {
-  display: inline-flex;
-  gap: 8px;
-  margin-left: 4px;
-}
-.assess-picker button {
+/* Feedback panel (shown below assess-wrap on thumbs-down) */
+.assess-feedback-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-top: 4px;
+  background: var(--bg-secondary, rgba(0,0,0,0.05));
+  border-radius: 6px;
   font-size: 11px;
-  padding: 0;
+}
+.assess-reason-text {
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  line-height: 1.4;
+}
+.assess-comment {
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 6px;
+  border: 1px solid var(--border, rgba(0,0,0,0.15));
+  border-radius: 4px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  resize: vertical;
+  min-height: 28px;
+}
+.assess-comment:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.assess-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.assess-submit {
+  font-size: 11px;
+  padding: 2px 10px;
+  cursor: pointer;
+  background: var(--accent, #1264a3);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-weight: 500;
+}
+.assess-submit:hover { opacity: 0.85; }
+.assess-picker-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.assess-action-row button:not(.assess-submit) {
+  font-size: 11px;
+  padding: 2px 6px;
   cursor: pointer;
   background: none;
-  border: none;
+  border: 1px solid var(--border, rgba(0,0,0,0.15));
+  border-radius: 4px;
   color: var(--text-muted);
   white-space: nowrap;
   outline: none;
-  text-decoration: underline;
-  text-decoration-color: transparent;
-  transition: color 0.12s, text-decoration-color 0.12s;
+  transition: color 0.12s, border-color 0.12s;
 }
-.assess-picker button:hover { color: var(--accent); text-decoration-color: var(--accent); background: none; }
+.assess-action-row button:not(.assess-submit):hover { color: var(--accent); border-color: var(--accent); background: none; }
 /* DEV_ONLY_END */
 .assess-info {
   display: inline-flex;
