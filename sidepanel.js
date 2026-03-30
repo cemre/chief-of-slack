@@ -6,6 +6,8 @@ const SEEN_REPLIES_CHUNK = 10;
 const UNREAD_REPLIES_CHUNK = 10;
 const _hiddenUnreadReplies = new Map(); // "channel-ts" → array of reply objects
 const RESERVED_MENTIONS = new Set(['here', 'channel', 'everyone']);
+const prioritizationHelpers = globalThis.FslackPrioritization;
+if (!prioritizationHelpers) throw new Error('prioritization.js must load before sidepanel.js');
 
 // ── Drafts (local-only, chrome.storage) ──
 let _drafts = {}; // { "channel:threadTs" → "text" }
@@ -2605,489 +2607,52 @@ let _handleMentionRegex = null;
 let _selfHandleLower = null; // lowercase handle for highlight matching
 
 function containsSelfMention(text, selfId) {
-  if (!text || !selfId) return false;
-  // Slack encoded @-mention or raw @-mention
-  if (text.includes(`<@${selfId}>`)) return true;
-  if (text.includes(`@${selfId}`)) return true;
-  // @channel / @here (Slack encodes as <!channel> / <!here>)
-  if (text.includes('<!channel>') || text.includes('<!here>')) return true;
-  // @handle mention (e.g. @gem_ray)
-  return _handleMentionRegex ? _handleMentionRegex.test(text) : false;
+  return prioritizationHelpers.containsSelfMention(text, selfId, { handleMentionRegex: _handleMentionRegex });
 }
 
 // ── Deterministic pre-filters ──
 // Hard-drops, bot→whenFree. Everything else goes to LLM for classification + ranking.
 function applyPreFilters(data) {
-  const { selfId, threads, dms, channelPosts, channels, users } = data;
-  const meta = data.channelMeta || {};
-  window._preFilterLog = {}; // debug: track routing decisions
-
-  const noise = [];
-  const whenFree = [];
-  const digests = [];
-  const forLlm = { threads: [], dms: [], channelPosts: [] };
-
-  function isBot(m) { return m.bot_id || m.subtype === 'bot_message'; }
-
-  const threadList = Array.isArray(threads) ? threads : [];
-  const channelPostList = Array.isArray(channelPosts) ? channelPosts : [];
-  const dmList = Array.isArray(dms) ? dms : [];
-
-  // Track replies that were also posted to the channel so we can drop the duplicate thread entry
-  const broadcastedThreadReplyKeys = new Set();
-  for (const cp of channelPostList) {
-    const channelId = cp?.channel_id;
-    if (!channelId) continue;
-    for (const msg of cp.messages || []) {
-      if (msg.thread_ts && msg.thread_ts !== msg.ts) {
-        broadcastedThreadReplyKeys.add(`${channelId}:${msg.ts}`);
-      }
-    }
-  }
-
-  const filteredThreads = [];
-  for (const t of threadList) {
-    if (!t) continue;
-    const muteKey = threadKey(t.channel_id, t.ts);
-    if (muteKey && mutedThreadKeys.has(muteKey)) continue;
-    const unread = t.unread_replies || [];
-    if (unread.length > 0 && broadcastedThreadReplyKeys.size > 0) {
-      const deduped = unread.filter((reply) => !broadcastedThreadReplyKeys.has(`${t.channel_id}:${reply.ts}`));
-      if (deduped.length !== unread.length) {
-        t.unread_replies = deduped;
-        if (deduped.length > 0) {
-          const latest = deduped[deduped.length - 1];
-          if (latest?.ts) t.sort_ts = latest.ts;
-        }
-      }
-    }
-    if ((t.unread_replies || []).length === 0) continue;
-    filteredThreads.push(t);
-  }
-  data.threads = filteredThreads;
-
-  // Threads: annotate metadata for LLM
-  for (const t of filteredThreads) {
-    t._userReplied = (t.reply_users || []).includes(selfId);
-    t._type = 'thread';
-    t._isDmThread = t.channel_id?.startsWith('D') || false;
-    t._sidebarSection = sidebarSections[t.channel_id] || null;
-    t._sidebarSectionName = sidebarSectionNameMap[t.channel_id] || null;
-
-    // Check unread replies for direct @-mentions (drives floor rule → forced priority)
-    const unreadTexts = (t.unread_replies || []).map((r) => r.text).join(' ');
-    t._mentionInReplies = containsSelfMention(unreadTexts, selfId);
-    t._isMentioned = t._mentionInReplies;
-    // Check root for @-mention — doesn't force priority but makes thread "qualified"
-    // so the LLM CAN classify it as priority/act_now if warranted
-    t._mentionInRoot = containsSelfMention(t.root_text || '', selfId);
-
-    // High-volume channels: only surface if 10+ replies, rest → noise
-    const isOwnThread = t.root_user === selfId;
-    if (t._sidebarSection === 'high_volume' && !isOwnThread) {
-      const secName = t._sidebarSectionName || 'high-volume';
-      if ((t.reply_count || 0) >= 5) {
-        t._forceThreadSummary = true;
-        t._ruleOverride = `"${secName}" section: 5+ replies → relevant`;
-        whenFree.push(t);
-      } else {
-        t._ruleOverride = `"${secName}" section: <5 replies → noise`;
-        noise.push(t);
-      }
-      continue;
-    }
-
-
-    forLlm.threads.push(t);
-  }
-
-  // Build set of thread roots so we can dedup channel posts that are already shown as threads
-  const threadRootKeys = new Set();
-  const threadByKey = {};
-  for (const t of filteredThreads) {
-    if (t.channel_id && t.ts) {
-      const key = `${t.channel_id}:${t.ts}`;
-      threadRootKeys.add(key);
-      threadByKey[key] = t;
-    }
-  }
-
-  // Channel posts
-  for (const cp of channelPostList) {
-    cp._type = 'channel';
-    cp._sidebarSection = sidebarSections[cp.channel_id] || null;
-    cp._sidebarSectionName = sidebarSectionNameMap[cp.channel_id] || null;
-
-    const allCpTexts = cp.messages.map((m) => m.text || '').join(' ');
-    cp._isMentioned = containsSelfMention(allCpTexts, selfId);
-
-    // Debug: log routing for every channel post
-    const _dbgCh = channels[cp.channel_id] || cp.channel_id;
-    const _dbgLog = (route) => { window._preFilterLog[cp.channel_id] = { channel: _dbgCh, route, _isMentioned: cp._isMentioned, mention_count: cp.mention_count, msgCount: cp.messages.length, selfId, sidebarSection: cp._sidebarSection, textSnippet: allCpTexts.slice(0, 200) }; };
-
-    // Dedup: if every message in this channel post is already a thread root, skip it
-    // but carry over mention_count and _isMentioned to the thread
-    const cpMsgsInThreads = cp.messages.filter((m) => threadRootKeys.has(`${cp.channel_id}:${m.ts}`));
-    if (cpMsgsInThreads.length === cp.messages.length && cp.messages.length > 0) {
-      for (const m of cpMsgsInThreads) {
-        const t = threadByKey[`${cp.channel_id}:${m.ts}`];
-        if (t) {
-          if (cp.mention_count > 0) t.mention_count = (t.mention_count || 0) + cp.mention_count;
-          if (cp._isMentioned) t._isMentioned = true;
-        }
-      }
-      _dbgLog('dedup-to-thread');
-      continue;
-    }
-
-    // High-volume channels: split — individual posts with 10+ replies → whenFree, rest → noise
-    if (cp._sidebarSection === 'high_volume') {
-      const secName = cp._sidebarSectionName || 'high-volume';
-      const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 5);
-      const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 5);
-      if (hotMsgs.length > 0) {
-        const hotCp = { ...cp, messages: hotMsgs, _type: 'channel', _ruleOverride: `"${secName}" section: 5+ replies → relevant` };
-        const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
-        hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-        hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
-        hotCp._summarizeThreads = true;
-        whenFree.push(hotCp);
-      }
-      if (coldMsgs.length > 0) {
-        noise.push({ ...cp, messages: coldMsgs, _type: 'channel', _ruleOverride: `"${secName}" section: <5 replies → noise` });
-      }
-      _dbgLog('high_volume');
-      continue;
-    }
-
-    // Hard noise rule → bypass LLM, straight to noise
-    if (cp._sidebarSection === 'hard_noise') {
-      const secName = cp._sidebarSectionName || 'hard-noise';
-      cp._ruleOverride = `"${secName}" section → always noise`;
-      _dbgLog('hard_noise');
-      noise.push(cp);
-      continue;
-    }
-
-    // Skip rule → don't process at all
-    if (cp._sidebarSection === 'skip') {
-      _dbgLog('skip');
-      continue;
-    }
-
-    // All-bot messages — apply configurable bot-only rule (default: high_volume)
-    // @mentions always go to LLM regardless of bot rule
-    if (cp.messages.every(isBot) && !cp._isMentioned) {
-      cp._isAllBot = true;
-      const botRule = sidebarSections['__bot_only'] || 'high_volume';
-      if (botRule === 'skip') { _dbgLog('allBot-skip'); continue; }
-      if (botRule === 'hard_noise') { cp._ruleOverride = 'bot-only → always noise'; _dbgLog('allBot-noise'); noise.push(cp); continue; }
-      if (botRule === 'high_volume') {
-        const hotMsgs = cp.messages.filter((m) => (m.reply_count || 0) >= 5);
-        const coldMsgs = cp.messages.filter((m) => (m.reply_count || 0) < 5);
-        if (hotMsgs.length > 0) {
-          const hotCp = { ...cp, messages: hotMsgs, _isAllBot: true, _ruleOverride: 'bot-only, 5+ replies → relevant' };
-          const replierIds = [...new Set(hotMsgs.flatMap((m) => m.reply_users || []))];
-          hotCp._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-          hotCp._replierOverflow = Math.max(0, replierIds.length - 3);
-          whenFree.push(hotCp);
-        }
-        if (coldMsgs.length > 0) noise.push({ ...cp, messages: coldMsgs, _isAllBot: true, _ruleOverride: 'bot-only, <5 replies → noise' });
-        _dbgLog('allBot-highvol');
-        continue;
-      }
-      // floor_priority, floor_whenfree, normal → send to LLM
-      if (cp.messages.length >= 4) cp._deepAnalysis = true;
-      _dbgLog('allBot-llm');
-      forLlm.channelPosts.push(cp);
-      continue;
-    }
-
-    _dbgLog('forLlm');
-    forLlm.channelPosts.push(cp);
-  }
-
-  // DMs
-  for (const dm of dmList) {
-    dm._type = 'dm';
-    const originalMessages = dm.messages || [];
-    const filteredMessages = originalMessages.filter((m) => !threadRootKeys.has(`${dm.channel_id}:${m.ts}`));
-    if (filteredMessages.length === 0) {
-      // Entire DM already surfaced via thread cards; skip duplicate render
-      continue;
-    }
-    if (filteredMessages.length !== originalMessages.length) {
-      dm.messages = filteredMessages;
-    }
-    if (dm.messages.every(isBot)) {
-      whenFree.push(dm);
-      continue;
-    }
-    forLlm.dms.push(dm);
-  }
-
-  return { noise, whenFree, digests, forLlm };
+  return prioritizationHelpers.applyPreFilters(data, {
+    handleMentionRegex: _handleMentionRegex,
+    mutedThreadKeys,
+    sidebarSections,
+    sidebarSectionNameMap,
+    threadKey,
+    uname,
+    windowObj: window,
+  });
 }
 
 // ── Serialize items for LLM ──
 function serializeForLlm(forLlm, data, channelIndexOffset = 0) {
-  const items = [];
-  const meta = data.channelMeta || {};
-
-  for (let i = 0; i < forLlm.threads.length; i++) {
-    const t = forLlm.threads[i];
-    const ch = data.channels[t.channel_id] || t.channel_id;
-    const item = {
-      id: `thread_${i}`,
-      type: t._isDmThread ? 'dm_thread' : 'thread',
-      channel: ch,
-      isPrivate: meta[t.channel_id]?.isPrivate || false,
-      isMentioned: t._isMentioned || false,
-      sidebarSection: t._sidebarSection || undefined,
-      rootUser: fullName(t.root_user, data.fullNames),
-      rootText: plainTruncate(textWithFwd(t.root_text, t.root_fwd), 1000, data.users),
-      userReplied: t._userReplied,
-      newReplies: t.unread_replies.map((r) => ({
-        user: fullName(r.user, data.fullNames),
-        text: plainTruncate(textWithFwd(r.text, r.fwd), 1000, data.users),
-      })),
-    };
-    if (t.full_replies?.length) {
-      const readReplies = t.full_replies.filter((r) => !r.is_unread);
-      if (readReplies.length > 0) {
-        item.recentContext = readReplies.map((r) => ({
-          user: fullName(r.user, data.fullNames),
-          text: plainTruncate(r.text, 500, data.users),
-        }));
-      }
-    }
-    items.push(item);
-  }
-
-  for (let i = 0; i < forLlm.dms.length; i++) {
-    const dm = forLlm.dms[i];
-    const participantIds = (dm.members || []).filter((uid) => uid && uid !== data.selfId);
-    const participantNames = [...new Set(participantIds.map((uid) => fullName(uid, data.fullNames)))].filter(Boolean);
-    const dmItem = {
-      id: `dm_${i}`,
-      type: 'dm',
-      isGroup: !!dm.isGroup,
-      participants: participantNames,
-      messages: dm.messages.map((m) => ({
-        user: m.subtype === 'bot_message' ? 'Bot' : fullName(m.user, data.fullNames),
-        text: plainTruncate(textWithFwd(m.text, m.fwd), 1000, data.users),
-      })),
-    };
-    if (dm.recentContext?.length) {
-      dmItem.recentContext = dm.recentContext.map((m) => ({
-        user: fullName(m.user, data.fullNames),
-        text: plainTruncate(m.text, 500, data.users),
-      }));
-    }
-    items.push(dmItem);
-  }
-
-  for (let i = 0; i < forLlm.channelPosts.length; i++) {
-    const cp = forLlm.channelPosts[i];
-    const ch = data.channels[cp.channel_id] || cp.channel_id;
-    items.push({
-      id: `channel_${i + channelIndexOffset}`,
-      type: 'channel',
-      channel: ch,
-      isPrivate: meta[cp.channel_id]?.isPrivate || false,
-      isMentioned: cp._isMentioned || false,
-      sidebarSection: cp._sidebarSection || undefined,
-      mentionCount: cp.mention_count || 0,
-      messages: cp.messages.map((m) => ({
-        user: m.subtype === 'bot_message' ? 'Bot' : fullName(m.user, data.fullNames),
-        text: plainTruncate(textWithFwd(m.text, m.fwd), 1000, data.users),
-      })),
-    });
-  }
-
-  return items;
+  return prioritizationHelpers.serializeForLlm(forLlm, data, {
+    channelIndexOffset,
+    fullName,
+    plainTruncate,
+    textWithFwd,
+  });
 }
 
-// Category rank for floor comparisons: higher = more urgent
-const CAT_RANK = { drop: 0, noise: 1, when_free: 2, priority: 3, act_now: 4 };
 function floorCategory(current, floor) {
-  return (CAT_RANK[current] || 0) >= (CAT_RANK[floor] || 0) ? current : floor;
-}
-
-// ── Map LLM priorities back to original data objects ──
-function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data, reasons = {}) {
-  const actNow = [];
-  const priority = [];
-  const whenFree = [...deterministicWhenFree];
-  const noise = [...deterministicNoise];
-  const meta = data?.channelMeta || {};
-
-  const CAT_LABEL = { act_now: 'urgent', priority: 'priority', when_free: 'relevant', noise: 'noise', drop: 'drop' };
-
-  function place(item, cat) {
-    const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm' || item._isDmThread;
-    const isDm = item._type === 'dm' || item._isDmThread;
-    const isMentioned = item._isMentioned || false;
-    const mentionInRoot = item._mentionInRoot || false;
-    const isImportantChannel = item._sidebarSection === 'floor_priority' || item._sidebarSection === 'floor_whenfree';
-    const userReplied = item._userReplied || false;
-    const llmCat = cat; // original LLM classification before overrides
-    const chLabel = data.channels?.[item.channel_id] || item.channel_id;
-
-    // DM overrides (configurable via Settings > Priority Rules)
-    const dmRule = priorityRules.dm || 'priority';       // default: at least priority
-    const vipDmRule = priorityRules.vipDm || 'act_now';  // default: act_now
-    if (isDm) {
-      const vipSet = new Set(data.vipUserIds || []);
-      const senderIds = (item.messages || item.unread_replies || []).map((m) => m.user).filter(Boolean);
-      const isVipDm = senderIds.some((uid) => vipSet.has(uid));
-      if (isVipDm && vipDmRule !== 'ai') {
-        const before = cat;
-        cat = floorCategory(cat, vipDmRule);
-        const floorLabel = CAT_LABEL[vipDmRule] || vipDmRule;
-        if (cat !== before) item._ruleOverride = `VIP DM (Minimum: ${floorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
-        else if (cat === before && CAT_RANK[cat] > CAT_RANK[vipDmRule]) item._ruleOverride = `VIP DM (Minimum: ${floorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
-        else item._ruleOverride = `VIP DM (Minimum: ${floorLabel})`;
-      } else if (!isVipDm && dmRule !== 'ai') {
-        const before = cat;
-        cat = floorCategory(cat, dmRule);
-        const floorLabel = CAT_LABEL[dmRule] || dmRule;
-        if (cat !== before) item._ruleOverride = `DM (Minimum: ${floorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
-        else if (cat === before && CAT_RANK[cat] > CAT_RANK[dmRule]) item._ruleOverride = `DM (Minimum: ${floorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
-        else item._ruleOverride = `DM (Minimum: ${floorLabel})`;
-      }
-    }
-
-    // @mention floor (configurable)
-    const mentionRule = priorityRules.mention || 'priority'; // default: at least priority
-    if (isMentioned && mentionRule !== 'ai') {
-      const before = cat;
-      cat = floorCategory(cat, mentionRule);
-      const floorLabel = CAT_LABEL[mentionRule] || mentionRule;
-      if (cat !== before) item._ruleOverride = `@mention (Minimum: ${floorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
-      else if (cat === before && CAT_RANK[cat] > CAT_RANK[mentionRule]) item._ruleOverride = `@mention (Minimum: ${floorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
-      else item._ruleOverride = `@mention (Minimum: ${floorLabel})`;
-    }
-
-    // Floor rules from sidebar section config — always show the floor in the override
-    const sectionName = item._sidebarSectionName;
-    const sectionFloorLabel = item._sidebarSection === 'floor_priority' ? 'Minimum: Priority'
-      : item._sidebarSection === 'floor_whenfree' ? 'Minimum: Relevant' : '';
-    const sectionPrefix = sectionName ? `"${sectionName}" section` : 'Channel';
-    if (item._sidebarSection === 'floor_priority') {
-      if (cat === 'act_now') {
-        // Above floor — explain why AI elevated it
-        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI elevated to urgent`;
-      } else if (cat !== 'priority') {
-        // Below floor — floor kicks in
-        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
-        cat = 'priority';
-      } else {
-        // Matches floor
-        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel})`;
-      }
-    }
-    if (item._sidebarSection === 'floor_whenfree') {
-      if (cat === 'act_now' || cat === 'priority') {
-        // Above floor — explain why AI elevated it
-        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI elevated to ${CAT_LABEL[cat]}`;
-      } else if (cat === 'noise' || cat === 'drop') {
-        // Below floor — floor kicks in
-        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel}) — AI said ${CAT_LABEL[llmCat]}`;
-        cat = 'when_free';
-      } else {
-        // Matches floor
-        item._ruleOverride = `${sectionPrefix} (${sectionFloorLabel})`;
-      }
-    }
-
-    // Always store the AI's reasoning (used by eval mode and priority display)
-    item._reasonWhy = reasons[item._llmId + '_why'] || undefined;
-
-    if (cat === 'act_now' || cat === 'priority') {
-      item._reason = reasons[item._llmId] || undefined;
-      // Fallback reason when mention floor-rule elevated the item but LLM didn't supply a reason
-      if (!item._reason && isMentioned) item._reason = item._mentionInReplies && !item._mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
-      // Fallback: truncate most substantive message text
-      if (!item._reason) {
-        let raw = '';
-        if (item._type === 'thread') {
-          const replies = item.unread_replies || [];
-          raw = replies.reduce((best, r) => (r.text || '').length > best.length ? r.text : best, '') || item.root_text || '';
-        } else {
-          const msgs = item.messages || [];
-          raw = msgs.reduce((best, m) => (m.text || '').length > best.length ? m.text : best, '') || '';
-        }
-        // Strip Slack markup (<@U..>, <http...|label>, etc.)
-        raw = raw.replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
-        if (isDm) {
-          // DMs: "Name: [100 char preview]"
-          const partner = dmPartnerName(item, data);
-          let preview = raw.length > 100 ? raw.slice(0, 100) + '...' : raw;
-          item._reason = preview ? `${partner}: ${preview}` : `${partner} DM'd you`;
-        } else {
-          const words = raw.split(/\s+/).filter(Boolean);
-          item._reason = words.length > 10 ? words.slice(0, 10).join(' ') + '...' : words.join(' ') || 'new message';
-        }
-      }
-    }
-
-    if (cat !== llmCat || cat === 'act_now' || cat === 'priority') {
-      console.log(`[fslack] ${item._llmId} (${item._type}, #${chLabel}): LLM="${llmCat}" → final="${cat}" | isDm=${isDm} isPrivate=${isPrivate} isMentioned=${isMentioned} isImportant=${isImportantChannel} reason="${item._reason || ''}" why="${item._reasonWhy || ''}"`);
-    }
-
-    if (cat === 'act_now') { actNow.push(item); return; }
-    if (cat === 'priority') { priority.push(item); return; }
-
-    // Private channel floor (configurable, excludes DMs which have their own rules)
-    const privateRule = priorityRules.privateChannel || 'when_free'; // default: at least relevant
-    if (isPrivate && !isDm && privateRule !== 'ai') {
-      const before = cat;
-      cat = floorCategory(cat, privateRule);
-      if (cat !== before) item._ruleOverride = `private channel → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
-    }
-
-    // Public channel posts without @mention — cap rule (configurable)
-    const publicRule = priorityRules.publicChannel || 'cap_whenfree'; // default: can't reach priority
-    if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel && publicRule === 'cap_whenfree') {
-      if (cat === 'act_now' || cat === 'priority') {
-        item._ruleOverride = `public channel capped at relevant (AI said ${CAT_LABEL[llmCat]})`;
-        cat = 'when_free';
-      }
-    }
-
-    if (userReplied && (cat === 'noise' || cat === 'drop')) { whenFree.push(item); return; }
-    if (cat === 'drop') return;
-    if (cat === 'when_free') { whenFree.push(item); return; }
-    noise.push(item);
-  }
-
-  forLlm.threads.forEach((t, i) => { t._llmId = `thread_${i}`; place(t, priorities[`thread_${i}`]); });
-  forLlm.dms.forEach((dm, i) => { dm._llmId = `dm_${i}`; place(dm, priorities[`dm_${i}`]); });
-  forLlm.channelPosts.forEach((cp, i) => { cp._llmId = `channel_${i}`; place(cp, priorities[`channel_${i}`]); });
-
-  return { actNow, priority, whenFree, noise };
+  return prioritizationHelpers.floorCategory(current, floor);
 }
 
 function getItemSortTs(item) {
   return parseFloat(item.sort_ts || item.messages?.[0]?.ts || '0');
 }
 
+// ── Map LLM priorities back to original data objects ──
+function mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data, reasons = {}) {
+  return prioritizationHelpers.mapPriorities(priorities, forLlm, deterministicNoise, deterministicWhenFree, data, reasons, {
+    priorityRules,
+    dmPartnerName,
+  });
+}
+
 // ── Render prioritized view ──
 function sortNoiseItems(items, noiseOrder = []) {
-  const orderMap = new Map(noiseOrder.map((id, i) => [id, i]));
-  return [...items].sort((a, b) => {
-    const aPos = orderMap.has(a._llmId) ? orderMap.get(a._llmId) : Infinity;
-    const bPos = orderMap.has(b._llmId) ? orderMap.get(b._llmId) : Infinity;
-    if (aPos !== bPos) return aPos - bPos;
-    // Fallback for pre-filtered items with no LLM ID (deterministic noise channels)
-    const aMsgs = (a.fullMessages?.history || a.messages || []).length;
-    const bMsgs = (b.fullMessages?.history || b.messages || []).length;
-    if (bMsgs !== aMsgs) return bMsgs - aMsgs;
-    const aTs = parseFloat(a.messages?.[0]?.ts || a.sort_ts || '0');
-    const bTs = parseFloat(b.messages?.[0]?.ts || b.sort_ts || '0');
-    return bTs - aTs;
-  });
+  return prioritizationHelpers.sortNoiseItems(items, noiseOrder);
 }
 
 

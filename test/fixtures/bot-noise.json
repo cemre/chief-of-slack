@@ -1,0 +1,51 @@
+{
+  "selfId": "U_SELF",
+  "users": {
+    "U_SELF": "Casey",
+    "U_HELPER": "Morgan"
+  },
+  "channels": {
+    "C_BOT": "community-reports"
+  },
+  "channelMeta": {
+    "C_BOT": {
+      "isPrivate": false
+    }
+  },
+  "sidebarSections": {
+    "C_BOT": "normal",
+    "__bot_only": "high_volume"
+  },
+  "sidebarSectionNameMap": {
+    "C_BOT": "Other"
+  },
+  "threads": [],
+  "dms": [],
+  "channelPosts": [
+    {
+      "channel_id": "C_BOT",
+      "mention_count": 0,
+      "sort_ts": "400.000100",
+      "messages": [
+        {
+          "bot_id": "B_FEED",
+          "subtype": "bot_message",
+          "text": "Community report: issue with dark mode.",
+          "ts": "400.000100",
+          "reply_count": 0,
+          "reply_users": []
+        },
+        {
+          "bot_id": "B_FEED",
+          "subtype": "bot_message",
+          "text": "Community report: request for visual templates.",
+          "ts": "399.000100",
+          "reply_count": 1,
+          "reply_users": [
+            "U_HELPER"
+          ]
+        }
+      ]
+    }
+  ]
+}

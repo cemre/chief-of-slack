@@ -28,36 +28,46 @@ function strip(content, ext) {
   return out.replace(BLANK_RE, '\n\n');
 }
 
-// Recreate dist/
-if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true });
-fs.mkdirSync(DIST);
+function buildDist() {
+  if (fs.existsSync(DIST)) fs.rmSync(DIST, { recursive: true });
+  fs.mkdirSync(DIST);
 
-let stripped = 0;
-let copied = 0;
+  let stripped = 0;
+  let copied = 0;
 
-for (const entry of fs.readdirSync(ROOT)) {
-  if (SKIP.has(entry)) continue;
-  const src = path.join(ROOT, entry);
-  const dest = path.join(DIST, entry);
-  const stat = fs.statSync(src);
+  for (const entry of fs.readdirSync(ROOT)) {
+    if (SKIP.has(entry)) continue;
+    const src = path.join(ROOT, entry);
+    const dest = path.join(DIST, entry);
+    const stat = fs.statSync(src);
 
-  if (stat.isDirectory()) continue; // skip subdirectories
+    if (stat.isDirectory()) continue;
 
-  const ext = path.extname(entry);
-  if (['.js', '.css', '.html'].includes(ext)) {
-    const before = fs.readFileSync(src, 'utf8');
-    const after = strip(before, ext);
-    fs.writeFileSync(dest, after);
-    if (after.length < before.length) {
-      stripped++;
-      console.log(`  stripped: ${entry} (${before.length - after.length} bytes removed)`);
+    const ext = path.extname(entry);
+    if (['.js', '.css', '.html'].includes(ext)) {
+      const before = fs.readFileSync(src, 'utf8');
+      const after = strip(before, ext);
+      fs.writeFileSync(dest, after);
+      if (after.length < before.length) {
+        stripped++;
+        console.log(`  stripped: ${entry} (${before.length - after.length} bytes removed)`);
+      } else {
+        copied++;
+      }
     } else {
+      fs.copyFileSync(src, dest);
       copied++;
     }
-  } else {
-    fs.copyFileSync(src, dest);
-    copied++;
   }
+
+  console.log(`\nDone → dist/  (${stripped} stripped, ${copied} copied)`);
+  return { stripped, copied };
 }
 
-console.log(`\nDone → dist/  (${stripped} stripped, ${copied} copied)`);
+if (typeof module !== 'undefined') {
+  module.exports = { strip, buildDist };
+}
+
+if (require.main === module) {
+  buildDist();
+}

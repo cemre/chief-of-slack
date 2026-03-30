@@ -1,0 +1,134 @@
+{
+  "selfId": "U_SELF",
+  "users": {
+    "U_SELF": "Casey",
+    "U_PARTNER": "Jordan",
+    "U_VIP": "Alex",
+    "U_TEAM": "Taylor",
+    "U_HELPER": "Morgan"
+  },
+  "fullNames": {
+    "U_SELF": "Casey",
+    "U_PARTNER": "Jordan",
+    "U_VIP": "Alex",
+    "U_TEAM": "Taylor",
+    "U_HELPER": "Morgan"
+  },
+  "vipUserIds": [
+    "U_VIP"
+  ],
+  "channels": {
+    "C_PRIVATE_THREAD": "planning-ops",
+    "C_PUBLIC": "eng-ai-tools"
+  },
+  "channelMeta": {
+    "C_PRIVATE_THREAD": {
+      "isPrivate": true
+    },
+    "C_PUBLIC": {
+      "isPrivate": false
+    }
+  },
+  "sidebarSections": {
+    "C_PRIVATE_THREAD": "normal",
+    "C_PUBLIC": "normal"
+  },
+  "sidebarSectionNameMap": {
+    "C_PRIVATE_THREAD": "Weekly",
+    "C_PUBLIC": "Other"
+  },
+  "threads": [
+    {
+      "channel_id": "C_PRIVATE_THREAD",
+      "ts": "100.000100",
+      "sort_ts": "102.000100",
+      "reply_count": 3,
+      "reply_users": [
+        "U_VIP",
+        "U_TEAM"
+      ],
+      "root_user": "U_SELF",
+      "root_text": "Could we set up a process for escalating product feedback?",
+      "root_fwd": {
+        "author": "Casey",
+        "text": "search is not auto-completing the internal doc"
+      },
+      "unread_replies": [
+        {
+          "text": "We could route regressions to the owning team first.",
+          "ts": "101.000100",
+          "user": "U_VIP"
+        },
+        {
+          "text": "I can prototype that workflow this week.",
+          "ts": "102.000100",
+          "user": "U_TEAM"
+        }
+      ],
+      "full_replies": [
+        {
+          "text": "Let us define what counts as a regression.",
+          "ts": "099.000100",
+          "user": "U_SELF",
+          "is_unread": false
+        }
+      ]
+    }
+  ],
+  "dms": [
+    {
+      "channel_id": "D_DIRECT",
+      "members": [
+        "U_SELF",
+        "U_PARTNER"
+      ],
+      "messages": [
+        {
+          "text": "so we should count revisits after the create event",
+          "ts": "201.000100",
+          "user": "U_PARTNER"
+        }
+      ],
+      "recentContext": [
+        {
+          "text": "yes, that makes sense",
+          "ts": "200.000100",
+          "user": "U_PARTNER"
+        },
+        {
+          "text": "let us define the revisit explicitly",
+          "ts": "200.500100",
+          "user": "U_SELF"
+        }
+      ]
+    }
+  ],
+  "channelPosts": [
+    {
+      "channel_id": "C_PUBLIC",
+      "mention_count": 0,
+      "sort_ts": "300.000100",
+      "messages": [
+        {
+          "text": "We keep hitting the plan review loop in tooling discussions.",
+          "ts": "300.000100",
+          "user": "U_TEAM",
+          "reply_count": 7,
+          "reply_users": [
+            "U_VIP",
+            "U_HELPER"
+          ],
+          "thread_ts": "300.000100"
+        },
+        {
+          "text": "The new desktop build can control local GUI tools now. <https://example.com/post|Read more>",
+          "ts": "301.000100",
+          "user": "U_HELPER",
+          "reply_count": 0,
+          "reply_users": [],
+          "thread_ts": null
+        }
+      ]
+    }
+  ]
+}

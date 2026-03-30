@@ -361,6 +361,8 @@ async function handlePrioritize(payload, selfName) {
       }
     }
     console.log('[fslack bg] LLM response:', JSON.stringify({ priorities, reasons }, null, 2));
+    const firstKey = Object.keys(parsed).find(k => k !== '_noiseOrder');
+    if (firstKey) console.log(`[fslack bg] Format check: ${firstKey} = ${JSON.stringify(parsed[firstKey])}`);
     return { priorities, noiseOrder, reasons };
   } catch (err) {
     return { error: err.message };

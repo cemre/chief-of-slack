@@ -189,7 +189,10 @@ chrome.runtime.onMessage.addListener((msg) => {
   /* DEV_ONLY_START */
   // Clear inject.js localStorage caches
   if (msg.type === `${FSLACK}:nukeLocalStorage`) {
-    const keys = Object.keys(localStorage).filter(k => k.startsWith('fslack'));
+    const preserve = msg.preserveSidebar
+      ? new Set(['fslackSidebarSections', 'fslackSectionNames', 'fslackSectionChannelIds', 'fslackSectionNameMap', 'fslackEmoji'])
+      : new Set();
+    const keys = Object.keys(localStorage).filter(k => k.startsWith('fslack') && !preserve.has(k));
     keys.forEach(k => localStorage.removeItem(k));
     console.log(`[fslack content] nuked ${keys.length} localStorage keys:`, keys);
     return;

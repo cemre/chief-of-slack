@@ -8,9 +8,9 @@ const openInBrowserCheckbox = document.getElementById('open-in-browser');
 const saveBtn = document.getElementById('save-btn');
 const saveStatus = document.getElementById('save-status');
 
-// ── Token limit defaults (must match background.js TOKEN_DEFAULTS) ──
+// ── Token limit defaults (editable subset of background.js TOKEN_DEFAULTS) ──
 const TOKEN_DEFAULTS = {
-  prioritize: 800,
+  prioritize: 8192,
   channelSummary: 150,
   vipSummary: 300,
   threadReply: 200,
@@ -42,6 +42,14 @@ const RULE_GROUPS = [
     { value: 'skip', label: 'Exclude entirely' },
   ]},
 ];
+
+function buildRuleSelect(currentRule) {
+  return RULE_GROUPS.map((g) =>
+    `<optgroup label="${g.group}">${g.options.map((o) =>
+      `<option value="${o.value}"${o.value === currentRule ? ' selected' : ''}>${o.label}</option>`
+    ).join('')}</optgroup>`
+  ).join('');
+}
 
 chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarSectionChannels', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog', 'priorityRules'], (result) => {
   if (result.claudeApiKey) apiKeyInput.value = result.claudeApiKey;
@@ -81,13 +89,6 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
       if (aHasRule !== bHasRule) return aHasRule - bHasRule;
       return a.localeCompare(b);
     });
-    function buildRuleSelect(key, currentRule) {
-      return RULE_GROUPS.map((g) =>
-        `<optgroup label="${g.group}">${g.options.map((o) =>
-          `<option value="${o.value}"${o.value === currentRule ? ' selected' : ''}>${o.label}</option>`
-        ).join('')}</optgroup>`
-      ).join('');
-    }
     for (const name of sorted) {
       const key = name.toLowerCase();
       if (key === 'dms' || key === 'direct messages') continue;
@@ -96,7 +97,7 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
       const infoIcon = channels && channels.length ? `<span class="section-info-wrap" title="${channels.map(c => '#' + c).join(', ')}">${infoSvg}</span>` : '';
       const row = document.createElement('div');
       row.className = 'tier-row';
-      row.innerHTML = `<span class="section-name">${name}${infoIcon}</span><select data-section="${key}">${buildRuleSelect(key, currentRule)}</select>`;
+      row.innerHTML = `<span class="section-name">${name}${infoIcon}</span><select data-section="${key}">${buildRuleSelect(currentRule)}</select>`;
       tierMapEl.appendChild(row);
     }
 
@@ -105,7 +106,7 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   const botSelect = document.querySelector('select[data-section="__bot_only"]');
   if (botSelect) {
     const botRule = savedRules['__bot_only'] || 'high_volume';
-    botSelect.innerHTML = buildRuleSelect('__bot_only', botRule);
+    botSelect.innerHTML = buildRuleSelect(botRule);
   }
 
   // Render token table
@@ -117,7 +118,7 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td>${TOKEN_LABELS[key]}</td>
-      <td><input type="number" data-key="${key}" value="${limits[key]}" min="50" max="4096" step="50" placeholder="${defaultVal}"></td>
+      <td><input type="number" data-key="${key}" value="${limits[key]}" min="50" max="16384" step="50" placeholder="${defaultVal}"></td>
       <td class="usage">${u.calls}</td>
       <td class="usage">${u.inputTokens.toLocaleString()}</td>
       <td class="usage">${u.outputTokens.toLocaleString()}</td>`;

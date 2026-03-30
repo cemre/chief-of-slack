@@ -591,7 +591,27 @@
     window.postMessage({ type: `${FSLACK}:progress`, step, detail }, '*');
   }
 
+  // Shared early-fetch for emoji + sidebar (no dependencies, slow when uncached)
+  function kickoffEmojiAndSidebar(cachedEmoji, { checkStaleness = false } = {}) {
+    const emojiPromise = cachedEmoji ? Promise.resolve(cachedEmoji) : fetchEmojiList().catch(() => ({}));
+    let sidebarSections, sidebarSectionChannelIds = {};
+    let needsSidebarRefresh = false;
+    try {
+      const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
+      if (cached?.data) {
+        sidebarSections = cached.data;
+        if (cached.sectionChannelIds) sidebarSectionChannelIds = cached.sectionChannelIds;
+        if (checkStaleness && cached.ts) needsSidebarRefresh = Date.now() - cached.ts > 60 * 60 * 1000;
+      }
+    } catch {}
+    const sidebarPromise = sidebarSections ? null : fetchSidebarSections().catch(() => ({}));
+    return { emojiPromise, sidebarSections, sidebarSectionChannelIds, sidebarPromise, needsSidebarRefresh };
+  }
+
   async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
+    const { emojiPromise, sidebarPromise, needsSidebarRefresh, ...sidebar } = kickoffEmojiAndSidebar(cachedEmoji, { checkStaleness: true });
+    let { sidebarSections, sidebarSectionChannelIds } = sidebar;
+
     // 1. Get counts + self ID
     progress(1, 'Getting counts + user info...');
     const [counts, { selfId, selfHandle, muted, vipUserIds }] = await Promise.all([
@@ -945,31 +965,13 @@
       if (mp.last_read) lastRead[mp.id] = mp.last_read;
     }
 
-    // 7. Custom emoji — use cache if available, fetch async later
-    let emoji = cachedEmoji;
-    const needsEmojiRefresh = !emoji;
-    if (needsEmojiRefresh) {
-      // No cache at all — must fetch now
-      progress(7, 'Loading custom emoji...');
-      emoji = await fetchEmojiList().catch(() => ({}));
-    }
+    // 7. Custom emoji — already kicked off at top, just await
+    const emoji = await emojiPromise;
+    const needsEmojiRefresh = !cachedEmoji;
 
-    // 8. Sidebar sections — use localStorage cache if available, fetch async later
-    let sidebarSections;
-    let sidebarSectionChannelIds = {};
-    let needsSidebarRefresh = false;
-    try {
-      const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
-      if (cached?.data && cached.ts) {
-        sidebarSections = cached.data;
-        if (cached.sectionChannelIds) sidebarSectionChannelIds = cached.sectionChannelIds;
-        needsSidebarRefresh = Date.now() - cached.ts > 60 * 60 * 1000; // refresh if >1h old
-      }
-    } catch {}
-    if (!sidebarSections) {
-      // No cache at all — must fetch now
-      progress(8, 'Loading sidebar sections...');
-      sidebarSections = await fetchSidebarSections().catch(() => ({}));
+    // 8. Sidebar sections — already kicked off at top, await if needed
+    if (sidebarPromise) {
+      sidebarSections = await sidebarPromise;
       try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
@@ -1034,6 +1036,9 @@
   }
 
   async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
+    const { emojiPromise, sidebarPromise, ...sidebar } = kickoffEmojiAndSidebar(cachedEmoji);
+    let { sidebarSections, sidebarSectionChannelIds } = sidebar;
+
     // Fast mode: only counts + threads + DMs (no channel history)
     const now = Date.now();
 
@@ -1309,26 +1314,12 @@
     for (const im of (counts.ims || [])) { if (im.last_read) lastRead[im.id] = im.last_read; }
     for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
 
-    // 7. Custom emoji — use cache if available
-    let emoji = cachedEmoji;
-    if (!emoji) {
-      progress(7, 'Loading custom emoji...');
-      emoji = await fetchEmojiList().catch(() => ({}));
-    }
+    // 7. Custom emoji — already kicked off at top, just await
+    const emoji = await emojiPromise;
 
-    // 8. Sidebar sections — use localStorage cache if available
-    let sidebarSections;
-    let sidebarSectionChannelIds = {};
-    try {
-      const cached = JSON.parse(localStorage.getItem('fslackSidebarSections'));
-      if (cached?.data) {
-        sidebarSections = cached.data;
-        if (cached.sectionChannelIds) sidebarSectionChannelIds = cached.sectionChannelIds;
-      }
-    } catch {}
-    if (!sidebarSections) {
-      progress(8, 'Loading sidebar sections...');
-      sidebarSections = await fetchSidebarSections().catch(() => ({}));
+    // 8. Sidebar sections — already kicked off at top, await if needed
+    if (sidebarPromise) {
+      sidebarSections = await sidebarPromise;
       try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
