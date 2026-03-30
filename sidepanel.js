@@ -679,11 +679,11 @@ function _showAssessPicker(btn, itemEl) {
   const actionRow = document.createElement('div');
   actionRow.className = 'assess-action-row';
 
-  // Submit comment only (keep current category)
-  const submitBtn = document.createElement('button');
-  submitBtn.className = 'assess-submit';
-  submitBtn.textContent = 'Submit';
-  submitBtn.addEventListener('click', (e) => {
+  // Keep-current-category button (shows current bucket label)
+  const keepBtn = document.createElement('button');
+  keepBtn.className = 'assess-submit';
+  keepBtn.textContent = labels[currentCat];
+  keepBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     _logAssessment(itemEl, currentCat, currentCat, comment.value.trim());
     btn.classList.add('assessed');
@@ -692,9 +692,9 @@ function _showAssessPicker(btn, itemEl) {
     if (upBtn) upBtn.style.display = 'none';
     panel.remove();
   });
-  actionRow.appendChild(submitBtn);
+  actionRow.appendChild(keepBtn);
 
-  // Category picker
+  // Move-to-different-category buttons
   const pickerLabel = document.createElement('span');
   pickerLabel.className = 'assess-picker-label';
   pickerLabel.textContent = 'or move to:';
@@ -1164,7 +1164,8 @@ function classifyFocused(focused) {
 
   // 4. Collapsible item (priority/act-now with item-details)
   const reasonToggle = parentItem?.querySelector('.item-reason-toggle');
-  const detailsEl = reasonToggle?.nextElementSibling;
+  let detailsEl = reasonToggle?.nextElementSibling;
+  if (detailsEl?.classList.contains('assess-wrap')) detailsEl = detailsEl.nextElementSibling;
   if (detailsEl?.classList.contains('item-details')) {
     return { type: 'collapsible-item', el: focused, parentItem, isRow, reasonToggle, detailsEl,
       isDetailsExpanded: detailsEl.classList.contains('expanded'), ...contentFields };
@@ -3494,6 +3495,19 @@ bodyEl.addEventListener('click', (e) => {
     ? wrap.nextElementSibling : null;
   if (existingPanel) {
     existingPanel.remove();
+    return;
+  }
+  // If already assessed, undo: remove from log, reset button
+  if (btn.classList.contains('assessed')) {
+    btn.classList.remove('assessed');
+    btn.textContent = '👎';
+    const upBtn = wrap.querySelector('.assess-up');
+    if (upBtn) upBtn.style.display = '';
+    // Remove last matching assessment from log
+    const channelEl = itemEl.querySelector('.item-channel');
+    const ch = channelEl?.textContent?.trim() || '';
+    const idx = _assessLog.findLastIndex(e => e.channel === ch);
+    if (idx !== -1) { _assessLog.splice(idx, 1); _persistAssessLog(); }
     return;
   }
   _showAssessPicker(btn, itemEl);
