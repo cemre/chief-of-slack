@@ -1592,6 +1592,7 @@ function escapeHtml(str) {
 }
 
 const LOCK_ICON = '<svg class="lock-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M12 7h1a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1h1V5a4 4 0 118 0v2zm-2 0V5a2 2 0 10-4 0v2h4z"/></svg>';
+const ENVELOPE_ICON = '<svg class="envelope-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3.5l7 4.5 7-4.5V3a1 1 0 00-1-1H2a1 1 0 00-1 1v.5zM15 5.5l-7 4.5L1 5.5V13a1 1 0 001 1h12a1 1 0 001-1V5.5z"/></svg>';
 function chPrefix(channelId, data) {
   return data?.channelMeta?.[channelId]?.isPrivate ? LOCK_ICON : '#';
 }
@@ -2274,7 +2275,7 @@ function renderDmItem(dm, data, cssClass) {
   let html = `<div class="item ${cssClass}">${reasonBadge(dm, cssClass)}
     ${collapsible ? '<div class="item-details">' : ''}
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
+      ${itemLeftLink(`${ENVELOPE_ICON}<span class="item-channel">${escapeHtml(partner)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest.ts)}</span>`, slackPermalink(dm.channel_id, latest.ts) || `https://app.slack.com/archives/${dm.channel_id}`)}
     </div>
     ${cssClass === 'when-free' && latest.text ? `<div class="compact-preview">${escapeHtml(latest.text.slice(0, 120).replace(/\n/g, ' '))}</div>` : ''}
     <div class="item-right">`;
