@@ -325,6 +325,7 @@ section h2 {
 }
 .lock-icon { vertical-align: -1px; margin-right: 1px; opacity: 0.7; }
 .envelope-icon { vertical-align: -1px; margin-right: 2px; }
+.robot-icon { vertical-align: -1px; margin-right: 1px; opacity: 0.7; }
 .item-channel[data-channel] { cursor: pointer; }
 .item-channel[data-channel]:hover { color: var(--text-bright); text-decoration: underline; }
 .inline-channel { display: inline; }
