@@ -26,6 +26,27 @@ async function getIdentity() {
   };
 }
 
+// ── Load custom prompts ──
+async function getCustomPrompts() {
+  const { customPrompts } = await chrome.storage.local.get('customPrompts');
+  return customPrompts || {};
+}
+
+// ── Simple template renderer: replaces ${key} with vars[key], supports dotted keys ──
+function renderTemplate(template, vars) {
+  return template.replace(/\$\{([^}]+)\}/g, (match, expr) => {
+    const key = expr.trim();
+    // Navigate dotted paths like identity.contextClause
+    const parts = key.split('.');
+    let val = vars;
+    for (const p of parts) {
+      if (val == null) return '';
+      val = val[p];
+    }
+    return val != null ? String(val) : '';
+  });
+}
+
 // ── Side panel behavior: open on icon click ──
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
@@ -68,7 +89,6 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeVip`,
   `${FSLACK}:summarizeBotThread`,
   `${FSLACK}:summarizeChannelPost`,
-  `${FSLACK}:summarizeThreadReplies`,
   `${FSLACK}:summarizeFullThread`,
   /* DEV_ONLY_START */ `${FSLACK}:anonymize`, /* DEV_ONLY_END */
   `${FSLACK}:setApiKey`,
@@ -108,10 +128,13 @@ chrome.commands.onCommand.addListener(async (command) => {
 });
 
 // ── Build the prioritization prompt ──
-function buildPrompt(items, selfName, identity, vipNames) {
+function buildPrompt(items, selfName, identity, vipNames, customPrompts) {
   const vipList = (vipNames || []).map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(', ');
-
   const serialized = JSON.stringify(items, null, 0);
+
+  if (customPrompts?.prioritize) {
+    return renderTemplate(customPrompts.prioritize, { identity, vipList, serialized });
+  }
 
   return `Slack prioritizer for a busy engineer. Classify each item.
 ${identity.nameClause}${identity.userContextClause}
@@ -176,12 +199,9 @@ Return ONLY the JSON object, no markdown fences.`;
 const TOKEN_DEFAULTS = {
   batchSummarize: 4096,
   prioritize: 8192,
-  channelSummary: 150,
+  channelSummary: 200,
   vipSummary: 300,
-  threadReply: 200,
-  fullThread: 300,
-  botThread: 200,
-  channelPost: 200,
+  threadSummary: 300,
 };
 
 // ── Load token limits (user overrides or defaults) ──
@@ -304,8 +324,13 @@ async function fetchWithRetry(url, options) {
 }
 
 // ── Batch summarize: distill raw items into terse summaries for prioritization ──
-function buildBatchSummarizePrompt(items, identity) {
+function buildBatchSummarizePrompt(items, identity, customPrompts) {
   const serialized = JSON.stringify(items, null, 0);
+
+  if (customPrompts?.batchSummarize) {
+    return renderTemplate(customPrompts.batchSummarize, { identity, serialized });
+  }
+
   return `${identity.nameClause}
 You are summarizing Slack items so they can be prioritized. For each item, write a 2-3 sentence summary that preserves ALL signals needed for prioritization. Be specific — names, asks, blockers, and deadlines matter. Do not generalize.
 
@@ -335,9 +360,8 @@ async function handleBatchSummarize(items) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
-  const prompt = buildBatchSummarizePrompt(items, identity);
+  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const prompt = buildBatchSummarizePrompt(items, identity, customPrompts);
 
   try {
     const result = await callClaude(claudeApiKey, prompt, 'batchSummarize', limits);
@@ -353,9 +377,8 @@ async function handlePrioritize(payload, selfName) {
   const { claudeApiKey, vipNames } = await chrome.storage.local.get(['claudeApiKey', 'vipNames']);
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
-  const prompt = buildPrompt(payload, selfName, identity, vipNames);
+  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const prompt = buildPrompt(payload, selfName, identity, vipNames, customPrompts);
 
   try {
     const result = await callClaude(claudeApiKey, prompt, 'prioritize', limits);
@@ -389,55 +412,53 @@ async function handlePrioritize(payload, selfName) {
   }
 }
 
-// ── Build single-channel summarization prompt ──
-function buildSummarizePrompt(item, identity) {
+// ── Build channel summary prompt (used for both noise deep-summaries and when-free channel posts) ──
+function buildChannelSummaryPrompt(item, identity, customPrompts) {
   const serialized = JSON.stringify(item.messages, null, 0);
+
+  if (customPrompts?.channelSummary) {
+    return renderTemplate(customPrompts.channelSummary, { identity, item, serialized });
+  }
+
   return `${identity.contextClause}
 
-Summarize this Slack channel as 1-3 bullet points. STRICT LIMIT: each bullet MUST be under 8 words.
+Summarize what's being discussed in #${item.channel} as up to 3 bullet points.
+Each bullet: "- [first name] [verb] [specific thing]"
+STRICT LIMIT: each bullet MUST be under 8 words.
+Use first names only. Be concrete — name the specific artifact, issue, or topic, not a vague category.
+For bot/automated messages (bot_id present), skip the reporter or source name — just describe the issue or topic directly. E.g. "stuck toast notification bug" not "zendesk reported stuck toast notification bug".
+Combine multiple small messages from the same person into one bullet when possible.
+Fewer bullets is better if fewer distinct topics exist.
 
-Channel: #${item.channel}
-
-Format: [first name] [verb] [what]
-
-Examples of CORRECT length:
-- "jeff added media support to artifacts"
-- "rishi rewrote suggestions prompt"
-- "vardhan flagged suggestion quality issues"
-- "bot surfaced Reddit post about Dia"
-
-Examples of WRONG length (TOO LONG — never do this):
-- "jeff explored adding additional sources to clia artifacts by extending adk-core support for fonts, images, media, and stylesheets"
-- "rishi pushed a PR rewriting the combined chat + url suggestions prompt and reports marked quality improvements"
-
-Drop all detail. First names only. No filler.
-
-Each message has a "ts" field. Prefix each bullet with the ts of the most relevant message: "[1773771342.788049] jeff added media support"
+Each message has a "ts" field. For each bullet, include the ts of the most relevant message in square brackets at the start, like: "- [1773771342.788049] cory shipped the new CLI"
 
 MESSAGES:
 ${serialized}
 
-Respond with ONLY a JSON object:
-{"bullets": ["[ts] ...", "[ts] ..."]}
-No explanation, no markdown fences, just the JSON object.`;
+Respond with ONLY a JSON object: {"summary": "- [ts] bullet1\\n- [ts] bullet2\\n..."}
+No markdown fences, no explanation.`;
 }
 
-// ── Call Claude API for single-channel summarization ──
-async function handleSummarize(item) {
+// ── Call Claude API for channel summarization (handles both fslack:summarize and fslack:summarizeChannelPost) ──
+async function handleChannelSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
+  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
   try {
-    const result = await callClaude(claudeApiKey, buildSummarizePrompt(item, identity), 'channelSummary', limits);
+    const result = await callClaude(claudeApiKey, buildChannelSummaryPrompt(item, identity, customPrompts), 'channelSummary', limits);
     if (result.error) return result;
     return { summary: result.parsed };
   } catch (err) { return { error: err.message }; }
 }
 
 // ── Build VIP summarization prompt ──
-function buildVipSummarizePrompt(item, identity) {
+function buildVipSummarizePrompt(item, identity, customPrompts) {
   const serialized = JSON.stringify(item.messages, null, 0);
+
+  if (customPrompts?.vipSummary) {
+    return renderTemplate(customPrompts.vipSummary, { identity, item, serialized });
+  }
+
   return `${identity.contextClause}
 
 Extract 3-5 specific bullet points about what ${item.name} has been saying or doing in Slack.
@@ -463,52 +484,40 @@ No explanation, no markdown fences, just the JSON object.`;
 async function handleVipSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
+  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
   try {
-    const result = await callClaude(claudeApiKey, buildVipSummarizePrompt(item, identity), 'vipSummary', limits);
+    const result = await callClaude(claudeApiKey, buildVipSummarizePrompt(item, identity, customPrompts), 'vipSummary', limits);
     if (result.error) return result;
     return { summary: result.parsed };
   } catch (err) { return { error: err.message }; }
 }
 
-// ── Build thread reply summarization prompt ──
-function buildThreadReplySummarizePrompt(item, identity) {
-  const serialized = JSON.stringify(item.replies, null, 0);
-  return `${identity.contextClause}
+// ── Build thread summary prompt (handles both full threads and bot threads) ──
+function buildThreadSummaryPrompt(item, identity, customPrompts) {
+  const isBotThread = !item.rootUser;
+  const serialized = JSON.stringify(item.replies || item.messages, null, 0);
 
-A thread in #${item.channel} has new unread replies. The original post is shown below for context only — the user can already see it, so do NOT repeat or restate it.
+  if (customPrompts?.threadSummary) {
+    return renderTemplate(customPrompts.threadSummary, { identity, item, serialized, isBotThread: isBotThread ? 'true' : '' });
+  }
 
-Summarize ONLY what's new in the unread replies in 1-2 terse sentences. Focus on:
-- What new information, decisions, or actions came from the replies
-- Key points from different people (use first names)
-- Do NOT restate what the original post said or asked
+  if (isBotThread) {
+    return `${identity.contextClause}
 
-ORIGINAL POST (already visible, for context only) by ${item.rootUser}: ${item.rootText}
+A bot posted an automated report in #${item.channel} and people replied in a thread.
 
-UNREAD REPLIES:
+Summarize in 2-3 sentences:
+- What the issue or item is about (from the bot message)
+- Key points from the discussion — who said what, use first names
+- Current status: resolved, triaged, or still open
+
+MESSAGES (first is the bot post, rest are replies):
 ${serialized}
 
 Respond with ONLY a JSON object: {"summary": "..."}
 No markdown fences, no explanation.`;
-}
+  }
 
-// ── Call Claude API for thread reply summarization ──
-async function handleThreadReplySummarize(item) {
-  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
-  if (!claudeApiKey) return { error: 'no_api_key' };
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
-  try {
-    const result = await callClaude(claudeApiKey, buildThreadReplySummarizePrompt(item, identity), 'threadReply', limits);
-    if (result.error) return result;
-    return { summary: result.parsed };
-  } catch (err) { return { error: err.message }; }
-}
-
-// ── Build full-thread bullet-point summarization prompt ──
-function buildFullThreadSummarizePrompt(item, identity) {
-  const serialized = JSON.stringify(item.replies, null, 0);
   return `${identity.threadContextClause}
 
 Summarize the ENTIRE thread (root message + replies) as terse bullet points.
@@ -528,80 +537,13 @@ Respond with ONLY a JSON object: {"summary": "- bullet1\\n- bullet2\\n..."}
 No markdown fences, no explanation.`;
 }
 
-// ── Call Claude API for full-thread bullet summarization ──
-async function handleFullThreadSummarize(item) {
+// ── Call Claude API for thread summarization (handles both fslack:summarizeFullThread and fslack:summarizeBotThread) ──
+async function handleThreadSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
+  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
   try {
-    const result = await callClaude(claudeApiKey, buildFullThreadSummarizePrompt(item, identity), 'fullThread', limits);
-    if (result.error) return result;
-    return { summary: result.parsed };
-  } catch (err) { return { error: err.message }; }
-}
-
-// ── Build bot thread summarization prompt ──
-function buildBotThreadPrompt(item, identity) {
-  const serialized = JSON.stringify(item.messages, null, 0);
-  return `${identity.contextClause}
-
-A bot posted an automated report in #${item.channel} and people replied in a thread.
-
-Summarize in 2-3 sentences:
-- What the issue or item is about (from the bot message)
-- Key points from the discussion — who said what, use first names
-- Current status: resolved, triaged, or still open
-
-MESSAGES (first is the bot post, rest are replies):
-${serialized}
-
-Respond with ONLY a JSON object: {"summary": "..."}
-No markdown fences, no explanation.`;
-}
-
-// ── Call Claude API for bot thread summarization ──
-async function handleBotThreadSummarize(item) {
-  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
-  if (!claudeApiKey) return { error: 'no_api_key' };
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
-  try {
-    const result = await callClaude(claudeApiKey, buildBotThreadPrompt(item, identity), 'botThread', limits);
-    if (result.error) return result;
-    return { summary: result.parsed };
-  } catch (err) { return { error: err.message }; }
-}
-
-// ── Build channel post summarization prompt ──
-function buildChannelPostPrompt(item, identity) {
-  const serialized = JSON.stringify(item.messages, null, 0);
-  return `${identity.contextClause}
-
-Summarize what people are discussing in #${item.channel} as exactly 3 bullet points.
-Each bullet: "- [first name] [verb] [specific thing]"
-Use first names only. Be concrete — name the specific artifact, issue, or topic, not a vague category.
-For bot/automated messages (bot_id present), skip the reporter or source name — just describe the issue or topic directly. E.g. "stuck toast notification bug" not "zendesk reported stuck toast notification bug" or "customer reported stuck toast notification bug".
-Combine multiple small messages from the same person into one bullet when possible.
-If fewer than 3 distinct topics, use fewer bullets.
-
-Each message has a "ts" field. For each bullet, include the ts of the most relevant message in square brackets at the start, like: "- [1773771342.788049] cory shipped the new CLI"
-
-MESSAGES:
-${serialized}
-
-Respond with ONLY a JSON object: {"summary": "- [ts] bullet1\\n- [ts] bullet2\\n- [ts] bullet3"}
-No markdown fences, no explanation.`;
-}
-
-// ── Call Claude API for channel post summarization ──
-async function handleChannelPostSummarize(item) {
-  const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
-  if (!claudeApiKey) return { error: 'no_api_key' };
-  const identity = await getIdentity();
-  const limits = await getTokenLimits();
-  try {
-    const result = await callClaude(claudeApiKey, buildChannelPostPrompt(item, identity), 'channelPost', limits);
+    const result = await callClaude(claudeApiKey, buildThreadSummaryPrompt(item, identity, customPrompts), 'threadSummary', limits);
     if (result.error) return result;
     return { summary: result.parsed };
   } catch (err) { return { error: err.message }; }
@@ -714,28 +656,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handlePrioritize(msg.data, msg.selfName).then(sendResponse);
     return true; // async response
   }
-  if (msg.type === `${FSLACK}:summarize`) {
-    handleSummarize(msg.data).then(sendResponse);
+  if (msg.type === `${FSLACK}:summarize` || msg.type === `${FSLACK}:summarizeChannelPost`) {
+    handleChannelSummarize(msg.data).then(sendResponse);
     return true;
   }
   if (msg.type === `${FSLACK}:summarizeVip`) {
     handleVipSummarize(msg.data).then(sendResponse);
     return true;
   }
-  if (msg.type === `${FSLACK}:summarizeBotThread`) {
-    handleBotThreadSummarize(msg.data).then(sendResponse);
-    return true;
-  }
-  if (msg.type === `${FSLACK}:summarizeChannelPost`) {
-    handleChannelPostSummarize(msg.data).then(sendResponse);
-    return true;
-  }
-  if (msg.type === `${FSLACK}:summarizeThreadReplies`) {
-    handleThreadReplySummarize(msg.data).then(sendResponse);
-    return true;
-  }
-  if (msg.type === `${FSLACK}:summarizeFullThread`) {
-    handleFullThreadSummarize(msg.data).then(sendResponse);
+  if (msg.type === `${FSLACK}:summarizeBotThread` || msg.type === `${FSLACK}:summarizeFullThread`) {
+    handleThreadSummarize(msg.data).then(sendResponse);
     return true;
   }
   /* DEV_ONLY_START */

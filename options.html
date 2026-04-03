@@ -98,6 +98,12 @@
     </section>
 
     <details class="advanced">
+      <summary>Advanced: Custom Prompts</summary>
+      <p class="hint" style="margin-top: 12px; padding: 0 24px;">Edit the AI prompts used for each operation. Leave blank to use the default. Variables like <code>${serialized}</code> are injected at runtime.</p>
+      <div id="prompt-editors" style="padding: 0 24px 16px;"></div>
+    </details>
+
+    <details class="advanced">
       <summary>Advanced: Token Limits & Usage</summary>
       <p class="hint" style="margin-top: 12px; padding: 0 24px;">Max output tokens per Claude API call. Lower = faster/cheaper, higher = more detailed.</p>
       <table id="token-table" class="token-table">

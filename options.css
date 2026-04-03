@@ -327,6 +327,104 @@ textarea {
   color: #1d1c1d;
 }
 
+/* ── Prompt editors ── */
+.prompt-editor {
+  margin-bottom: 16px;
+}
+
+.prompt-editor:last-child {
+  margin-bottom: 0;
+}
+
+.prompt-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.prompt-header label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d1c1d;
+}
+
+.prompt-status {
+  font-size: 11px;
+  color: #b0adb4;
+  font-weight: 500;
+}
+
+.prompt-status.custom {
+  color: #4a154b;
+}
+
+.reset-prompt-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #d6d4d9;
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-weight: 500;
+  color: #89868d;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.reset-prompt-btn:hover:not(:disabled) {
+  background: #f0eff2;
+  color: #1d1c1d;
+}
+
+.reset-prompt-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.prompt-editor textarea {
+  width: 100%;
+  min-height: 80px;
+  max-height: 400px;
+  padding: 8px 10px;
+  border: 1px solid #d6d4d9;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  line-height: 1.5;
+  background: #fafafa;
+  color: #1d1c1d;
+  resize: vertical;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+}
+
+.prompt-editor textarea:focus {
+  outline: none;
+  border-color: #4a154b;
+  background: #fff;
+}
+
+.prompt-editor textarea::placeholder {
+  color: #b0adb4;
+  font-style: italic;
+}
+
+.prompt-editor .hint {
+  font-size: 11px;
+  color: #89868d;
+  margin: 0 0 6px;
+  padding: 0;
+}
+
+.prompt-editor .hint code {
+  background: #f0eff2;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
 /* ── Save bar ── */
 .actions {
   position: sticky;
