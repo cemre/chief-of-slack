@@ -584,7 +584,7 @@ function _getCategoryForItem(itemEl) {
   return 'noise';
 }
 
-function _injectAssessButtons() {
+function _injectAssessButtons(prioritized) {
   // Add a small ✗ button to every .item that doesn't already have one
   for (const item of bodyEl.querySelectorAll('.item:not(.interesting):not(.vip-item)')) {
     if (item.querySelector('.assess-btn')) continue;
@@ -602,17 +602,16 @@ function _injectAssessButtons() {
       upBtn.classList.add('assessed');
       btn.style.display = 'none';
     });
-    // Find the AI's reasoning or rule explanation from cachedView
+    // Find the AI's reasoning or rule explanation from prioritized data
     let reasonWhy = '';
-    if (cachedView?.prioritized) {
-      const allItems = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []),
-                        ...(cachedView.prioritized.whenFree || []), ...(cachedView.prioritized.noise || [])];
+    if (prioritized) {
+      const allItems = [...(prioritized.actNow || []), ...(prioritized.priority || []),
+                        ...(prioritized.whenFree || []), ...(prioritized.noise || [])];
       const dataEl = item.querySelector('[data-channel]');
       if (dataEl) {
         const ch = dataEl.dataset.channel;
         const ts = dataEl.dataset.threadTs || dataEl.dataset.ts;
-        const match = allItems.find(i => i.channel_id === ch && (i.ts === ts || i.sort_ts === ts))
-          || allItems.find(i => i.channel_id === ch);
+        const match = allItems.find(i => i.channel_id === ch && (i.ts === ts || i.sort_ts === ts));
         if (match) {
           const cat = _getCategoryForItem(item);
           const aiReason = match._reasonWhy || '';
@@ -2784,7 +2783,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   bodyEl.innerHTML = html;
-  /* DEV_ONLY_START */ if (_assessMode) _injectAssessButtons(); /* DEV_ONLY_END */
+  /* DEV_ONLY_START */ if (_assessMode) _injectAssessButtons(prioritized); /* DEV_ONLY_END */
   focusedItemIndex = -1;
   resetThreadUnreadIndex();
   lastRenderData = data;
@@ -4304,13 +4303,14 @@ async function kickoffVipSection(data) {
     const byChannel = new Map();
     for (const m of vip.messages) {
       const key = m.channel_id || m.channel_name || '?';
-      if (!byChannel.has(key)) byChannel.set(key, { name: m.channel_name || '?', permalink: m.permalink, messages: [] });
+      if (!byChannel.has(key)) byChannel.set(key, { name: m.channel_name || '?', isDm: m.isDm, permalink: m.permalink, messages: [] });
       byChannel.get(key).messages.push(m);
     }
     let messagesHtml = '';
     for (const [chId, ch] of byChannel) {
       const chHref = ch.permalink ? escapeHtml(ch.permalink.replace(/\/p\d+$/, '')) : '#';
-      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">${chPrefix(chId, data)}${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+      const prefix = ch.isDm ? ENVELOPE_ICON : chPrefix(chId, data);
+      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">${prefix}${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
       messagesHtml += `<div class="vip-channel-group">${channelLabel}<ul class="vip-msg-list">`;
       for (const m of ch.messages) {
         const msgLink = m.permalink ? `<a class="vip-msg-slack-link" href="${escapeHtml(m.permalink)}" target="_blank">open in Slack ↗</a>` : '';
@@ -6074,14 +6074,14 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
         assessCheckbox.checked = true;
         _assessMode = true;
         document.body.classList.add('assess-mode');
-        _injectAssessButtons();
+        _injectAssessButtons(cachedView?.prioritized);
       }
     });
     assessCheckbox.addEventListener('change', () => {
       _assessMode = assessCheckbox.checked;
       document.body.classList.toggle('assess-mode', _assessMode);
       chrome.storage.local.set({ fslackAssessMode: _assessMode });
-      if (_assessMode) _injectAssessButtons();
+      if (_assessMode) _injectAssessButtons(cachedView?.prioritized);
     });
   }
 

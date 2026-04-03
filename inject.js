@@ -1421,14 +1421,28 @@
           count: String(batch.length * 12),
         });
         for (const m of (res.messages?.matches || [])) {
+          const rawChName = m.channel?.name;
+          const chId = m.channel?.id;
+          // Resolve mpdm names (e.g. "mpdm-gem898--tara--josh--clare-1") to friendly names
+          let friendlyName = rawChName;
+          if (rawChName) {
+            const mpdmMatch = rawChName.match(/^mpdm-(.+)-\d+$/);
+            if (mpdmMatch) {
+              friendlyName = mpdmMatch[1].split('--').join(', ');
+            }
+          } else if (chId && chId.startsWith('D')) {
+            // 1:1 DM with no channel name — use "DM"
+            friendlyName = 'DM';
+          }
           const formatted = {
             user: m.user || m.username,
             text: extractText(m),
             fwd: extractFwd(m),
             ts: m.ts,
             files: extractFiles(m),
-            channel_id: m.channel?.id,
-            channel_name: m.channel?.name,
+            channel_id: chId,
+            channel_name: friendlyName,
+            isDm: !!(chId && (chId.startsWith('D') || (chId.startsWith('G') && rawChName?.startsWith('mpdm-')))),
             permalink: m.permalink,
           };
           // Match message to VIP by userId
