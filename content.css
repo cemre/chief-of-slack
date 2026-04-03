@@ -261,6 +261,10 @@ button:hover { background: var(--accent-hover); }
 button:disabled { opacity: 0.5; cursor: wait; }
 #fslack-nav-toggle { background: transparent; color: #662500cc; font-size: 13px; font-weight: 500; padding: 4px 8px; border-radius: 8px; }
 #fslack-nav-toggle:hover { background: rgba(0,0,0,0.04); }
+@media (prefers-color-scheme: dark) {
+  #fslack-nav-toggle { color: var(--dt_color-theme-content-inv-sec); }
+  #fslack-nav-toggle:hover { background: rgba(255,255,255,0.08); }
+}
 button.secondary {
   background: transparent;
   border: 1px solid var(--border-strong);
