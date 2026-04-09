@@ -396,6 +396,16 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
   font-size: 11px;
   color: var(--text-secondary);
 }
+.item-engagement {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.item-engagement .engage-icon {
+  vertical-align: -1px;
+  opacity: 0.6;
+  margin-left: 1px;
+}
 
 /* Item content */
 .item-right {

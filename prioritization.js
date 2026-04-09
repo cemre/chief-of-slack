@@ -6,6 +6,8 @@
   globalScope.FslackPrioritization = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function buildPrioritizationApi() {
   const CAT_RANK = { drop: 0, noise: 1, when_free: 2, priority: 3, act_now: 4 };
+  const HOT_THRESHOLD = 5;
+  function msgEngagement(m) { return (m.reply_count || 0) + (m.reaction_count || 0); }
 
   function containsSelfMention(text, selfId, options = {}) {
     if (!text || !selfId) return false;
@@ -90,12 +92,12 @@
       const isOwnThread = thread.root_user === selfId;
       if (thread._sidebarSection === 'high_volume' && !isOwnThread) {
         const sectionName = thread._sidebarSectionName || 'high-volume';
-        if ((thread.reply_count || 0) >= 5) {
+        if (msgEngagement(thread) >= HOT_THRESHOLD) {
           thread._forceThreadSummary = true;
-          thread._ruleOverride = `"${sectionName}" section: 5+ replies → relevant`;
+          thread._ruleOverride = `"${sectionName}" section: ${HOT_THRESHOLD}+ engagement → relevant`;
           whenFree.push(thread);
         } else {
-          thread._ruleOverride = `"${sectionName}" section: <5 replies → noise`;
+          thread._ruleOverride = `"${sectionName}" section: <${HOT_THRESHOLD} engagement → noise`;
           noise.push(thread);
         }
         continue;
@@ -149,16 +151,32 @@
         continue;
       }
 
+      // First pass: rescue reaction-spiked messages → whenFree (before section routing)
+      const spikedMessages = channelPost.messages.filter((message) => message.isReactionSpike);
+      if (spikedMessages.length > 0) {
+        whenFree.push({
+          ...channelPost,
+          messages: spikedMessages,
+          _type: 'channel',
+          _ruleOverride: `reaction spike (≥${Math.max(6, Math.round(3 * (channelPost.reactionMedian || 0)))} reactions) → relevant`,
+        });
+        channelPost.messages = channelPost.messages.filter((message) => !message.isReactionSpike);
+        if (channelPost.messages.length === 0) {
+          debugLog('reaction-spike-all');
+          continue;
+        }
+      }
+
       if (channelPost._sidebarSection === 'high_volume') {
         const sectionName = channelPost._sidebarSectionName || 'high-volume';
-        const hotMessages = channelPost.messages.filter((message) => (message.reply_count || 0) >= 5);
-        const coldMessages = channelPost.messages.filter((message) => (message.reply_count || 0) < 5);
+        const hotMessages = channelPost.messages.filter((message) => msgEngagement(message) >= HOT_THRESHOLD);
+        const coldMessages = channelPost.messages.filter((message) => msgEngagement(message) < HOT_THRESHOLD);
         if (hotMessages.length > 0) {
           const hotChannelPost = {
             ...channelPost,
             messages: hotMessages,
             _type: 'channel',
-            _ruleOverride: `"${sectionName}" section: 5+ replies → relevant`,
+            _ruleOverride: `"${sectionName}" section: ${HOT_THRESHOLD}+ engagement → relevant`,
           };
           const replierIds = [...new Set(hotMessages.flatMap((message) => message.reply_users || []))];
           hotChannelPost._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
@@ -171,7 +189,7 @@
             ...channelPost,
             messages: coldMessages,
             _type: 'channel',
-            _ruleOverride: `"${sectionName}" section: <5 replies → noise`,
+            _ruleOverride: `"${sectionName}" section: <${HOT_THRESHOLD} engagement → noise`,
           });
         }
         debugLog('high_volume');
@@ -205,14 +223,14 @@
           continue;
         }
         if (botRule === 'high_volume') {
-          const hotMessages = channelPost.messages.filter((message) => (message.reply_count || 0) >= 5);
-          const coldMessages = channelPost.messages.filter((message) => (message.reply_count || 0) < 5);
+          const hotMessages = channelPost.messages.filter((message) => msgEngagement(message) >= HOT_THRESHOLD);
+          const coldMessages = channelPost.messages.filter((message) => msgEngagement(message) < HOT_THRESHOLD);
           if (hotMessages.length > 0) {
             const hotChannelPost = {
               ...channelPost,
               messages: hotMessages,
               _isAllBot: true,
-              _ruleOverride: 'bot-only, 5+ replies → relevant',
+              _ruleOverride: `bot-only, ${HOT_THRESHOLD}+ engagement → relevant`,
             };
             const replierIds = [...new Set(hotMessages.flatMap((message) => message.reply_users || []))];
             hotChannelPost._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
@@ -224,21 +242,36 @@
               ...channelPost,
               messages: coldMessages,
               _isAllBot: true,
-              _ruleOverride: 'bot-only, <5 replies → noise',
+              _ruleOverride: `bot-only, <${HOT_THRESHOLD} engagement → noise`,
             });
           }
           debugLog('allBot-highvol');
           continue;
         }
 
-        if (channelPost.messages.length >= 4) channelPost._deepAnalysis = true;
-        debugLog('allBot-llm');
-        forLlm.channelPosts.push(channelPost);
+        // Was: forLlm.channelPosts.push(channelPost) — now reaction-based
+        if (channelPost._isMentioned) {
+          channelPost._ruleOverride = 'bot-only, mentioned → relevant';
+          whenFree.push(channelPost);
+          debugLog('allBot-mentioned');
+        } else {
+          channelPost._ruleOverride = 'bot-only → noise';
+          noise.push(channelPost);
+          debugLog('allBot-noise-default');
+        }
         continue;
       }
 
-      debugLog('forLlm');
-      forLlm.channelPosts.push(channelPost);
+      // Default route: mentioned → whenFree, otherwise → noise
+      // (was: forLlm.channelPosts.push — LLM classification commented out in favor of reaction-based routing)
+      if (channelPost._isMentioned) {
+        channelPost._ruleOverride = 'mentioned → relevant';
+        debugLog('mentioned');
+        whenFree.push(channelPost);
+      } else {
+        debugLog('noise-default');
+        noise.push(channelPost);
+      }
     }
 
     for (const dm of dmList) {

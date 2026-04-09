@@ -1017,13 +1017,107 @@ function showFromCache() {
     updateLastUpdated();
     if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
-    renderPrioritized(cachedView.prioritized, cachedView.data, cachedView.popular, false, false, cachedView.saved || [], false, cachedView.ts);
+    const cachedNoise = cachedView.prioritized.noise || [];
+    const unsummarizedCacheNoise = cachedNoise.filter((item) =>
+      !item._deepSummary && (item.fullMessages?.history || item.messages || []).length >= 1
+    );
+    const summarizedCacheNoise = cachedNoise.filter((item) =>
+      item._deepSummary || (item.fullMessages?.history || item.messages || []).length < 1
+    );
+    renderPrioritized({ ...cachedView.prioritized, noise: summarizedCacheNoise }, cachedView.data, cachedView.popular, false, unsummarizedCacheNoise.length > 0, cachedView.saved || [], false, cachedView.ts);
     runBotThreadSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
     runWhenFreeChannelSummarization(cachedView.prioritized.whenFree || [], cachedView.data);
     const allElevatedCache = [...(cachedView.prioritized.actNow || []), ...(cachedView.prioritized.priority || []), ...(cachedView.prioritized.whenFree || [])];
     runThreadReplySummarization(allElevatedCache, cachedView.data);
     runChannelThreadSummarization(allElevatedCache, cachedView.data);
     runRootSummarization(allElevatedCache, cachedView.data);
+    // Summarize unsummarized cache noise in-place
+    if (unsummarizedCacheNoise.length > 0) {
+      (async () => {
+        const noiseRecentEl = document.getElementById('noise-recent-items');
+        const noiseOlderEl = document.getElementById('noise-older-items');
+        const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
+        const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
+        const deepNoiseArea = document.getElementById('deep-noise-area');
+        if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... 0/${unsummarizedCacheNoise.length}`;
+        let done = 0;
+        const results = await Promise.all(unsummarizedCacheNoise.map(async (cp) => {
+          const allMsgs = cp.fullMessages?.history || cp.messages || [];
+          const latestTs = allMsgs[0]?.ts || '';
+          const cacheKey = `${cp.channel_id}:${latestTs}`;
+          if (_summaryCache[cacheKey]) {
+            done++;
+            if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${done}/${unsummarizedCacheNoise.length}`;
+            return { cp, result: _summaryCache[cacheKey] };
+          }
+          let response;
+          const MAX_PL = 3000;
+          const chLabel = cachedView.data.channels?.[cp.channel_id] || cp.channel_id;
+          const plMsgs = []; let plBytes = 0;
+          for (const m of allMsgs) {
+            const entry = { user: m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, cachedView.data.users), text: plainTruncate(textWithFwd(m.text, m.fwd), 400, cachedView.data.users), ts: m.ts };
+            const s = JSON.stringify(entry);
+            if (plBytes + s.length > MAX_PL) break;
+            plMsgs.push(entry); plBytes += s.length;
+          }
+          try {
+            response = await new Promise((resolve) =>
+              chrome.runtime.sendMessage({ type: `${FSLACK}:summarize`, data: { channel: chLabel, channelId: cp.channel_id, messages: plMsgs } }, resolve)
+            );
+          } catch { return { cp, result: null }; }
+          if (response?.summary) {
+            _summaryCache[cacheKey] = response.summary;
+            chrome.storage.local.set({ fslackSummaryCache: _summaryCache });
+          }
+          done++;
+          if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${done}/${unsummarizedCacheNoise.length}`;
+          return { cp, result: response?.summary };
+        }));
+        if (deepNoiseArea) deepNoiseArea.textContent = '';
+        for (const { cp, result } of results) {
+          if (result?.bullets?.length) {
+            cp._deepSummary = result.bullets.join('\n');
+          } else if (result?.summary) {
+            cp._deepSummary = result.summary;
+          }
+          if (!cp._deepSummary) {
+            const msgs = cp.fullMessages?.history || cp.messages || [];
+            const first = msgs[0];
+            if (first) {
+              const name = first.subtype === 'bot_message' || !first.user ? 'Bot' : uname(first.user, cachedView.data.users);
+              cp._deepSummary = `${name}: ${plainTruncate(first.text || '', 200, cachedView.data.users)}`;
+            }
+          }
+        }
+        const allNoise = sortNoiseItems([...summarizedCacheNoise, ...unsummarizedCacheNoise]);
+        const noiseCutoff = Date.now() / 1000 - 86400;
+        const allNoiseRecent = allNoise.filter((item) => getItemSortTs(item) >= noiseCutoff);
+        const allNoiseOlder = allNoise.filter((item) => getItemSortTs(item) < noiseCutoff);
+        if (noiseRecentEl) {
+          let recentHtml = '';
+          for (const item of allNoiseRecent) recentHtml += renderAnyItem(item, cachedView.data, 'noise-item');
+          recentHtml += `<div class="noise-section-footer"><button id="noise-mark-recent-btn">Mark all recent as read</button></div>`;
+          noiseRecentEl.innerHTML = recentHtml;
+          if (noiseRecentToggleEl) {
+            const expanded = noiseRecentEl.classList.contains('expanded');
+            noiseRecentToggleEl.textContent = `Recent noise · ${allNoiseRecent.length} ${expanded ? '↑' : '↓'}`;
+          }
+        }
+        if (noiseOlderEl) {
+          let olderHtml = '';
+          for (const item of allNoiseOlder) olderHtml += renderAnyItem(item, cachedView.data, 'noise-item');
+          olderHtml += `<div class="noise-section-footer" id="noise-older-footer"${allNoiseOlder.length === 0 ? ' style="display:none"' : ''}><button id="noise-mark-older-btn">Mark all older as read</button></div>`;
+          noiseOlderEl.innerHTML = olderHtml;
+          if (allNoiseOlder.length > 0 && noiseOlderToggleEl) noiseOlderToggleEl.style.display = '';
+          if (noiseOlderToggleEl) {
+            const expanded = noiseOlderEl.classList.contains('expanded');
+            noiseOlderToggleEl.textContent = `Older noise · ${allNoiseOlder.length} ${expanded ? '↑' : '↓'}`;
+          }
+        }
+        cachedView.prioritized.noise = allNoise;
+        saveViewCache(cachedView.data, cachedView.popular, cachedView.prioritized, cachedView.saved || []);
+      })();
+    }
     startDmWatcher(cachedView.data);
     return true;
   }
@@ -1608,7 +1702,7 @@ function compactBulletsHtml(summary) {
   const items = summary.split('\n').filter(b => b.trim())
     .map(b => b.replace(/^-\s*/, '').replace(/^\[\d+\.\d+\]\s*/, '').split(/\s+/).slice(0, 12).join(' '));
   if (items.length === 0) return '';
-  if (items.length <= 2) return escapeHtml(items.join(' · '));
+  if (items.length === 1) return escapeHtml(items[0]);
   return '<ul class="compact-bullet-list">' + items.map(b => `<li>${escapeHtml(b)}</li>`).join('') + '</ul>';
 }
 
@@ -1901,9 +1995,16 @@ function itemLeftLink(innerHtml, href) {
 
 const THREAD_BADGE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
 
+const HEART_ICON = '<svg class="engage-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21.3l7.8-7.8 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg>';
+const COMMENT_ICON = '<svg class="engage-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+
 function threadBadge(m, channel, truncId, opts = {}) {
-  if (!m.reply_count) return '';
-  const n = m.reply_count;
+  const rc = m.reaction_count || 0;
+  const n = m.reply_count || 0;
+  if (!rc && !n) return '';
+  const parts = [];
+  if (rc > 0) parts.push(`${rc}${HEART_ICON}`);
+  if (n > 0) parts.push(`${n}${COMMENT_ICON}`);
   const seeMore = truncId ? ' · See more' : '';
   const truncAttr = truncId ? ` data-trunc-id="${truncId}"` : '';
   const containerAttr = opts.containerId ? ` data-container-id="${opts.containerId}"` : '';
@@ -1911,7 +2012,7 @@ function threadBadge(m, channel, truncId, opts = {}) {
   const time = formatTimeTooltip(m.ts);
   const timeHtml = time ? `<span class="msg-time">${time}</span>` : '';
   const timeAttr = time ? ` data-time="${escapeHtml(time)}"` : '';
-  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${badgeTs}"${truncAttr}${timeAttr}${containerAttr}>${THREAD_BADGE_ICON}${n} ${n === 1 ? 'reply' : 'replies'}${seeMore}${timeHtml}</span>`;
+  return `<span class="msg-thread-badge" data-channel="${channel}" data-ts="${badgeTs}"${truncAttr}${timeAttr}${containerAttr}>${parts.join(' ')}${seeMore}${timeHtml}</span>`;
 }
 
 function newerRepliesBadge(channel, threadTs, afterTs, count, containerId) {
@@ -2351,11 +2452,6 @@ function renderChannelItem(cp, data, cssClass) {
     html += `<div class="item-left">`;
     html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data, cp._isAllBot)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
-    if (cp._repliers?.length) {
-      const names = cp._repliers.map(escapeHtml).join(', ');
-      const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
-      html += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
-    }
     if (csMsgId) html += ` <span class="item-sep">·</span> ${headerExpandHtml(csMsgId, cp.messages.length)}`;
     // Inline mark-read for noise items (accessible in compact mode)
     if (cssClass === 'noise-item') {
@@ -2375,21 +2471,25 @@ function renderChannelItem(cp, data, cssClass) {
         if (_previewText) _chPreview = `${_previewAuthor}: ${_previewText}`;
       }
       if (_chPreview) {
+        // Engagement stats suffix: (10 🤍, 3 💬)
+        const _engageParts = [];
+        const _maxR = Math.max(0, ...(cp.messages || []).map(m => m.reaction_count || 0));
+        const _maxReplies = Math.max(0, ...(cp.messages || []).map(m => m.reply_count || 0));
+        if (_maxR > 0) _engageParts.push(`${_maxR}${HEART_ICON}`);
+        if (_maxReplies > 0) _engageParts.push(`${_maxReplies}${COMMENT_ICON}`);
+        const _engageSuffix = _engageParts.length > 0 ? ` <span class="item-sep">·</span> <span class="item-engagement">${_engageParts.join(' ')}</span>` : '';
         // If _chPreview came from compactBullets (plain text), use compactBulletsHtml for list rendering
         if (cp._channelSummary) {
-          html += `<div class="compact-preview">${compactBulletsHtml(cp._channelSummary)}</div>`;
+          const _summaryItems = cp._channelSummary.split('\n').filter(b => b.trim());
+          const _suffix = _summaryItems.length === 1 ? _engageSuffix : '';
+          html += `<div class="compact-preview">${compactBulletsHtml(cp._channelSummary)}${_suffix}</div>`;
         } else {
-          html += `<div class="compact-preview">${escapeHtml(_chPreview)}</div>`;
+          html += `<div class="compact-preview">${escapeHtml(_chPreview)}${_engageSuffix}</div>`;
         }
       }
     }
   } else {
     let chLeftInner = `<span class="item-channel">${chPrefix(cp.channel_id, data, cp._isAllBot)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
-    if (cp._repliers?.length) {
-      const names = cp._repliers.map(escapeHtml).join(', ');
-      const overflow = cp._replierOverflow > 0 ? ` +${cp._replierOverflow}` : '';
-      chLeftInner += ` <span class="item-sep">·</span> <span class="item-replied">${names}${overflow} replied</span>`;
-    }
     html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
   }
   html += `<div class="item-right">`;
@@ -2403,7 +2503,7 @@ function renderChannelItem(cp, data, cssClass) {
     let messagesHtml = '';
     for (const m of cp.messages.slice(0, 10).reverse()) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-      if (cp._summarizeThreads && (m.reply_count || 0) >= 5) {
+      if (cp._summarizeThreads && ((m.reply_count || 0) + (m.reaction_count || 0)) >= 5) {
         const threadTs = threadUi?.threadTs || m.ts;
         const containerId = threadUi?.containerId || `thread-${cp.channel_id}-${(threadTs || '').replace(/\./g, '_')}-${(m.ts || '').replace(/\./g, '_')}`;
         const modeAttr = threadUi?.mode ? ` data-mode="${threadUi.mode}"` : '';
@@ -2452,7 +2552,7 @@ function renderChannelItem(cp, data, cssClass) {
     const visibleMsgs = cp.messages.slice(0, 10).reverse();
     for (const m of visibleMsgs) {
       const threadUi = buildThreadUiMeta(data, cp.channel_id, m);
-      if (cp._summarizeThreads && (m.reply_count || 0) >= 5) {
+      if (cp._summarizeThreads && ((m.reply_count || 0) + (m.reaction_count || 0)) >= 5) {
         // Render message without thread badge; badge moves below summary
         const threadTs = threadUi?.threadTs || m.ts;
         const containerId = threadUi?.containerId || `thread-${cp.channel_id}-${(threadTs || '').replace(/\./g, '_')}-${(m.ts || '').replace(/\./g, '_')}`;
@@ -4479,8 +4579,13 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
     // Update compact preview with ALL summary bullets joined
     const previewEl = itemEl.querySelector('.compact-preview');
     if (previewEl && cp._channelSummary) {
-      const html = compactBulletsHtml(cp._channelSummary);
-      if (html) previewEl.innerHTML = html;
+      const _bHtml = compactBulletsHtml(cp._channelSummary);
+      if (_bHtml) {
+        const _engEl = previewEl.querySelector('.item-engagement');
+        const _sepEl = previewEl.querySelector('.item-sep');
+        const _isSingle = cp._channelSummary.split('\n').filter(b => b.trim()).length === 1;
+        previewEl.innerHTML = _bHtml + (_isSingle && _engEl ? ` <span class="item-sep">·</span> ${_engEl.outerHTML}` : '');
+      }
     }
   }));
 }
@@ -5116,7 +5221,10 @@ function _prioritizeAndRenderInner(data, background = false) {
         const unsummarizedNoise = prioritized.noise.filter((item) =>
           !item._deepSummary && (item.fullMessages?.history || item.messages || []).length >= 1
         );
-        renderPrioritized(prioritized, data, pendingPopular, false, false, pendingSaved || [], false, cachedView ? cachedView.ts : null);
+        const alreadySummarizedNoise = prioritized.noise.filter((item) =>
+          item._deepSummary || (item.fullMessages?.history || item.messages || []).length < 1
+        );
+        renderPrioritized({ ...prioritized, noise: alreadySummarizedNoise }, data, pendingPopular, false, unsummarizedNoise.length > 0, pendingSaved || [], false, cachedView ? cachedView.ts : null);
         runBotThreadSummarization(prioritized.whenFree, data);
         runWhenFreeChannelSummarization(prioritized.whenFree, data);
         runThreadReplySummarization(allElevated, data);

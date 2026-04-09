@@ -16,6 +16,51 @@
   let _dmContextCache = {};     // { [channelId]: { lastRead, context } }
   const FAST_CACHE_TTL = 60 * 1000; // 60s
   const DM_CONCURRENCY = 5; // parallel DM fetches (well under Slack Tier 3 rate limit)
+
+  // ── Reaction spike detection ──
+  const REACTION_BASELINE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+  function tagReactionSpikes(channelPost) {
+    const msgs = channelPost.messages;
+    if (!msgs || msgs.length === 0) return;
+
+    // Compute batch median
+    const counts = msgs.map((m) => m.reaction_count || 0).sort((a, b) => a - b);
+    const mid = Math.floor(counts.length / 2);
+    const batchMedian = counts.length % 2 ? counts[mid] : (counts[mid - 1] + counts[mid]) / 2;
+
+    // Blend with cached baseline (EMA)
+    const cacheKey = `fslackReactionBaseline_${channelPost.channel_id}`;
+    let median = batchMedian;
+    try {
+      const cached = JSON.parse(localStorage.getItem(cacheKey));
+      if (cached && Date.now() - cached.updatedAt < REACTION_BASELINE_TTL) {
+        if (msgs.length >= 5) {
+          // Enough data: blend current batch with cache
+          median = 0.7 * batchMedian + 0.3 * cached.median;
+        } else {
+          // Thin batch: trust cache more
+          median = cached.median;
+        }
+      }
+    } catch { /* ignore corrupt cache */ }
+
+    // Update cache if batch is large enough
+    if (msgs.length >= 5) {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify({ median, sampleSize: msgs.length, updatedAt: Date.now() }));
+      } catch { /* storage full — ignore */ }
+    }
+
+    // Tag spikes: reaction_count >= max(6, 3 × median)
+    const threshold = Math.max(6, 3 * median);
+    for (const msg of msgs) {
+      if ((msg.reaction_count || 0) >= threshold) {
+        msg.isReactionSpike = true;
+      }
+    }
+    channelPost.reactionMedian = median;
+  }
   async function pMap(items, fn, concurrency) {
     const results = [];
     let index = 0;
@@ -812,6 +857,7 @@
               reply_count: m.reply_count || 0,
               reply_users: m.reply_users || [],
               files: extractFiles(m),
+              reaction_count: (m.reactions || []).reduce((s, r) => s + r.count, 0),
             }));
           if (msgs.length > 0) {
             const channelPost = {
@@ -845,6 +891,7 @@
                 channelPost._deepFetchFailed = true;
               }
             }
+            tagReactionSpikes(channelPost);
             channelPosts.push(channelPost);
           }
         } catch {
@@ -1222,14 +1269,17 @@
                 reply_count: m.reply_count || 0,
                 reply_users: m.reply_users || [],
                 files: extractFiles(m),
+                reaction_count: (m.reactions || []).reduce((s, r) => s + r.count, 0),
               }));
             if (msgs.length > 0) {
-              channelPosts.push({
+              const channelPost = {
                 channel_id: ch.id,
                 mention_count: ch.mention_count,
                 messages: msgs,
                 sort_ts: msgs[0]?.ts || '0',
-              });
+              };
+              tagReactionSpikes(channelPost);
+              channelPosts.push(channelPost);
             }
           } catch { /* skip failed channels */ }
         })
