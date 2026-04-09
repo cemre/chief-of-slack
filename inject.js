@@ -653,7 +653,97 @@
     return { emojiPromise, sidebarSections, sidebarSectionChannelIds, sidebarPromise, needsSidebarRefresh };
   }
 
-  async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
+  // ── Shared helpers for two-phase fetch ──
+
+  function collectMentionIds(items, { threads: isThreads = false, dms: isDms = false, channels: isChannels = false } = {}) {
+    const userIds = [];
+    const channelIds = [];
+    function scan(text) {
+      if (!text) return;
+      for (const m of text.matchAll(/<@(U[A-Z0-9]+)>/g)) userIds.push(m[1]);
+      for (const m of text.matchAll(/<#(C[A-Z0-9]+)(?:\|[^>]*)?>/g)) channelIds.push(m[1]);
+    }
+    if (isThreads) {
+      for (const t of items) {
+        if (t.root_user) userIds.push(t.root_user);
+        scan(t.root_text);
+        for (const r of t.unread_replies) { if (r.user) userIds.push(r.user); scan(r.text); }
+      }
+    }
+    if (isDms) {
+      for (const dm of items) {
+        for (const m of dm.messages) { if (m.user) userIds.push(m.user); scan(m.text); }
+      }
+    }
+    if (isChannels) {
+      for (const cp of items) {
+        for (const m of cp.messages) {
+          if (m.user) userIds.push(m.user);
+          scan(m.text);
+          for (const uid of (m.reply_users || [])) userIds.push(uid);
+        }
+        if (cp.fullMessages) {
+          for (const m of cp.fullMessages.history) { if (m.user) userIds.push(m.user); scan(m.text); }
+          for (const t of cp.fullMessages.threads) { for (const r of t.messages) { if (r.user) userIds.push(r.user); } }
+        }
+      }
+    }
+    return { userIds, channelIds };
+  }
+
+  async function resolveChannelNames(ids, cachedChannels, cachedChannelMeta, progressCb) {
+    const channelIds = [...new Set(ids.filter(Boolean))];
+    const channels = { ...cachedChannels };
+    const channelMeta = { ...cachedChannelMeta };
+    const uncached = channelIds.filter((cid) => !channels[cid]);
+    if (progressCb) progressCb(0, uncached.length, channelIds.length - uncached.length);
+    let done = 0;
+    await Promise.all(
+      uncached.map(async (cid) => {
+        try {
+          const info = await slackApi('conversations.info', { channel: cid });
+          channels[cid] = info.channel.name;
+          channelMeta[cid] = { isPrivate: info.channel.is_private || info.channel.is_im || info.channel.is_mpim || false };
+        } catch {
+          channels[cid] = cid;
+          channelMeta[cid] = { isPrivate: false };
+        }
+        if (progressCb) progressCb(++done, uncached.length, channelIds.length - uncached.length);
+      })
+    );
+    return { channels, channelMeta };
+  }
+
+  function buildLastReadMap(counts) {
+    const lastRead = {};
+    for (const ch of (counts.channels || [])) { if (ch.last_read) lastRead[ch.id] = ch.last_read; }
+    for (const im of (counts.ims || [])) { if (im.last_read) lastRead[im.id] = im.last_read; }
+    for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
+    return lastRead;
+  }
+
+  function buildSidebarChannelMap(sidebarSectionChannelIds, channels) {
+    const sidebarSectionChannels = {};
+    for (const [section, ids] of Object.entries(sidebarSectionChannelIds)) {
+      sidebarSectionChannels[section] = [...new Set(ids.map(id => channels[id] || id))]
+        .sort((a, b) => {
+          const aIsId = /^[A-Z][A-Z0-9]{8,}$/.test(a);
+          const bIsId = /^[A-Z][A-Z0-9]{8,}$/.test(b);
+          if (aIsId !== bIsId) return aIsId ? 1 : -1;
+          return a.localeCompare(b);
+        });
+    }
+    return sidebarSectionChannels;
+  }
+
+  function normalizeTimestamp(ts) {
+    if (!ts) return null;
+    if (typeof ts === 'number') return ts > 0 ? ts.toString() : null;
+    if (typeof ts === 'string' && /^\d+(?:\.\d+)?$/.test(ts)) return parseFloat(ts) > 0 ? ts : null;
+    return null;
+  }
+
+  async function fetchUnreads({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}, sendPhase1 = null) {
     const { emojiPromise, sidebarPromise, needsSidebarRefresh, ...sidebar } = kickoffEmojiAndSidebar(cachedEmoji, { checkStaleness: true });
     let { sidebarSections, sidebarSectionChannelIds } = sidebar;
 
@@ -664,591 +754,159 @@
       getSelfIdAndMuted(),
     ]);
     _selfId = selfId;
-    // Update caches for subsequent fast fetches
     _countsCache = { data: counts, ts: Date.now() };
     progress(1, `Done. ${(counts.channels||[]).filter(c=>c.has_unreads).length} unread channels, self=${selfId}`);
 
-    // 2. Get unread threads — use unread_replies, filter out self-only
-    progress(2, 'Fetching threads...');
-    const threadView = await slackApi('subscriptions.thread.getView');
-    _threadViewCache = { data: threadView, ts: Date.now() };
-    const threads = (threadView.threads || [])
-      .map((t) => {
-        const unread = (t.unread_replies || []).map((r) => ({
-          user: r.user,
-          text: extractText(r),
-          fwd: extractFwd(r),
-          ts: r.ts,
-          bot_id: r.bot_id,
-          subtype: r.subtype,
-          files: extractFiles(r),
-        }));
-        // Filter: skip if all unread replies are from self
-        const othersUnread = unread.filter((r) => r.user !== selfId);
-        if (othersUnread.length === 0) return null;
-
-        const lastUnread = othersUnread[othersUnread.length - 1];
-        return {
-          channel_id: t.root_msg?.channel,
-          ts: t.root_msg?.ts,
-          root_text: extractText(t.root_msg || {}),
-          root_fwd: extractFwd(t.root_msg || {}),
-          root_files: extractFiles(t.root_msg || {}),
-          root_user: t.root_msg?.user,
-          reply_count: t.root_msg?.reply_count || 0,
-          reply_users: t.root_msg?.reply_users || [],
-          unread_replies: othersUnread,
-          sort_ts: lastUnread?.ts || t.root_msg?.ts || '0',
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
-
-    progress(2, `Done. ${threads.length} threads with unread replies from others.`);
-
-    // 2b. For threads where I replied, fetch full thread context (last 10 replies)
-    const myRepliedThreads = threads.filter((t) => (t.reply_users || []).includes(selfId));
-    if (myRepliedThreads.length > 0) {
-      progress(2, `Fetching context for ${myRepliedThreads.length} threads I replied in...`);
-      await Promise.all(myRepliedThreads.map(async (t) => {
-        try {
-          const r = await slackApi('conversations.replies', { channel: t.channel_id, ts: t.ts, limit: '12' });
-          // Skip root (index 0), take last 10 replies
-          const allReplies = (r.messages || []).slice(1).slice(-10);
-          if (allReplies.length > 0) {
-            const firstUnreadTs = t.unread_replies[0]?.ts;
-            t.full_replies = allReplies.map((m) => ({
-              user: m.user,
-              text: extractText(m),
-              ts: m.ts,
-              is_unread: firstUnreadTs ? parseFloat(m.ts) >= parseFloat(firstUnreadTs) : false,
-            }));
-          }
-        } catch { /* non-critical */ }
-      }));
-    }
-
-    // 3. Get unread DMs — fetch history for each
-    const unreadIms = (counts.ims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'im' }));
-    const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'mpim' }));
-    const unreadDirects = [...unreadIms, ...unreadMpims];
-    const dms = [];
-    let dmsDone = 0;
-    const dmsTotal = unreadDirects.length;
-    const dmFailures = [];
-    progress(3, dmsTotal > 0 ? `Fetching DMs (incl. group DMs)... 0/${dmsTotal}` : 'Fetching DMs...');
-    function normalizeTimestamp(ts) {
-      if (!ts) return null;
-      if (typeof ts === 'number') return ts > 0 ? ts.toString() : null;
-      if (typeof ts === 'string' && /^\d+(?:\.\d+)?$/.test(ts)) return parseFloat(ts) > 0 ? ts : null;
-      return null;
-    }
-
-    const pendingTranscripts = [];
-    await pMap(unreadDirects, async (conv) => {
-      const kindLabel = conv.kind === 'mpim' ? 'group DM' : 'DM';
-      let historyParams = null;
-      try {
-        const oldestTs = normalizeTimestamp(conv.last_read)
-          || normalizeTimestamp(conv.last_read_ts)
-          || (conv.kind === 'im' ? '0' : null);
-        historyParams = { channel: conv.id };
-        if (oldestTs) historyParams.oldest = oldestTs;
-        const hist = await slackApi('conversations.history', historyParams);
-        const msgs = (hist.messages || [])
-          .filter((m) => m.user !== selfId)
-          .map((m) => ({
-            user: m.user,
-            text: extractText(m),
-            fwd: extractFwd(m),
-            ts: m.ts,
-            subtype: m.subtype,
-            bot_id: m.bot_id,
-            files: extractFiles(m),
+    // 2. Start threads, DMs, and channels ALL in parallel
+    const threadsPromise = (async () => {
+      progress(2, 'Fetching threads...');
+      const threadView = await slackApi('subscriptions.thread.getView');
+      _threadViewCache = { data: threadView, ts: Date.now() };
+      const threads = (threadView.threads || [])
+        .map((t) => {
+          const unread = (t.unread_replies || []).map((r) => ({
+            user: r.user,
+            text: extractText(r),
+            fwd: extractFwd(r),
+            ts: r.ts,
+            bot_id: r.bot_id,
+            subtype: r.subtype,
+            files: extractFiles(r),
           }));
-        // Collect voice messages needing transcripts (resolved in batch after all DMs)
-        for (const msg of msgs) {
-          if (msg.files && msg.files.some(f => f.voice && !f.transcript && f.fileId)) {
-            pendingTranscripts.push(msg.files);
-          }
-        }
-        // Fetch recent context (up to 5 messages before last_read) for LLM summarization
-        let recentContext = [];
-        if (oldestTs && oldestTs !== '0') {
-          try {
-            const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
-            recentContext = (ctxHist.messages || [])
-              .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
-              .reverse(); // oldest first
-          } catch { /* non-critical */ }
-        }
-        if (msgs.length > 0) {
-          const dmPayload = {
-            channel_id: conv.id,
-            messages: msgs,
-            recentContext,
+          const othersUnread = unread.filter((r) => r.user !== selfId);
+          if (othersUnread.length === 0) return null;
+          const lastUnread = othersUnread[othersUnread.length - 1];
+          return {
+            channel_id: t.root_msg?.channel,
+            ts: t.root_msg?.ts,
+            root_text: extractText(t.root_msg || {}),
+            root_fwd: extractFwd(t.root_msg || {}),
+            root_files: extractFiles(t.root_msg || {}),
+            root_user: t.root_msg?.user,
+            reply_count: t.root_msg?.reply_count || 0,
+            reply_users: t.root_msg?.reply_users || [],
+            unread_replies: othersUnread,
+            sort_ts: lastUnread?.ts || t.root_msg?.ts || '0',
           };
-          if (conv.kind === 'mpim') {
-            dmPayload.isGroup = true;
-            let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
-            if (memberIds.length === 0) {
-              try {
-                const info = await slackApi('conversations.info', { channel: conv.id });
-                memberIds = (info.channel?.members || []).filter((uid) => uid && uid !== selfId);
-              } catch {}
+        })
+        .filter(Boolean)
+        .sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+      progress(2, `Done. ${threads.length} threads with unread replies from others.`);
+
+      // 2b. Thread context for threads I replied in
+      const myRepliedThreads = threads.filter((t) => (t.reply_users || []).includes(selfId));
+      if (myRepliedThreads.length > 0) {
+        progress(2, `Fetching context for ${myRepliedThreads.length} threads I replied in...`);
+        await Promise.all(myRepliedThreads.map(async (t) => {
+          try {
+            const r = await slackApi('conversations.replies', { channel: t.channel_id, ts: t.ts, limit: '12' });
+            const allReplies = (r.messages || []).slice(1).slice(-10);
+            if (allReplies.length > 0) {
+              const firstUnreadTs = t.unread_replies[0]?.ts;
+              t.full_replies = allReplies.map((m) => ({
+                user: m.user,
+                text: extractText(m),
+                ts: m.ts,
+                is_unread: firstUnreadTs ? parseFloat(m.ts) >= parseFloat(firstUnreadTs) : false,
+              }));
             }
-            if (memberIds.length > 0) dmPayload.members = memberIds;
-          }
-          dms.push(dmPayload);
-        }
-      } catch (err) {
-        console.error(`[${FSLACK}] Failed to fetch ${kindLabel} ${conv.id}`, err, {
-          channel: conv.id,
-          kind: conv.kind,
-          historyParams,
-          rawConversation: conv,
-        });
-        dmFailures.push({ id: conv.id, kind: conv.kind, error: err?.message || String(err) });
-        progress(3, `Failed to fetch ${kindLabel} ${conv.id}: ${err?.message || 'unknown error'}`);
+          } catch { /* non-critical */ }
+        }));
       }
-      progress(3, `Fetching DMs (incl. group DMs)... ${++dmsDone}/${dmsTotal}`);
-    }, DM_CONCURRENCY);
+      return threads;
+    })();
 
-    // Batch-resolve voice transcripts in parallel (decoupled from DM fetching)
-    if (pendingTranscripts.length > 0) {
-      progress(3, `Fetching ${pendingTranscripts.length} voice transcript(s)...`);
-      await Promise.all(pendingTranscripts.map(files => ensureTranscripts(files)));
-    }
+    const dmsPromise = (async () => {
+      const unreadIms = (counts.ims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'im' }));
+      const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'mpim' }));
+      const unreadDirects = [...unreadIms, ...unreadMpims];
+      const dms = [];
+      let dmsDone = 0;
+      const dmsTotal = unreadDirects.length;
+      const dmFailures = [];
+      progress(3, dmsTotal > 0 ? `Fetching DMs (incl. group DMs)... 0/${dmsTotal}` : 'Fetching DMs...');
 
-    const dmDoneDetail = `Done. ${dms.length} direct conversations${unreadMpims.length > 0 ? ' (incl. group DMs)' : ''}.`;
-    progress(3, dmFailures.length > 0
-      ? `${dmDoneDetail} ${dmFailures.length} failed — see console.`
-      : dmDoneDetail);
-
-    // 4. Get unread channel messages — most recent channels first
-    progress(4, 'Fetching channel messages...');
-    const unreadChannels = (counts.channels || [])
-      .filter((c) => c.has_unreads && !muted.has(c.id))
-      .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
-
-    const channelPosts = [];
-    let channelsDone = 0;
-    const channelsTotal = unreadChannels.length;
-    progress(4, `Fetching channels... 0/${channelsTotal}`);
-    await Promise.all(
-      unreadChannels.map(async (ch) => {
+      const pendingTranscripts = [];
+      await pMap(unreadDirects, async (conv) => {
+        const kindLabel = conv.kind === 'mpim' ? 'group DM' : 'DM';
+        let historyParams = null;
         try {
-          const hist = await slackApi('conversations.history', {
-            channel: ch.id,
-            oldest: ch.last_read,
-            limit: '50',
-          });
+          const oldestTs = normalizeTimestamp(conv.last_read)
+            || normalizeTimestamp(conv.last_read_ts)
+            || (conv.kind === 'im' ? '0' : null);
+          historyParams = { channel: conv.id };
+          if (oldestTs) historyParams.oldest = oldestTs;
+          const hist = await slackApi('conversations.history', historyParams);
           const msgs = (hist.messages || [])
-            .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))
             .filter((m) => m.user !== selfId)
             .map((m) => ({
               user: m.user,
               text: extractText(m),
               fwd: extractFwd(m),
               ts: m.ts,
-              thread_ts: m.thread_ts || null,
               subtype: m.subtype,
               bot_id: m.bot_id,
-              reply_count: m.reply_count || 0,
-              reply_users: m.reply_users || [],
               files: extractFiles(m),
-              reaction_count: (m.reactions || []).reduce((s, r) => s + r.count, 0),
             }));
-          if (msgs.length > 0) {
-            const channelPost = {
-              channel_id: ch.id,
-              mention_count: ch.mention_count,
-              messages: msgs,
-              sort_ts: msgs[0]?.ts || '0',
-            };
-            if (msgs.length >= 4) {
-              try {
-                const threadRoots = msgs.filter((m) => m.reply_count > 0).slice(0, 5);
-                const deepThreads = await Promise.all(
-                  threadRoots.map(async (m) => {
-                    try {
-                      const r = await slackApi('conversations.replies', { channel: ch.id, ts: m.ts, limit: '30' });
-                      return {
-                        rootTs: m.ts,
-                        messages: (r.messages || []).slice(1).map((reply) => ({
-                          user: reply.user,
-                          text: extractText(reply),
-                          fwd: extractFwd(reply),
-                          ts: reply.ts,
-                          files: extractFiles(reply),
-                        })),
-                      };
-                    } catch { return null; }
-                  })
-                );
-                channelPost.fullMessages = { history: msgs, threads: deepThreads.filter(Boolean) };
-              } catch {
-                channelPost._deepFetchFailed = true;
-              }
+          for (const msg of msgs) {
+            if (msg.files && msg.files.some(f => f.voice && !f.transcript && f.fileId)) {
+              pendingTranscripts.push(msg.files);
             }
-            tagReactionSpikes(channelPost);
-            channelPosts.push(channelPost);
           }
-        } catch {
-          // skip failed channels
-        }
-        progress(4, `Fetching channels... ${++channelsDone}/${channelsTotal}`);
-      })
-    );
-    channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
-
-    progress(4, `Done. ${channelPosts.length} channels with new posts.`);
-
-    // 4b. Activity feed — catch @mentions and threads missed by client.counts / subscriptions.thread.getView
-    progress(4, 'Checking activity feed for missed mentions...');
-    const { extraThreads, extraChannelPosts, activityMentionCount } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
-    if (extraThreads.length > 0) {
-      threads.push(...extraThreads);
-      threads.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
-    }
-    if (extraChannelPosts.length > 0) {
-      channelPosts.push(...extraChannelPosts);
-      channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
-    }
-    if (extraThreads.length > 0 || extraChannelPosts.length > 0) {
-      progress(4, `Activity feed: ${extraThreads.length} threads + ${extraChannelPosts.length} channels added (${activityMentionCount} total activity items).`);
-    }
-
-    // 5. Collect all user IDs and channel mentions, then resolve names
-    const allUserIds = [];
-    const mentionedChannelIds = [];
-    function collectMentions(text) {
-      if (!text) return;
-      for (const m of text.matchAll(/<@(U[A-Z0-9]+)>/g)) allUserIds.push(m[1]);
-      for (const m of text.matchAll(/<#(C[A-Z0-9]+)(?:\|[^>]*)?>/g)) mentionedChannelIds.push(m[1]);
-    }
-    threads.forEach((t) => {
-      if (t.root_user) allUserIds.push(t.root_user);
-      collectMentions(t.root_text);
-      t.unread_replies.forEach((r) => {
-        if (r.user) allUserIds.push(r.user);
-        collectMentions(r.text);
-      });
-    });
-    dms.forEach((dm) => {
-      dm.messages.forEach((m) => {
-        if (m.user) allUserIds.push(m.user);
-        collectMentions(m.text);
-      });
-    });
-    channelPosts.forEach((cp) => {
-      cp.messages.forEach((m) => {
-        if (m.user) allUserIds.push(m.user);
-        collectMentions(m.text);
-        (m.reply_users || []).forEach((uid) => allUserIds.push(uid));
-      });
-      if (cp.fullMessages) {
-        cp.fullMessages.history.forEach((m) => {
-          if (m.user) allUserIds.push(m.user);
-          collectMentions(m.text);
-        });
-        cp.fullMessages.threads.forEach((t) => {
-          t.messages.forEach((r) => { if (r.user) allUserIds.push(r.user); });
-        });
-      }
-    });
-    const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
-    const missingProfiles = uniqueUserIds.filter((uid) => !cachedUsers[uid] || !cachedUserMentionHints[uid]).length;
-    progress(5, `Resolving ${missingProfiles} user profiles (${uniqueUserIds.length - missingProfiles} cached)...`);
-    const { users, mentionHints, fullNames } = await resolveUsers(
-      allUserIds,
-      cachedUsers,
-      cachedUserMentionHints,
-      cachedFullNames || {},
-      (done, total) => {
-        if (total > 0) progress(5, `Resolving users... ${done}/${total}`);
-      }
-    );
-    progress(5, `Done. ${Object.keys(users).length} users resolved.`);
-
-    // 6. Get channel names for threads + channel posts
-    const allChannelIds = [
-      ...threads.map((t) => t.channel_id),
-      ...channelPosts.map((cp) => cp.channel_id),
-      ...mentionedChannelIds,
-    ];
-    const channelIds = [...new Set(allChannelIds.filter(Boolean))];
-    const channels = { ...cachedChannels };
-    const channelMeta = { ...cachedChannelMeta };
-    const uncachedChannelIds = channelIds.filter((cid) => !channels[cid]);
-    let channelNamesDone = 0;
-    const channelNamesTotal = uncachedChannelIds.length;
-    progress(6, channelNamesTotal > 0
-      ? `Resolving channel names... 0/${channelNamesTotal} (${channelIds.length - channelNamesTotal} cached)`
-      : `Resolving channel names (${channelIds.length} cached)...`);
-    await Promise.all(
-      uncachedChannelIds.map(async (cid) => {
-        try {
-          const info = await slackApi('conversations.info', { channel: cid });
-          channels[cid] = info.channel.name;
-          channelMeta[cid] = { isPrivate: info.channel.is_private || info.channel.is_im || info.channel.is_mpim || false };
-        } catch {
-          channels[cid] = cid;
-          channelMeta[cid] = { isPrivate: false };
-        }
-        progress(6, `Resolving channel names... ${++channelNamesDone}/${channelNamesTotal}`);
-      })
-    );
-
-    // Build last_read map for VIP message filtering
-    const lastRead = {};
-    for (const ch of (counts.channels || [])) {
-      if (ch.last_read) lastRead[ch.id] = ch.last_read;
-    }
-    for (const im of (counts.ims || [])) {
-      if (im.last_read) lastRead[im.id] = im.last_read;
-    }
-    for (const mp of (counts.mpims || [])) {
-      if (mp.last_read) lastRead[mp.id] = mp.last_read;
-    }
-
-    // 7. Custom emoji — already kicked off at top, just await
-    const emoji = await emojiPromise;
-    const needsEmojiRefresh = !cachedEmoji;
-
-    // 8. Sidebar sections — already kicked off at top, await if needed
-    if (sidebarPromise) {
-      sidebarSections = await sidebarPromise;
-      try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
-    }
-
-    progress(9, 'Preparing results...');
-    // Build section → channel names mapping for options page tooltips
-    let sidebarSectionChannels = {};
-    for (const [section, ids] of Object.entries(sidebarSectionChannelIds)) {
-      sidebarSectionChannels[section] = [...new Set(ids.map(id => channels[id] || id))]
-          .sort((a, b) => {
-            const aIsId = /^[A-Z][A-Z0-9]{8,}$/.test(a);
-            const bIsId = /^[A-Z][A-Z0-9]{8,}$/.test(b);
-            if (aIsId !== bIsId) return aIsId ? 1 : -1;
-            return a.localeCompare(b);
-          });
-    }
-    const result = {
-      selfId,
-      selfHandle,
-      vipUserIds,
-      badges: counts.channel_badges,
-      threadUnreads: counts.threads,
-      threads,
-      dms,
-      channelPosts,
-      users,
-      fullNames,
-      channels,
-      channelMeta,
-      lastRead,
-      emoji,
-      emojiFromCache: cachedEmoji !== null,
-      userMentionHints: mentionHints,
-      sidebarSections,
-      sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
-      sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
-      sidebarSectionChannels,
-      _deferredRefresh: needsSidebarRefresh || (cachedEmoji && !needsEmojiRefresh),
-    };
-    return result;
-  }
-
-  // Background refresh for emoji + sidebar after initial results are shown
-  async function refreshDeferredData() {
-    const updates = {};
-    try {
-      const emoji = await fetchEmojiList().catch(() => null);
-      if (emoji) updates.emoji = emoji;
-    } catch {}
-    try {
-      const sidebar = await fetchSidebarSections().catch(() => null);
-      if (sidebar) {
-        updates.sidebarSections = sidebar;
-        updates.sidebarSectionNames = JSON.parse(localStorage.getItem('fslackSectionNames') || '[]');
-        updates.sidebarSectionNameMap = JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}');
-        // Note: sidebarSectionChannels not updated here since we don't have resolved channel names
-        // It will be rebuilt on next full fetch
-      }
-    } catch {}
-    if (Object.keys(updates).length > 0) {
-      window.postMessage({ type: `${FSLACK}:deferredUpdate`, data: updates }, '*');
-    }
-  }
-
-  async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}) {
-    const { emojiPromise, sidebarPromise, ...sidebar } = kickoffEmojiAndSidebar(cachedEmoji);
-    let { sidebarSections, sidebarSectionChannelIds } = sidebar;
-
-    // Fast mode: only counts + threads + DMs (no channel history)
-    const now = Date.now();
-
-    // #2: Reuse cached counts if fresh
-    progress(1, 'Getting counts + user info...');
-    const countsPromise = (_countsCache && now - _countsCache.ts < FAST_CACHE_TTL)
-      ? (console.log(`[${FSLACK}] Reusing cached counts (${Math.round((now - _countsCache.ts) / 1000)}s old)`), Promise.resolve(_countsCache.data))
-      : slackApi('client.counts').then((d) => { _countsCache = { data: d, ts: Date.now() }; return d; });
-
-    const [counts, { selfId, selfHandle, muted, vipUserIds }] = await Promise.all([
-      countsPromise,
-      getSelfIdAndMuted(),
-    ]);
-    _selfId = selfId;
-    progress(1, `Done. self=${selfId}`);
-
-    // 2. Threads (#3: reuse cached threadView if fresh)
-    progress(2, 'Fetching threads...');
-    const threadView = (_threadViewCache && Date.now() - _threadViewCache.ts < FAST_CACHE_TTL)
-      ? (console.log(`[${FSLACK}] Reusing cached threadView (${Math.round((Date.now() - _threadViewCache.ts) / 1000)}s old)`), _threadViewCache.data)
-      : await slackApi('subscriptions.thread.getView').then((d) => { _threadViewCache = { data: d, ts: Date.now() }; return d; });
-    const threads = (threadView.threads || [])
-      .map((t) => {
-        const unread = (t.unread_replies || []).map((r) => ({
-          user: r.user,
-          text: extractText(r),
-          fwd: extractFwd(r),
-          ts: r.ts,
-          bot_id: r.bot_id,
-          subtype: r.subtype,
-          files: extractFiles(r),
-        }));
-        const othersUnread = unread.filter((r) => r.user !== selfId);
-        if (othersUnread.length === 0) return null;
-        const lastUnread = othersUnread[othersUnread.length - 1];
-        return {
-          channel_id: t.root_msg?.channel,
-          ts: t.root_msg?.ts,
-          root_text: extractText(t.root_msg || {}),
-          root_fwd: extractFwd(t.root_msg || {}),
-          root_files: extractFiles(t.root_msg || {}),
-          root_user: t.root_msg?.user,
-          reply_count: t.root_msg?.reply_count || 0,
-          reply_users: t.root_msg?.reply_users || [],
-          unread_replies: othersUnread,
-          sort_ts: lastUnread?.ts || t.root_msg?.ts || '0',
-        };
-      })
-      .filter(Boolean)
-      .sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
-    progress(2, `Done. ${threads.length} threads.`);
-
-    // 2b. Thread context for threads I replied in
-    const myRepliedThreads = threads.filter((t) => (t.reply_users || []).includes(selfId));
-    if (myRepliedThreads.length > 0) {
-      progress(2, `Fetching context for ${myRepliedThreads.length} threads I replied in...`);
-      await Promise.all(myRepliedThreads.map(async (t) => {
-        try {
-          const r = await slackApi('conversations.replies', { channel: t.channel_id, ts: t.ts, limit: '12' });
-          const allReplies = (r.messages || []).slice(1).slice(-10);
-          if (allReplies.length > 0) {
-            const firstUnreadTs = t.unread_replies[0]?.ts;
-            t.full_replies = allReplies.map((m) => ({
-              user: m.user,
-              text: extractText(m),
-              ts: m.ts,
-              is_unread: firstUnreadTs ? parseFloat(m.ts) >= parseFloat(firstUnreadTs) : false,
-            }));
-          }
-        } catch { /* non-critical */ }
-      }));
-    }
-
-    // 3. DMs
-    const unreadIms = (counts.ims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'im' }));
-    const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'mpim' }));
-    const unreadDirects = [...unreadIms, ...unreadMpims];
-    const dms = [];
-    let dmsDone = 0;
-    const dmsTotal = unreadDirects.length;
-    progress(3, dmsTotal > 0 ? `Fetching DMs... 0/${dmsTotal}` : 'Fetching DMs...');
-    function normalizeTimestamp(ts) {
-      if (!ts) return null;
-      if (typeof ts === 'number') return ts > 0 ? ts.toString() : null;
-      if (typeof ts === 'string' && /^\d+(?:\.\d+)?$/.test(ts)) return parseFloat(ts) > 0 ? ts : null;
-      return null;
-    }
-
-    const pendingTranscripts = [];
-    await pMap(unreadDirects, async (conv) => {
-      try {
-        const oldestTs = normalizeTimestamp(conv.last_read) || normalizeTimestamp(conv.last_read_ts) || (conv.kind === 'im' ? '0' : null);
-        const historyParams = { channel: conv.id };
-        if (oldestTs) historyParams.oldest = oldestTs;
-        const hist = await slackApi('conversations.history', historyParams);
-        const msgs = (hist.messages || [])
-          .filter((m) => m.user !== selfId)
-          .map((m) => ({
-            user: m.user,
-            text: extractText(m),
-            fwd: extractFwd(m),
-            ts: m.ts,
-            subtype: m.subtype,
-            bot_id: m.bot_id,
-            files: extractFiles(m),
-          }));
-        // Collect voice messages needing transcripts (resolved in batch after all DMs)
-        for (const msg of msgs) {
-          if (msg.files && msg.files.some(f => f.voice && !f.transcript && f.fileId)) {
-            pendingTranscripts.push(msg.files);
-          }
-        }
-        // #4: Skip DM context fetch if last_read hasn't changed (reuse cached context)
-        let recentContext = [];
-        if (oldestTs && oldestTs !== '0') {
-          const dmCtx = _dmContextCache[conv.id];
-          if (dmCtx && dmCtx.lastRead === oldestTs) {
-            recentContext = dmCtx.context;
-          } else {
+          let recentContext = [];
+          if (oldestTs && oldestTs !== '0') {
             try {
               const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
               recentContext = (ctxHist.messages || [])
                 .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
                 .reverse();
-              _dmContextCache[conv.id] = { lastRead: oldestTs, context: recentContext };
             } catch { /* non-critical */ }
           }
-        }
-        if (msgs.length > 0) {
-          const dmPayload = { channel_id: conv.id, messages: msgs, recentContext };
-          if (conv.kind === 'mpim') {
-            dmPayload.isGroup = true;
-            let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
-            if (memberIds.length === 0) {
-              try {
-                const info = await slackApi('conversations.info', { channel: conv.id });
-                memberIds = (info.channel?.members || []).filter((uid) => uid && uid !== selfId);
-              } catch {}
+          if (msgs.length > 0) {
+            const dmPayload = { channel_id: conv.id, messages: msgs, recentContext };
+            if (conv.kind === 'mpim') {
+              dmPayload.isGroup = true;
+              let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
+              if (memberIds.length === 0) {
+                try {
+                  const info = await slackApi('conversations.info', { channel: conv.id });
+                  memberIds = (info.channel?.members || []).filter((uid) => uid && uid !== selfId);
+                } catch {}
+              }
+              if (memberIds.length > 0) dmPayload.members = memberIds;
             }
-            if (memberIds.length > 0) dmPayload.members = memberIds;
+            dms.push(dmPayload);
           }
-          dms.push(dmPayload);
+        } catch (err) {
+          console.error(`[${FSLACK}] Failed to fetch ${kindLabel} ${conv.id}`, err, { channel: conv.id, kind: conv.kind, historyParams, rawConversation: conv });
+          dmFailures.push({ id: conv.id, kind: conv.kind, error: err?.message || String(err) });
+          progress(3, `Failed to fetch ${kindLabel} ${conv.id}: ${err?.message || 'unknown error'}`);
         }
-      } catch {}
-      progress(3, `Fetching DMs... ${++dmsDone}/${dmsTotal}`);
-    }, DM_CONCURRENCY);
+        progress(3, `Fetching DMs (incl. group DMs)... ${++dmsDone}/${dmsTotal}`);
+      }, DM_CONCURRENCY);
 
-    // Batch-resolve voice transcripts in parallel (decoupled from DM fetching)
-    if (pendingTranscripts.length > 0) {
-      progress(3, `Fetching ${pendingTranscripts.length} voice transcript(s)...`);
-      await Promise.all(pendingTranscripts.map(files => ensureTranscripts(files)));
-    }
-    progress(3, `Done. ${dms.length} DMs.`);
+      if (pendingTranscripts.length > 0) {
+        progress(3, `Fetching ${pendingTranscripts.length} voice transcript(s)...`);
+        await Promise.all(pendingTranscripts.map(files => ensureTranscripts(files)));
+      }
 
-    // 4. Fetch channel history for channels with @mentions (critical messages only)
-    const mentionChannels = (counts.channels || [])
-      .filter((c) => c.mention_count > 0 && !muted.has(c.id))
-      .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
-    const channelPosts = [];
-    if (mentionChannels.length > 0) {
-      progress(4, `Fetching ${mentionChannels.length} channels with mentions...`);
+      const dmDoneDetail = `Done. ${dms.length} direct conversations${unreadMpims.length > 0 ? ' (incl. group DMs)' : ''}.`;
+      progress(3, dmFailures.length > 0 ? `${dmDoneDetail} ${dmFailures.length} failed — see console.` : dmDoneDetail);
+      return dms;
+    })();
+
+    const channelsPromise = (async () => {
+      progress(4, 'Fetching channel messages...');
+      const unreadChannels = (counts.channels || [])
+        .filter((c) => c.has_unreads && !muted.has(c.id))
+        .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
+
+      const channelPosts = [];
+      let channelsDone = 0;
+      const channelsTotal = unreadChannels.length;
+      progress(4, `Fetching channels... 0/${channelsTotal}`);
       await Promise.all(
-        mentionChannels.map(async (ch) => {
+        unreadChannels.map(async (ch) => {
           try {
             const hist = await slackApi('conversations.history', {
               channel: ch.id,
@@ -1278,17 +936,139 @@
                 messages: msgs,
                 sort_ts: msgs[0]?.ts || '0',
               };
+              if (msgs.length >= 4) {
+                try {
+                  const threadRoots = msgs.filter((m) => m.reply_count > 0).slice(0, 5);
+                  const deepThreads = await Promise.all(
+                    threadRoots.map(async (m) => {
+                      try {
+                        const r = await slackApi('conversations.replies', { channel: ch.id, ts: m.ts, limit: '30' });
+                        return {
+                          rootTs: m.ts,
+                          messages: (r.messages || []).slice(1).map((reply) => ({
+                            user: reply.user,
+                            text: extractText(reply),
+                            fwd: extractFwd(reply),
+                            ts: reply.ts,
+                            files: extractFiles(reply),
+                          })),
+                        };
+                      } catch { return null; }
+                    })
+                  );
+                  channelPost.fullMessages = { history: msgs, threads: deepThreads.filter(Boolean) };
+                } catch {
+                  channelPost._deepFetchFailed = true;
+                }
+              }
               tagReactionSpikes(channelPost);
               channelPosts.push(channelPost);
             }
-          } catch { /* skip failed channels */ }
+          } catch {
+            // skip failed channels
+          }
+          progress(4, `Fetching channels... ${++channelsDone}/${channelsTotal}`);
         })
       );
       channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
-      progress(4, `Done. ${channelPosts.length} channels with mentions fetched.`);
+      progress(4, `Done. ${channelPosts.length} channels with new posts.`);
+      return channelPosts;
+    })();
+
+    // ── Phase 1: send threads + DMs as soon as they're ready ──
+    const [threads, dms] = await Promise.all([threadsPromise, dmsPromise]);
+
+    if (sendPhase1) {
+      // Resolve users/channels for Phase 1 (threads + DMs only)
+      const p1Mentions = collectMentionIds(threads, { threads: true });
+      const p1DmMentions = collectMentionIds(dms, { dms: true });
+      const p1UserIds = [...p1Mentions.userIds, ...p1DmMentions.userIds];
+      const p1ChannelRefIds = [...threads.map(t => t.channel_id), ...p1Mentions.channelIds, ...p1DmMentions.channelIds];
+
+      progress(5, 'Resolving users for threads + DMs...');
+      const { users: p1Users, mentionHints: p1MentionHints, fullNames: p1FullNames } = await resolveUsers(
+        p1UserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
+        (done, total) => { if (total > 0) progress(5, `Resolving users... ${done}/${total}`); }
+      );
+      progress(6, 'Resolving channel names...');
+      const { channels: p1Channels, channelMeta: p1ChannelMeta } = await resolveChannelNames(
+        p1ChannelRefIds, cachedChannels, cachedChannelMeta,
+        (done, total, cached) => { if (total > 0) progress(6, `Resolving channel names... ${done}/${total} (${cached} cached)`); }
+      );
+
+      const emoji = await emojiPromise;
+      const needsEmojiRefresh = !cachedEmoji;
+      if (sidebarPromise) {
+        sidebarSections = await sidebarPromise;
+        try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
+      }
+
+      const lastRead = buildLastReadMap(counts);
+      const sidebarSectionChannels = buildSidebarChannelMap(sidebarSectionChannelIds, p1Channels);
+
+      progress(9, 'Sending threads + DMs...');
+      sendPhase1({
+        selfId, selfHandle, vipUserIds,
+        badges: counts.channel_badges,
+        threadUnreads: counts.threads,
+        threads, dms,
+        channelPosts: [],
+        users: p1Users, fullNames: p1FullNames,
+        channels: p1Channels, channelMeta: p1ChannelMeta,
+        lastRead, emoji,
+        emojiFromCache: cachedEmoji !== null,
+        userMentionHints: p1MentionHints,
+        sidebarSections,
+        sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
+        sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
+        sidebarSectionChannels,
+        _deferredRefresh: needsSidebarRefresh || (cachedEmoji && !needsEmojiRefresh),
+        _channelsPending: true,
+      });
+
+      // ── Phase 2: channels + activity feed ──
+      const channelPosts = await channelsPromise;
+
+      // Activity feed (needs both threads + channelPosts for dedup)
+      progress(4, 'Checking activity feed for missed mentions...');
+      const { extraThreads, extraChannelPosts, activityMentionCount } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
+      if (extraThreads.length > 0) progress(4, `Activity feed: ${extraThreads.length} extra threads found.`);
+      if (extraChannelPosts.length > 0) {
+        channelPosts.push(...extraChannelPosts);
+        channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+      }
+
+      // Resolve NEW users/channels from channel data
+      const p2Mentions = collectMentionIds(channelPosts, { channels: true });
+      const p2ExtraThreadMentions = extraThreads.length > 0 ? collectMentionIds(extraThreads, { threads: true }) : { userIds: [], channelIds: [] };
+      const p2UserIds = [...p2Mentions.userIds, ...p2ExtraThreadMentions.userIds];
+      const p2ChannelRefIds = [...channelPosts.map(cp => cp.channel_id), ...p2Mentions.channelIds, ...p2ExtraThreadMentions.channelIds];
+
+      progress(5, 'Resolving users for channels...');
+      const { users: p2Users, mentionHints: p2MentionHints, fullNames: p2FullNames } = await resolveUsers(
+        p2UserIds, p1Users, { ...cachedUserMentionHints, ...p1MentionHints }, { ...cachedFullNames, ...p1FullNames },
+      );
+      progress(6, 'Resolving channel names...');
+      const { channels: p2Channels, channelMeta: p2ChannelMeta } = await resolveChannelNames(
+        p2ChannelRefIds, p1Channels, p1ChannelMeta,
+      );
+
+      // Return Phase 2 data (sent by message handler)
+      return {
+        channelPosts,
+        extraThreads,
+        users: p2Users,
+        fullNames: p2FullNames,
+        channels: p2Channels,
+        channelMeta: p2ChannelMeta,
+        userMentionHints: p2MentionHints,
+        lastRead,
+      };
     }
 
-    // 4b. Activity feed — catch @mentions and threads missed by client.counts / subscriptions.thread.getView
+    // ── Fallback: no Phase 1 callback — return everything at once (legacy) ──
+    const channelPosts = await channelsPromise;
+
     progress(4, 'Checking activity feed for missed mentions...');
     const { extraThreads, extraChannelPosts, activityMentionCount } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
     if (extraThreads.length > 0) {
@@ -1303,105 +1083,367 @@
       progress(4, `Activity feed: ${extraThreads.length} threads + ${extraChannelPosts.length} channels added (${activityMentionCount} total activity items).`);
     }
 
-    // 5. Resolve users for threads + DMs + mention channels
-    const allUserIds = [];
-    const mentionedChannelIds = [];
-    function collectMentions(text) {
-      if (!text) return;
-      for (const m of text.matchAll(/<@(U[A-Z0-9]+)>/g)) allUserIds.push(m[1]);
-      for (const m of text.matchAll(/<#(C[A-Z0-9]+)(?:\|[^>]*)?>/g)) mentionedChannelIds.push(m[1]);
-    }
-    threads.forEach((t) => {
-      if (t.root_user) allUserIds.push(t.root_user);
-      collectMentions(t.root_text);
-      t.unread_replies.forEach((r) => {
-        if (r.user) allUserIds.push(r.user);
-        collectMentions(r.text);
-      });
-    });
-    dms.forEach((dm) => {
-      dm.messages.forEach((m) => {
-        if (m.user) allUserIds.push(m.user);
-        collectMentions(m.text);
-      });
-    });
-    channelPosts.forEach((cp) => {
-      cp.messages.forEach((m) => {
-        if (m.user) allUserIds.push(m.user);
-        collectMentions(m.text);
-        (m.reply_users || []).forEach((uid) => allUserIds.push(uid));
-      });
-    });
-    const uniqueUserIds = [...new Set(allUserIds)].filter(Boolean);
-    const missingProfiles = uniqueUserIds.filter((uid) => !cachedUsers[uid] || !cachedUserMentionHints[uid]).length;
-    progress(5, `Resolving ${missingProfiles} user profiles (${uniqueUserIds.length - missingProfiles} cached)...`);
-    const { users, mentionHints, fullNames } = await resolveUsers(allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {});
-    progress(5, `Done. ${Object.keys(users).length} users resolved.`);
+    const allMentions = collectMentionIds(threads, { threads: true });
+    const dmMentions = collectMentionIds(dms, { dms: true });
+    const chMentions = collectMentionIds(channelPosts, { channels: true });
+    const allUserIds = [...allMentions.userIds, ...dmMentions.userIds, ...chMentions.userIds];
+    const mentionedChannelIds = [...allMentions.channelIds, ...dmMentions.channelIds, ...chMentions.channelIds];
 
-    // 6. Channel names for threads + mention channels
-    const allChannelIds = [...threads.map((t) => t.channel_id), ...channelPosts.map((cp) => cp.channel_id), ...mentionedChannelIds];
-    const channelIds = [...new Set(allChannelIds.filter(Boolean))];
-    const channels = { ...cachedChannels };
-    const channelMeta = { ...cachedChannelMeta };
-    const uncachedChannelIds = channelIds.filter((cid) => !channels[cid]);
-    progress(6, `Resolving ${uncachedChannelIds.length} channel names...`);
-    await Promise.all(
-      uncachedChannelIds.map(async (cid) => {
-        try {
-          const info = await slackApi('conversations.info', { channel: cid });
-          channels[cid] = info.channel.name;
-          channelMeta[cid] = { isPrivate: info.channel.is_private || info.channel.is_im || info.channel.is_mpim || false };
-        } catch {
-          channels[cid] = cid;
-          channelMeta[cid] = { isPrivate: false };
-        }
-      })
+    progress(5, 'Resolving user profiles...');
+    const { users, mentionHints, fullNames } = await resolveUsers(
+      allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
+      (done, total) => { if (total > 0) progress(5, `Resolving users... ${done}/${total}`); }
     );
 
-    // last_read map
-    const lastRead = {};
-    for (const ch of (counts.channels || [])) { if (ch.last_read) lastRead[ch.id] = ch.last_read; }
-    for (const im of (counts.ims || [])) { if (im.last_read) lastRead[im.id] = im.last_read; }
-    for (const mp of (counts.mpims || [])) { if (mp.last_read) lastRead[mp.id] = mp.last_read; }
+    const allChannelIds = [...threads.map(t => t.channel_id), ...channelPosts.map(cp => cp.channel_id), ...mentionedChannelIds];
+    progress(6, 'Resolving channel names...');
+    const { channels, channelMeta } = await resolveChannelNames(
+      allChannelIds, cachedChannels, cachedChannelMeta,
+      (done, total, cached) => { if (total > 0) progress(6, `Resolving channel names... ${done}/${total} (${cached} cached)`); }
+    );
 
-    // 7. Custom emoji — already kicked off at top, just await
+    const lastRead = buildLastReadMap(counts);
     const emoji = await emojiPromise;
-
-    // 8. Sidebar sections — already kicked off at top, await if needed
+    const needsEmojiRefresh = !cachedEmoji;
     if (sidebarPromise) {
       sidebarSections = await sidebarPromise;
       try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
     progress(9, 'Preparing results...');
-    let sidebarSectionChannels = {};
-    for (const [section, ids] of Object.entries(sidebarSectionChannelIds)) {
-      sidebarSectionChannels[section] = [...new Set(ids.map(id => channels[id] || id))]
-          .sort((a, b) => {
-            const aIsId = /^[A-Z][A-Z0-9]{8,}$/.test(a);
-            const bIsId = /^[A-Z][A-Z0-9]{8,}$/.test(b);
-            if (aIsId !== bIsId) return aIsId ? 1 : -1;
-            return a.localeCompare(b);
-          });
-    }
+    const sidebarSectionChannels = buildSidebarChannelMap(sidebarSectionChannelIds, channels);
     return {
-      selfId,
-      selfHandle,
-      vipUserIds,
+      selfId, selfHandle, vipUserIds,
       badges: counts.channel_badges,
       threadUnreads: counts.threads,
-      threads,
-      dms,
-      channelPosts,
-      users,
-      fullNames,
-      channels,
-      channelMeta,
-      lastRead,
-      emoji,
-      emojiFromCache: cachedEmoji !== null,
+      threads, dms, channelPosts,
+      users, fullNames, channels, channelMeta, lastRead,
+      emoji, emojiFromCache: cachedEmoji !== null,
       userMentionHints: mentionHints,
       sidebarSections,
+      sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
+      sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
+      sidebarSectionChannels,
+      _deferredRefresh: needsSidebarRefresh || (cachedEmoji && !needsEmojiRefresh),
+    };
+  }
+
+  // Background refresh for emoji + sidebar after initial results are shown
+  async function refreshDeferredData() {
+    const updates = {};
+    try {
+      const emoji = await fetchEmojiList().catch(() => null);
+      if (emoji) updates.emoji = emoji;
+    } catch {}
+    try {
+      const sidebar = await fetchSidebarSections().catch(() => null);
+      if (sidebar) {
+        updates.sidebarSections = sidebar;
+        updates.sidebarSectionNames = JSON.parse(localStorage.getItem('fslackSectionNames') || '[]');
+        updates.sidebarSectionNameMap = JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}');
+        // Note: sidebarSectionChannels not updated here since we don't have resolved channel names
+        // It will be rebuilt on next full fetch
+      }
+    } catch {}
+    if (Object.keys(updates).length > 0) {
+      window.postMessage({ type: `${FSLACK}:deferredUpdate`, data: updates }, '*');
+    }
+  }
+
+  async function fetchFast({ cachedUsers = {}, cachedUserMentionHints = {}, cachedFullNames = {}, cachedChannels = {}, cachedChannelMeta = {}, cachedEmoji = null } = {}, sendPhase1 = null) {
+    const { emojiPromise, sidebarPromise, ...sidebar } = kickoffEmojiAndSidebar(cachedEmoji);
+    let { sidebarSections, sidebarSectionChannelIds } = sidebar;
+
+    const now = Date.now();
+
+    // 1. Counts + self ID
+    progress(1, 'Getting counts + user info...');
+    const countsPromise = (_countsCache && now - _countsCache.ts < FAST_CACHE_TTL)
+      ? (console.log(`[${FSLACK}] Reusing cached counts (${Math.round((now - _countsCache.ts) / 1000)}s old)`), Promise.resolve(_countsCache.data))
+      : slackApi('client.counts').then((d) => { _countsCache = { data: d, ts: Date.now() }; return d; });
+
+    const [counts, { selfId, selfHandle, muted, vipUserIds }] = await Promise.all([
+      countsPromise,
+      getSelfIdAndMuted(),
+    ]);
+    _selfId = selfId;
+    progress(1, `Done. self=${selfId}`);
+
+    // 2. Start threads, DMs, and mention channels ALL in parallel
+    const threadsPromise = (async () => {
+      progress(2, 'Fetching threads...');
+      const threadView = (_threadViewCache && Date.now() - _threadViewCache.ts < FAST_CACHE_TTL)
+        ? (console.log(`[${FSLACK}] Reusing cached threadView (${Math.round((Date.now() - _threadViewCache.ts) / 1000)}s old)`), _threadViewCache.data)
+        : await slackApi('subscriptions.thread.getView').then((d) => { _threadViewCache = { data: d, ts: Date.now() }; return d; });
+      const threads = (threadView.threads || [])
+        .map((t) => {
+          const unread = (t.unread_replies || []).map((r) => ({
+            user: r.user, text: extractText(r), fwd: extractFwd(r), ts: r.ts,
+            bot_id: r.bot_id, subtype: r.subtype, files: extractFiles(r),
+          }));
+          const othersUnread = unread.filter((r) => r.user !== selfId);
+          if (othersUnread.length === 0) return null;
+          const lastUnread = othersUnread[othersUnread.length - 1];
+          return {
+            channel_id: t.root_msg?.channel, ts: t.root_msg?.ts,
+            root_text: extractText(t.root_msg || {}), root_fwd: extractFwd(t.root_msg || {}),
+            root_files: extractFiles(t.root_msg || {}), root_user: t.root_msg?.user,
+            reply_count: t.root_msg?.reply_count || 0, reply_users: t.root_msg?.reply_users || [],
+            unread_replies: othersUnread, sort_ts: lastUnread?.ts || t.root_msg?.ts || '0',
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+      progress(2, `Done. ${threads.length} threads.`);
+
+      // 2b. Thread context for threads I replied in
+      const myRepliedThreads = threads.filter((t) => (t.reply_users || []).includes(selfId));
+      if (myRepliedThreads.length > 0) {
+        progress(2, `Fetching context for ${myRepliedThreads.length} threads I replied in...`);
+        await Promise.all(myRepliedThreads.map(async (t) => {
+          try {
+            const r = await slackApi('conversations.replies', { channel: t.channel_id, ts: t.ts, limit: '12' });
+            const allReplies = (r.messages || []).slice(1).slice(-10);
+            if (allReplies.length > 0) {
+              const firstUnreadTs = t.unread_replies[0]?.ts;
+              t.full_replies = allReplies.map((m) => ({
+                user: m.user, text: extractText(m), ts: m.ts,
+                is_unread: firstUnreadTs ? parseFloat(m.ts) >= parseFloat(firstUnreadTs) : false,
+              }));
+            }
+          } catch { /* non-critical */ }
+        }));
+      }
+      return threads;
+    })();
+
+    const dmsPromise = (async () => {
+      const unreadIms = (counts.ims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'im' }));
+      const unreadMpims = (counts.mpims || []).filter((c) => c.has_unreads).map((c) => ({ ...c, kind: 'mpim' }));
+      const unreadDirects = [...unreadIms, ...unreadMpims];
+      const dms = [];
+      let dmsDone = 0;
+      const dmsTotal = unreadDirects.length;
+      progress(3, dmsTotal > 0 ? `Fetching DMs... 0/${dmsTotal}` : 'Fetching DMs...');
+
+      const pendingTranscripts = [];
+      await pMap(unreadDirects, async (conv) => {
+        try {
+          const oldestTs = normalizeTimestamp(conv.last_read) || normalizeTimestamp(conv.last_read_ts) || (conv.kind === 'im' ? '0' : null);
+          const historyParams = { channel: conv.id };
+          if (oldestTs) historyParams.oldest = oldestTs;
+          const hist = await slackApi('conversations.history', historyParams);
+          const msgs = (hist.messages || [])
+            .filter((m) => m.user !== selfId)
+            .map((m) => ({
+              user: m.user, text: extractText(m), fwd: extractFwd(m), ts: m.ts,
+              subtype: m.subtype, bot_id: m.bot_id, files: extractFiles(m),
+            }));
+          for (const msg of msgs) {
+            if (msg.files && msg.files.some(f => f.voice && !f.transcript && f.fileId)) {
+              pendingTranscripts.push(msg.files);
+            }
+          }
+          let recentContext = [];
+          if (oldestTs && oldestTs !== '0') {
+            const dmCtx = _dmContextCache[conv.id];
+            if (dmCtx && dmCtx.lastRead === oldestTs) {
+              recentContext = dmCtx.context;
+            } else {
+              try {
+                const ctxHist = await slackApi('conversations.history', { channel: conv.id, latest: oldestTs, inclusive: true, limit: '5' });
+                recentContext = (ctxHist.messages || [])
+                  .map((m) => ({ user: m.user, text: extractText(m), ts: m.ts }))
+                  .reverse();
+                _dmContextCache[conv.id] = { lastRead: oldestTs, context: recentContext };
+              } catch { /* non-critical */ }
+            }
+          }
+          if (msgs.length > 0) {
+            const dmPayload = { channel_id: conv.id, messages: msgs, recentContext };
+            if (conv.kind === 'mpim') {
+              dmPayload.isGroup = true;
+              let memberIds = (conv.members || []).filter((uid) => uid && uid !== selfId);
+              if (memberIds.length === 0) {
+                try {
+                  const info = await slackApi('conversations.info', { channel: conv.id });
+                  memberIds = (info.channel?.members || []).filter((uid) => uid && uid !== selfId);
+                } catch {}
+              }
+              if (memberIds.length > 0) dmPayload.members = memberIds;
+            }
+            dms.push(dmPayload);
+          }
+        } catch {}
+        progress(3, `Fetching DMs... ${++dmsDone}/${dmsTotal}`);
+      }, DM_CONCURRENCY);
+
+      if (pendingTranscripts.length > 0) {
+        progress(3, `Fetching ${pendingTranscripts.length} voice transcript(s)...`);
+        await Promise.all(pendingTranscripts.map(files => ensureTranscripts(files)));
+      }
+      progress(3, `Done. ${dms.length} DMs.`);
+      return dms;
+    })();
+
+    const channelsPromise = (async () => {
+      const mentionChannels = (counts.channels || [])
+        .filter((c) => c.mention_count > 0 && !muted.has(c.id))
+        .sort((a, b) => parseFloat(b.latest) - parseFloat(a.latest));
+      const channelPosts = [];
+      if (mentionChannels.length > 0) {
+        progress(4, `Fetching ${mentionChannels.length} channels with mentions...`);
+        await Promise.all(
+          mentionChannels.map(async (ch) => {
+            try {
+              const hist = await slackApi('conversations.history', {
+                channel: ch.id, oldest: ch.last_read, limit: '50',
+              });
+              const msgs = (hist.messages || [])
+                .filter((m) => !m.subtype || !NOISE_SUBTYPES.has(m.subtype))
+                .filter((m) => m.user !== selfId)
+                .map((m) => ({
+                  user: m.user, text: extractText(m), fwd: extractFwd(m), ts: m.ts,
+                  thread_ts: m.thread_ts || null, subtype: m.subtype, bot_id: m.bot_id,
+                  reply_count: m.reply_count || 0, reply_users: m.reply_users || [],
+                  files: extractFiles(m),
+                  reaction_count: (m.reactions || []).reduce((s, r) => s + r.count, 0),
+                }));
+              if (msgs.length > 0) {
+                const channelPost = {
+                  channel_id: ch.id, mention_count: ch.mention_count,
+                  messages: msgs, sort_ts: msgs[0]?.ts || '0',
+                };
+                tagReactionSpikes(channelPost);
+                channelPosts.push(channelPost);
+              }
+            } catch { /* skip failed channels */ }
+          })
+        );
+        channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+        progress(4, `Done. ${channelPosts.length} channels with mentions fetched.`);
+      }
+      return channelPosts;
+    })();
+
+    // ── Phase 1: send threads + DMs as soon as they're ready ──
+    const [threads, dms] = await Promise.all([threadsPromise, dmsPromise]);
+
+    if (sendPhase1) {
+      // Resolve users/channels for Phase 1 (threads + DMs only)
+      const p1Mentions = collectMentionIds(threads, { threads: true });
+      const p1DmMentions = collectMentionIds(dms, { dms: true });
+      const p1UserIds = [...p1Mentions.userIds, ...p1DmMentions.userIds];
+      const p1ChannelRefIds = [...threads.map(t => t.channel_id), ...p1Mentions.channelIds, ...p1DmMentions.channelIds];
+
+      progress(5, 'Resolving users for threads + DMs...');
+      const { users: p1Users, mentionHints: p1MentionHints, fullNames: p1FullNames } = await resolveUsers(
+        p1UserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
+      );
+      progress(6, 'Resolving channel names...');
+      const { channels: p1Channels, channelMeta: p1ChannelMeta } = await resolveChannelNames(
+        p1ChannelRefIds, cachedChannels, cachedChannelMeta,
+      );
+
+      const emoji = await emojiPromise;
+      if (sidebarPromise) {
+        sidebarSections = await sidebarPromise;
+        try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
+      }
+
+      const lastRead = buildLastReadMap(counts);
+      const sidebarSectionChannels = buildSidebarChannelMap(sidebarSectionChannelIds, p1Channels);
+
+      progress(9, 'Sending threads + DMs...');
+      sendPhase1({
+        selfId, selfHandle, vipUserIds,
+        badges: counts.channel_badges,
+        threadUnreads: counts.threads,
+        threads, dms,
+        channelPosts: [],
+        users: p1Users, fullNames: p1FullNames,
+        channels: p1Channels, channelMeta: p1ChannelMeta,
+        lastRead, emoji,
+        emojiFromCache: cachedEmoji !== null,
+        userMentionHints: p1MentionHints,
+        sidebarSections,
+        sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
+        sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
+        sidebarSectionChannels,
+        _channelsPending: true,
+      });
+
+      // ── Phase 2: mention channels + activity feed ──
+      const channelPosts = await channelsPromise;
+
+      progress(4, 'Checking activity feed for missed mentions...');
+      const { extraThreads, extraChannelPosts } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
+      if (extraChannelPosts.length > 0) {
+        channelPosts.push(...extraChannelPosts);
+        channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+      }
+
+      // Resolve NEW users/channels from channel data
+      const p2Mentions = collectMentionIds(channelPosts, { channels: true });
+      const p2ExtraThreadMentions = extraThreads.length > 0 ? collectMentionIds(extraThreads, { threads: true }) : { userIds: [], channelIds: [] };
+      const p2UserIds = [...p2Mentions.userIds, ...p2ExtraThreadMentions.userIds];
+      const p2ChannelRefIds = [...channelPosts.map(cp => cp.channel_id), ...p2Mentions.channelIds, ...p2ExtraThreadMentions.channelIds];
+
+      const { users: p2Users, mentionHints: p2MentionHints, fullNames: p2FullNames } = await resolveUsers(
+        p2UserIds, p1Users, { ...cachedUserMentionHints, ...p1MentionHints }, { ...cachedFullNames, ...p1FullNames },
+      );
+      const { channels: p2Channels, channelMeta: p2ChannelMeta } = await resolveChannelNames(
+        p2ChannelRefIds, p1Channels, p1ChannelMeta,
+      );
+
+      return {
+        channelPosts, extraThreads,
+        users: p2Users, fullNames: p2FullNames,
+        channels: p2Channels, channelMeta: p2ChannelMeta,
+        userMentionHints: p2MentionHints, lastRead,
+      };
+    }
+
+    // ── Fallback: no Phase 1 callback — return everything at once (legacy) ──
+    const channelPosts = await channelsPromise;
+
+    progress(4, 'Checking activity feed for missed mentions...');
+    const { extraThreads, extraChannelPosts, activityMentionCount } = await fetchActivityMentions({ selfId, threads, channelPosts, muted });
+    if (extraThreads.length > 0) {
+      threads.push(...extraThreads);
+      threads.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+    if (extraChannelPosts.length > 0) {
+      channelPosts.push(...extraChannelPosts);
+      channelPosts.sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+
+    const allMentions = collectMentionIds(threads, { threads: true });
+    const dmMentions = collectMentionIds(dms, { dms: true });
+    const chMentions = collectMentionIds(channelPosts, { channels: true });
+    const allUserIds = [...allMentions.userIds, ...dmMentions.userIds, ...chMentions.userIds];
+    const mentionedChannelIds = [...allMentions.channelIds, ...dmMentions.channelIds, ...chMentions.channelIds];
+
+    const { users, mentionHints, fullNames } = await resolveUsers(allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {});
+    const allChannelIds = [...threads.map(t => t.channel_id), ...channelPosts.map(cp => cp.channel_id), ...mentionedChannelIds];
+    const { channels, channelMeta } = await resolveChannelNames(allChannelIds, cachedChannels, cachedChannelMeta);
+
+    const lastRead = buildLastReadMap(counts);
+    const emoji = await emojiPromise;
+    if (sidebarPromise) {
+      sidebarSections = await sidebarPromise;
+      try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
+    }
+
+    progress(9, 'Preparing results...');
+    const sidebarSectionChannels = buildSidebarChannelMap(sidebarSectionChannelIds, channels);
+    return {
+      selfId, selfHandle, vipUserIds,
+      badges: counts.channel_badges, threadUnreads: counts.threads,
+      threads, dms, channelPosts,
+      users, fullNames, channels, channelMeta, lastRead,
+      emoji, emojiFromCache: cachedEmoji !== null,
+      userMentionHints: mentionHints, sidebarSections,
       sidebarSectionNameMap: JSON.parse(localStorage.getItem('fslackSectionNameMap') || '{}'),
       sidebarSectionNames: JSON.parse(localStorage.getItem('fslackSectionNames') || '[]'),
       sidebarSectionChannels,
@@ -1521,15 +1563,20 @@
         const cached = {
           cachedUsers: event.data.cachedUsers || {},
           cachedUserMentionHints: event.data.cachedUserMentionHints || {},
+          cachedFullNames: event.data.cachedFullNames || {},
           cachedChannels: event.data.cachedChannels || {},
           cachedChannelMeta: event.data.cachedChannelMeta || {},
           cachedEmoji: event.data.cachedEmoji || null,
         };
-        const result = await fetchUnreads(cached);
+        // Two-phase: Phase 1 (threads+DMs) sent via callback, Phase 2 (channels) returned
+        const phase2 = await fetchUnreads(cached, (phase1Data) => {
+          window.postMessage({ type: `${FSLACK}:result`, data: phase1Data }, '*');
+        });
+        if (phase2) {
+          window.postMessage({ type: `${FSLACK}:channelsResult`, data: phase2 }, '*');
+        }
         const stats = resetApiCounter();
         console.log(`[fslack] FULL FETCH: ${stats.count} Slack API calls`, stats.log);
-        window.postMessage({ type: `${FSLACK}:result`, data: result }, '*');
-        // Refresh emoji + sidebar in background after results are delivered
         refreshDeferredData();
       } catch (err) {
         window.postMessage(
@@ -1545,14 +1592,20 @@
         const cached = {
           cachedUsers: event.data.cachedUsers || {},
           cachedUserMentionHints: event.data.cachedUserMentionHints || {},
+          cachedFullNames: event.data.cachedFullNames || {},
           cachedChannels: event.data.cachedChannels || {},
           cachedChannelMeta: event.data.cachedChannelMeta || {},
           cachedEmoji: event.data.cachedEmoji || null,
         };
-        const result = await fetchFast(cached);
+        // Two-phase: Phase 1 (threads+DMs) sent via callback, Phase 2 (mention channels) returned
+        const phase2 = await fetchFast(cached, (phase1Data) => {
+          window.postMessage({ type: `${FSLACK}:fastResult`, data: phase1Data }, '*');
+        });
+        if (phase2) {
+          window.postMessage({ type: `${FSLACK}:channelsResult`, data: phase2 }, '*');
+        }
         const stats = resetApiCounter();
         console.log(`[fslack] FAST FETCH: ${stats.count} Slack API calls`, stats.log);
-        window.postMessage({ type: `${FSLACK}:fastResult`, data: result }, '*');
       } catch (err) {
         window.postMessage(
           { type: `${FSLACK}:error`, error: err.message },

@@ -2787,10 +2787,12 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   // Channels header (combines cache-age + refresh into one line)
-  if (whenFree.length > 0 || (!loading && (noise.length > 0 || deepNoiseLoading))) {
+  if (whenFree.length > 0 || (!loading && (noise.length > 0 || deepNoiseLoading)) || data._channelsPending) {
     html += '<div class="channels-header">';
     html += '<span class="channels-header-label">Channels</span>';
-    if (cachedTs) {
+    if (data._channelsPending) {
+      html += '<span class="channels-header-age channels-loading">loading\u2026</span>';
+    } else if (cachedTs) {
       const mins = Math.floor((Date.now() - cachedTs) / 60000);
       const agoLabel = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
       html += `<span class="channels-header-age">cached ${agoLabel}</span>`;
@@ -2870,7 +2872,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   }
 
   // All clear
-  if (!loading && !deepNoiseLoading && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
+  if (!loading && !deepNoiseLoading && !data._channelsPending && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
     html += '<div id="status">All clear — nothing needs your attention.</div>';
   }
 
@@ -5984,6 +5986,61 @@ function handlePortMessage(msg) {
       if (msg.data.channels) channelNameMap = msg.data.channels;
     }
     tryPrioritize();
+    return;
+  }
+
+  if (msg.type === `${FSLACK}:channelsResult`) {
+    clearFetchTimeout();
+    const delta = msg.data;
+    if (!delta || !pendingUnreads) return; // stale Phase 2 or fetch was reset
+
+    console.log(`[fslack] Phase 2: ${(delta.channelPosts || []).length} channels, ${(delta.extraThreads || []).length} extra threads`);
+
+    // Merge new users/channels into caches + storage
+    const toStore = {};
+    if (delta.users) {
+      mergeCachedUsers(delta.users);
+      toStore.fslackUsers = cachedUserMap;
+    }
+    if (delta.fullNames) {
+      mergeCachedFullNames(delta.fullNames);
+      toStore.fslackFullNames = cachedFullNameMap;
+    }
+    if (delta.userMentionHints) {
+      mergeCachedMentionHints(delta.userMentionHints);
+      toStore.fslackUserMentionHints = cachedUserMentionHints;
+    }
+    if (delta.channels) {
+      toStore.fslackChannels = { ...(channelNameMap || {}), ...delta.channels };
+      channelNameMap = toStore.fslackChannels;
+    }
+    if (delta.channelMeta) toStore.fslackChannelMeta = { ...(toStore.fslackChannelMeta || {}), ...delta.channelMeta };
+    if (Object.keys(toStore).length > 0) chrome.storage.local.set(toStore);
+
+    // Merge into the Phase 1 data
+    const baseData = pendingUnreads;
+    baseData.channelPosts = delta.channelPosts || [];
+    if (delta.extraThreads && delta.extraThreads.length > 0) {
+      baseData.threads = [...(baseData.threads || []), ...delta.extraThreads]
+        .sort((a, b) => parseFloat(b.sort_ts) - parseFloat(a.sort_ts));
+    }
+    baseData.users = { ...(baseData.users || {}), ...(delta.users || {}) };
+    baseData.fullNames = { ...(baseData.fullNames || {}), ...(delta.fullNames || {}) };
+    baseData.channels = { ...(baseData.channels || {}), ...(delta.channels || {}) };
+    baseData.channelMeta = { ...(baseData.channelMeta || {}), ...(delta.channelMeta || {}) };
+    baseData.userMentionHints = { ...(baseData.userMentionHints || {}), ...(delta.userMentionHints || {}) };
+    baseData._channelsPending = false;
+
+    // If background fetch staged data, merge into staged data instead
+    if (isBackgroundFetch && stagedRenderData) {
+      stagedRenderData = baseData;
+      warmSummaryCache(baseData);
+      return;
+    }
+
+    // Re-run prioritization with full data (summary caches will hit for Phase 1 items)
+    pendingUnreads = baseData;
+    prioritizeAndRender(baseData);
     return;
   }
 

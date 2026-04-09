@@ -665,6 +665,13 @@ ul.slack-list, ol.slack-list {
   color: var(--text-muted);
 }
 .channels-header-age::before { content: '·'; margin-right: 8px; }
+.channels-header-age.channels-loading {
+  animation: pulse-loading 1.5s ease-in-out infinite;
+}
+@keyframes pulse-loading {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 .channels-header-refresh {
   font-size: 11px;
   color: var(--accent);
