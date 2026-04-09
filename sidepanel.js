@@ -1012,6 +1012,7 @@ function startFullFetch() {
 
 function showFromCache() {
   // Full cache available and fresh — render it
+  const cacheRenderGen = ++_renderGeneration;
   if (cachedView && Date.now() - cachedView.ts < 300000) {
     lastFetchTime = cachedView.ts;
     updateLastUpdated();
@@ -1034,10 +1035,6 @@ function showFromCache() {
     // Summarize unsummarized cache noise in-place
     if (unsummarizedCacheNoise.length > 0) {
       (async () => {
-        const noiseRecentEl = document.getElementById('noise-recent-items');
-        const noiseOlderEl = document.getElementById('noise-older-items');
-        const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
-        const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
         const deepNoiseArea = document.getElementById('deep-noise-area');
         if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... 0/${unsummarizedCacheNoise.length}`;
         let done = 0;
@@ -1073,7 +1070,12 @@ function showFromCache() {
           if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${done}/${unsummarizedCacheNoise.length}`;
           return { cp, result: response?.summary };
         }));
+        if (cacheRenderGen !== _renderGeneration) return; // stale render cycle
         if (deepNoiseArea) deepNoiseArea.textContent = '';
+        const noiseRecentEl = document.getElementById('noise-recent-items');
+        const noiseOlderEl = document.getElementById('noise-older-items');
+        const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
+        const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
         for (const { cp, result } of results) {
           if (result?.bullets?.length) {
             cp._deepSummary = result.bullets.join('\n');
@@ -1115,7 +1117,9 @@ function showFromCache() {
           }
         }
         cachedView.prioritized.noise = allNoise;
-        saveViewCache(cachedView.data, cachedView.popular, cachedView.prioritized, cachedView.saved || []);
+        if (cacheRenderGen === _renderGeneration) {
+          saveViewCache(cachedView.data, cachedView.popular, cachedView.prioritized, cachedView.saved || []);
+        }
       })();
     }
     startDmWatcher(cachedView.data);
@@ -4903,6 +4907,7 @@ function prioritizeAndRender(data, background = false) {
 }
 
 function _prioritizeAndRenderInner(data, background = false) {
+  const renderGen = ++_renderGeneration;
   // Build self-mention regex from Slack handle and cache handle for Claude prompts
   if (data.selfHandle) {
     const escaped = data.selfHandle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -5238,12 +5243,13 @@ function _prioritizeAndRenderInner(data, background = false) {
         }
         // Summarize unsummarized noise items in-place without re-rendering
         (async () => {
+          const results = await Promise.all(unsummarizedNoise.map(cachedSummarize));
+          if (renderGen !== _renderGeneration) return; // stale render cycle
+
           const noiseRecentEl = document.getElementById('noise-recent-items');
           const noiseOlderEl = document.getElementById('noise-older-items');
           const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
           const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
-
-          const results = await Promise.all(unsummarizedNoise.map(cachedSummarize));
 
           for (const { cp, result } of results) {
             if (result?.bullets?.length) {
@@ -5290,7 +5296,9 @@ function _prioritizeAndRenderInner(data, background = false) {
             }
           }
 
-          saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
+          if (renderGen === _renderGeneration) {
+            saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
+          }
         })();
         return;
       }
@@ -5318,10 +5326,6 @@ function _prioritizeAndRenderInner(data, background = false) {
       // Summarize each deep-noise and digest channel individually
       (async () => {
         const deepNoiseArea = document.getElementById('deep-noise-area');
-        const noiseRecentEl = document.getElementById('noise-recent-items');
-        const noiseOlderEl = document.getElementById('noise-older-items');
-        const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
-        const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
         let noiseDone = 0;
         if (deepNoiseArea && deepNoise.length > 0) deepNoiseArea.textContent = `Summarizing channels... 0/${deepNoise.length}`;
 
@@ -5331,6 +5335,12 @@ function _prioritizeAndRenderInner(data, background = false) {
           if (deepNoiseArea) deepNoiseArea.textContent = `Summarizing channels... ${noiseDone}/${deepNoise.length}`;
           return { cp, result };
         }));
+        if (renderGen !== _renderGeneration) return; // stale render cycle
+
+        const noiseRecentEl = document.getElementById('noise-recent-items');
+        const noiseOlderEl = document.getElementById('noise-older-items');
+        const noiseRecentToggleEl = document.getElementById('noise-recent-toggle');
+        const noiseOlderToggleEl = document.getElementById('noise-older-toggle');
 
         if (deepNoiseArea) deepNoiseArea.textContent = '';
 
@@ -5383,7 +5393,9 @@ function _prioritizeAndRenderInner(data, background = false) {
           }
         }
 
-        saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
+        if (renderGen === _renderGeneration) {
+          saveViewCache(data, pendingPopular, { ...prioritized, noise: allNoise }, pendingSaved || []);
+        }
       })();
   }
 }
@@ -5489,6 +5501,7 @@ let pendingUnreads = null;
 let gotUnreads = false;
 let gotPopular = false;
 let isFastFetch = false;
+let _renderGeneration = 0; // bumped each prioritizeAndRender call; guards async saveViewCache
 
 function resetFetchState() {
   pendingUnreads = null;
