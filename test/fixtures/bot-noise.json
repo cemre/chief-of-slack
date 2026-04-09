@@ -13,8 +13,7 @@
     }
   },
   "sidebarSections": {
-    "C_BOT": "normal",
-    "__bot_only": "high_volume"
+    "C_BOT": "normal"
   },
   "sidebarSectionNameMap": {
     "C_BOT": "Other"

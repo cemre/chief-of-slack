@@ -104,7 +104,7 @@ test('containsSelfMention and floorCategory preserve the current floor rules', (
   assert.equal(floorCategory('act_now', 'priority'), 'act_now');
 });
 
-test('applyPreFilters sends snapshot-derived bot-only posts to deterministic noise by default', () => {
+test('applyPreFilters sends unmentioned channel posts to noise by default', () => {
   const data = loadFixture('bot-noise.json');
   const options = makePreFilterOptions(data);
   const result = applyPreFilters(clone(data), options);
@@ -112,9 +112,6 @@ test('applyPreFilters sends snapshot-derived bot-only posts to deterministic noi
   assert.equal(result.whenFree.length, 0);
   assert.equal(result.noise.length, 1);
   assert.equal(result.forLlm.channelPosts.length, 0);
-  assert.equal(result.noise[0]._isAllBot, true);
-  assert.equal(result.noise[0]._ruleOverride, 'bot-only, <5 engagement → noise');
-  assert.equal(options.windowObj._preFilterLog.C_BOT.route, 'allBot-highvol');
 });
 
 test('applyPreFilters dedups thread/channel overlap and splits high-volume sections', () => {

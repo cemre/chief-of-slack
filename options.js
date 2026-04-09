@@ -274,12 +274,6 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
     }
 
   }
-  // Render bot-only rule (lives under Message Type section in HTML, but stored in sidebarTierMap)
-  const botSelect = document.querySelector('select[data-section="__bot_only"]');
-  if (botSelect) {
-    const botRule = savedRules['__bot_only'] || 'high_volume';
-    botSelect.innerHTML = buildRuleSelect(botRule);
-  }
 
   // Render token table
   const limits = { ...TOKEN_DEFAULTS, ...(result.tokenLimits || {}) };

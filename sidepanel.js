@@ -1686,9 +1686,7 @@ function escapeHtml(str) {
 
 const LOCK_ICON = '<svg class="lock-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M12 7h1a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1h1V5a4 4 0 118 0v2zm-2 0V5a2 2 0 10-4 0v2h4z"/></svg>';
 const ENVELOPE_ICON = '<svg class="envelope-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3.5l7 4.5 7-4.5V3a1 1 0 00-1-1H2a1 1 0 00-1 1v.5zM15 5.5l-7 4.5L1 5.5V13a1 1 0 001 1h12a1 1 0 001-1V5.5z"/></svg>';
-const ROBOT_ICON = '<svg class="robot-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a1 1 0 011 1v1h2a3 3 0 013 3v1h1a1 1 0 110 2h-1v2a3 3 0 01-3 3H5a3 3 0 01-3-3V9H1a1 1 0 110-2h1V6a3 3 0 013-3h2V2a1 1 0 011-1zM6 7.5a1 1 0 10-2 0 1 1 0 002 0zm5 0a1 1 0 10-2 0 1 1 0 002 0zM6 10a2 2 0 104 0H6z"/></svg>';
-function chPrefix(channelId, data, isBot) {
-  if (isBot) return ROBOT_ICON;
+function chPrefix(channelId, data) {
   return data?.channelMeta?.[channelId]?.isPrivate ? LOCK_ICON : '#';
 }
 
@@ -2450,7 +2448,7 @@ function renderChannelItem(cp, data, cssClass) {
   if (needsChannelSummary || cssClass === 'noise-item') {
     // Split header: channel link + metadata + expand toggle
     html += `<div class="item-left">`;
-    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data, cp._isAllBot)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
     if (csMsgId) html += ` <span class="item-sep">·</span> ${headerExpandHtml(csMsgId, cp.messages.length)}`;
     // Inline mark-read for noise items (accessible in compact mode)
@@ -2489,7 +2487,7 @@ function renderChannelItem(cp, data, cssClass) {
       }
     }
   } else {
-    let chLeftInner = `<span class="item-channel">${chPrefix(cp.channel_id, data, cp._isAllBot)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
+    let chLeftInner = `<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
     html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
   }
   html += `<div class="item-right">`;
@@ -2602,7 +2600,7 @@ function renderDeepSummarizedItem(cp, data) {
   const deepOpenHref = slackPermalink(cp.channel_id, newestTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
-      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data, cp._isAllBot)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
+      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
       <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
@@ -2683,7 +2681,7 @@ function renderBotThreadItem(cp, data, cssClass) {
   const botOpenHref = slackPermalink(cp.channel_id, botOpenTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
-      ${itemLeftLink(`<span class="item-channel">${chPrefix(cp.channel_id, data, true)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
+      ${itemLeftLink(`<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
       ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
     </div>
     <div class="item-right">

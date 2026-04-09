@@ -315,8 +315,6 @@
       try { localStorage.setItem('fslackSectionNames', JSON.stringify(sectionNames)); } catch {}
       try { localStorage.setItem('fslackSectionChannelIds', JSON.stringify(sectionChannelIds)); } catch {}
       try { localStorage.setItem('fslackSectionNameMap', JSON.stringify(sectionNameMap)); } catch {}
-      // Pass through virtual section rules
-      if (rules['__bot_only']) result['__bot_only'] = rules['__bot_only'];
     } catch (err) {
       console.warn(`[${FSLACK}] fetchSidebarSections failed:`, err);
       if (cached?.data) return cached.data;

@@ -209,59 +209,6 @@
         continue;
       }
 
-      if (channelPost.messages.every(isBot) && !channelPost._isMentioned) {
-        channelPost._isAllBot = true;
-        const botRule = sidebarSections.__bot_only || 'high_volume';
-        if (botRule === 'skip') {
-          debugLog('allBot-skip');
-          continue;
-        }
-        if (botRule === 'hard_noise') {
-          channelPost._ruleOverride = 'bot-only → always noise';
-          debugLog('allBot-noise');
-          noise.push(channelPost);
-          continue;
-        }
-        if (botRule === 'high_volume') {
-          const hotMessages = channelPost.messages.filter((message) => msgEngagement(message) >= HOT_THRESHOLD);
-          const coldMessages = channelPost.messages.filter((message) => msgEngagement(message) < HOT_THRESHOLD);
-          if (hotMessages.length > 0) {
-            const hotChannelPost = {
-              ...channelPost,
-              messages: hotMessages,
-              _isAllBot: true,
-              _ruleOverride: `bot-only, ${HOT_THRESHOLD}+ engagement → relevant`,
-            };
-            const replierIds = [...new Set(hotMessages.flatMap((message) => message.reply_users || []))];
-            hotChannelPost._repliers = replierIds.slice(0, 3).map((uid) => uname(uid, users));
-            hotChannelPost._replierOverflow = Math.max(0, replierIds.length - 3);
-            whenFree.push(hotChannelPost);
-          }
-          if (coldMessages.length > 0) {
-            noise.push({
-              ...channelPost,
-              messages: coldMessages,
-              _isAllBot: true,
-              _ruleOverride: `bot-only, <${HOT_THRESHOLD} engagement → noise`,
-            });
-          }
-          debugLog('allBot-highvol');
-          continue;
-        }
-
-        // Was: forLlm.channelPosts.push(channelPost) — now reaction-based
-        if (channelPost._isMentioned) {
-          channelPost._ruleOverride = 'bot-only, mentioned → relevant';
-          whenFree.push(channelPost);
-          debugLog('allBot-mentioned');
-        } else {
-          channelPost._ruleOverride = 'bot-only → noise';
-          noise.push(channelPost);
-          debugLog('allBot-noise-default');
-        }
-        continue;
-      }
-
       // Default route: mentioned → LLM (so mention floor can elevate to priority), otherwise → noise
       if (channelPost._isMentioned) {
         debugLog('mentioned-forLlm');

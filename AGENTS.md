@@ -232,7 +232,6 @@ Safe seams already covered by tests:
 
 Current prioritization fixture coverage includes:
 
-- bot-only routing
 - thread/channel dedup
 - high-volume section splitting
 - DM floor behavior
