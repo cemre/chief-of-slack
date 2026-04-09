@@ -209,9 +209,12 @@
         continue;
       }
 
-      // Default route: mentioned → LLM (so mention floor can elevate to priority), otherwise → noise
+      // Default route: mentioned or floor-section → LLM (so floors can elevate), otherwise → noise
       if (channelPost._isMentioned) {
         debugLog('mentioned-forLlm');
+        forLlm.channelPosts.push(channelPost);
+      } else if (channelPost._sidebarSection === 'floor_whenfree' || channelPost._sidebarSection === 'floor_priority') {
+        debugLog('floor-section-forLlm');
         forLlm.channelPosts.push(channelPost);
       } else {
         debugLog('noise-default');
