@@ -114,6 +114,17 @@ test('applyPreFilters sends unmentioned channel posts to noise by default', () =
   assert.equal(result.forLlm.channelPosts.length, 0);
 });
 
+test('applyPreFilters sends floor_whenfree unmentioned channel posts to forLlm', () => {
+  const data = loadFixture('bot-noise.json');
+  // Override sidebar section to floor_whenfree
+  data.sidebarSections.C_BOT = 'floor_whenfree';
+  const options = makePreFilterOptions(data);
+  const result = applyPreFilters(clone(data), options);
+
+  assert.equal(result.noise.length, 0, 'floor_whenfree channel should not go to noise');
+  assert.equal(result.forLlm.channelPosts.length, 1, 'floor_whenfree channel should go to forLlm');
+});
+
 test('applyPreFilters dedups thread/channel overlap and splits high-volume sections', () => {
   const data = {
     selfId: 'U_SELF',
