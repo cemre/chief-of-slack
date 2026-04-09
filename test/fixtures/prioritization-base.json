@@ -106,11 +106,11 @@
   "channelPosts": [
     {
       "channel_id": "C_PUBLIC",
-      "mention_count": 0,
+      "mention_count": 1,
       "sort_ts": "300.000100",
       "messages": [
         {
-          "text": "We keep hitting the plan review loop in tooling discussions.",
+          "text": "We keep hitting the plan review loop in tooling discussions. <@U_SELF> thoughts?",
           "ts": "300.000100",
           "user": "U_TEAM",
           "reply_count": 7,

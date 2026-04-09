@@ -90,7 +90,7 @@
       thread._mentionInRoot = containsSelfMention(thread.root_text || '', selfId, { handleMentionRegex });
 
       const isOwnThread = thread.root_user === selfId;
-      if (thread._sidebarSection === 'high_volume' && !isOwnThread) {
+      if (thread._sidebarSection === 'high_volume' && !isOwnThread && !thread._isMentioned) {
         const sectionName = thread._sidebarSectionName || 'high-volume';
         if (msgEngagement(thread) >= HOT_THRESHOLD) {
           thread._forceThreadSummary = true;
@@ -167,7 +167,7 @@
         }
       }
 
-      if (channelPost._sidebarSection === 'high_volume') {
+      if (channelPost._sidebarSection === 'high_volume' && !channelPost._isMentioned) {
         const sectionName = channelPost._sidebarSectionName || 'high-volume';
         const hotMessages = channelPost.messages.filter((message) => msgEngagement(message) >= HOT_THRESHOLD);
         const coldMessages = channelPost.messages.filter((message) => msgEngagement(message) < HOT_THRESHOLD);
@@ -262,12 +262,10 @@
         continue;
       }
 
-      // Default route: mentioned → whenFree, otherwise → noise
-      // (was: forLlm.channelPosts.push — LLM classification commented out in favor of reaction-based routing)
+      // Default route: mentioned → LLM (so mention floor can elevate to priority), otherwise → noise
       if (channelPost._isMentioned) {
-        channelPost._ruleOverride = 'mentioned → relevant';
-        debugLog('mentioned');
-        whenFree.push(channelPost);
+        debugLog('mentioned-forLlm');
+        forLlm.channelPosts.push(channelPost);
       } else {
         debugLog('noise-default');
         noise.push(channelPost);

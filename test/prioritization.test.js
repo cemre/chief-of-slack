@@ -113,7 +113,7 @@ test('applyPreFilters sends snapshot-derived bot-only posts to deterministic noi
   assert.equal(result.noise.length, 1);
   assert.equal(result.forLlm.channelPosts.length, 0);
   assert.equal(result.noise[0]._isAllBot, true);
-  assert.equal(result.noise[0]._ruleOverride, 'bot-only, <5 replies → noise');
+  assert.equal(result.noise[0]._ruleOverride, 'bot-only, <5 engagement → noise');
   assert.equal(options.windowObj._preFilterLog.C_BOT.route, 'allBot-highvol');
 });
 
@@ -190,16 +190,16 @@ test('applyPreFilters dedups thread/channel overlap and splits high-volume secti
   assert.equal(result.forLlm.threads[0].mention_count, 2);
   assert.equal(result.forLlm.threads[0]._isMentioned, true);
 
-  assert.equal(result.forLlm.channelPosts.length, 1);
-  assert.equal(result.forLlm.channelPosts[0].messages[0].ts, '200.000100');
+  assert.equal(result.forLlm.channelPosts.length, 0);
 
   assert.equal(result.whenFree.length, 1);
-  assert.equal(result.whenFree[0]._ruleOverride, '"Firehose" section: 5+ replies → relevant');
+  assert.equal(result.whenFree[0]._ruleOverride, `"Firehose" section: ${5}+ engagement → relevant`);
   assert.deepEqual(result.whenFree[0]._repliers, ['Alex', 'Blair', 'Cameron']);
   assert.equal(result.whenFree[0]._replierOverflow, 1);
 
-  assert.equal(result.noise.length, 1);
-  assert.equal(result.noise[0]._ruleOverride, '"Firehose" section: <5 replies → noise');
+  assert.equal(result.noise.length, 2);
+  assert.ok(result.noise.find((item) => item._ruleOverride === `"Firehose" section: <${5} engagement → noise`));
+  assert.ok(result.noise.find((item) => item.messages?.[0]?.ts === '200.000100'));
 });
 
 test('serializeForLlm keeps the lean payload shape for snapshot-derived base items', () => {
@@ -258,7 +258,7 @@ test('mapPriorities preserves current DM floors and the current public-channel c
 
   const publicChannel = mapped.priority.find((item) => item._type === 'channel');
   assert.ok(publicChannel);
-  assert.equal(publicChannel._ruleOverride, undefined);
+  assert.equal(publicChannel._ruleOverride, '@mention (Minimum: priority)');
 
   const thread = mapped.noise.find((item) => item._type === 'thread');
   assert.ok(thread);
