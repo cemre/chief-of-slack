@@ -5164,7 +5164,7 @@ function _prioritizeAndRenderInner(data, background = false) {
           const rMsgs = item.messages.filter(m => parseFloat(m.ts) >= noiseSplitCutoff);
           const oMsgs = item.messages.filter(m => parseFloat(m.ts) < noiseSplitCutoff);
           if (rMsgs.length > 0 && oMsgs.length > 0) {
-            const rItem = { ...item, messages: rMsgs, sort_ts: rMsgs[0]?.ts || item.sort_ts };
+            const rItem = { ...item, messages: rMsgs, sort_ts: rMsgs[0]?.ts || item.sort_ts, _deepSummary: null, _channelSummary: null };
             if (item.fullMessages) rItem.fullMessages = { ...item.fullMessages, history: rMsgs };
             splitNoise.push(rItem);
             const oItem = { ...item, messages: oMsgs, sort_ts: oMsgs[0]?.ts || item.sort_ts, _deepSummary: null, _channelSummary: null };
@@ -5923,7 +5923,14 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:ready`) {
     // If the view is already rendered (reconnect after service worker idle),
     // don't re-render and blow away the user's scroll/expand state.
-    if (bodyEl.querySelector('.item')) return;
+    if (bodyEl.querySelector('.item')) {
+      // Silent background refresh if cache is stale (>2 min)
+      if (cachedView?.ts && Date.now() - cachedView.ts > 2 * 60 * 1000) {
+        console.log('[fslack] Panel opened with stale cache — background refresh');
+        startFetch(true);
+      }
+      return;
+    }
     // Don't auto-fetch if the welcome/setup screen is showing
     if (bodyEl.querySelector('.welcome-screen') || bodyEl.querySelector('.api-key-form')) return;
     if (showFromCache()) return;
