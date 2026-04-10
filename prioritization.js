@@ -432,6 +432,23 @@
         }
       }
 
+      // Private channel floor (before early return so 'priority' floor routes correctly)
+      const privateRule = priorityRules.privateChannel || 'when_free';
+      if (isPrivate && !isDm && privateRule !== 'ai') {
+        const before = cat;
+        cat = floorCategory(cat, privateRule);
+        if (cat !== before) item._ruleOverride = `private channel → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
+      }
+
+      // Public channel cap (before early return so the cap can actually fire)
+      const publicRule = priorityRules.publicChannel || 'cap_whenfree';
+      if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel && publicRule === 'cap_whenfree') {
+        if (cat === 'act_now' || cat === 'priority') {
+          item._ruleOverride = `public channel capped at relevant (AI said ${CAT_LABEL[llmCat]})`;
+          cat = 'when_free';
+        }
+      }
+
       item._reasonWhy = reasons[item._llmId + '_why'] || undefined;
 
       if (cat === 'act_now' || cat === 'priority') {
@@ -473,21 +490,6 @@
       if (cat === 'priority') {
         priority.push(item);
         return;
-      }
-
-      const privateRule = priorityRules.privateChannel || 'when_free';
-      if (isPrivate && !isDm && privateRule !== 'ai') {
-        const before = cat;
-        cat = floorCategory(cat, privateRule);
-        if (cat !== before) item._ruleOverride = `private channel → at least ${CAT_LABEL[cat]} (AI said ${CAT_LABEL[llmCat]})`;
-      }
-
-      const publicRule = priorityRules.publicChannel || 'cap_whenfree';
-      if (item._type === 'channel' && !isPrivate && !isMentioned && !isImportantChannel && publicRule === 'cap_whenfree') {
-        if (cat === 'act_now' || cat === 'priority') {
-          item._ruleOverride = `public channel capped at relevant (AI said ${CAT_LABEL[llmCat]})`;
-          cat = 'when_free';
-        }
       }
 
       if (userReplied && (cat === 'noise' || cat === 'drop')) {
