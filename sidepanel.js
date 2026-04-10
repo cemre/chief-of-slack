@@ -452,8 +452,10 @@ refreshLink.addEventListener('click', () => {
     updateLastUpdated();
     if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
     lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+    _fetchReason = 'Applying background update';
     prioritizeAndRender(data);
   } else {
+    _fetchReason = 'You pressed refresh';
     startFetch();
   }
 });
@@ -513,6 +515,7 @@ let autoRefreshTimer = null;       // background poll timer
 let isBackgroundFetch = false;     // true when fetching silently in background
 let _pendingInlineRefresh = false; // true when user clicked refresh but we kept the old view
 let stagedRenderData = null;       // data fetched in background, waiting for user to display
+let _fetchReason = '';             // human-readable reason for current fetch/prioritize cycle
 let _hasApiKey = false;            // true once a Claude API key is confirmed in storage
 let shiftPreviewItems = [];   // [{ item, gc }] — items highlighted for Shift+click batch mark
 let shiftPreviewTarget = null; // gutter-check element currently hovered
@@ -907,7 +910,7 @@ function startFetch(background = false) {
   if (!background) {
     fetchBtn.textContent = 'Fetching...';
     if (!keepVisible) {
-      bodyEl.innerHTML = statusHtml(null, 'Starting fetch...');
+      bodyEl.innerHTML = statusHtml(null, _fetchReason ? `${_fetchReason} · Fetching...` : 'Starting fetch...');
       showEducationBanner(true);
     } else {
       // Show inline loading indicator without wiping current view
@@ -977,20 +980,21 @@ function scheduleBackgroundPoll() {
   if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
   autoRefreshTimer = setTimeout(() => {
     autoRefreshTimer = null;
-    if (!fetchBtn.disabled && !stagedRenderData) startFetch(true);
+    if (!fetchBtn.disabled && !stagedRenderData) { _fetchReason = 'Checking for new messages'; startFetch(true); }
   }, 5 * 60 * 1000);
 }
 
 function startFullFetch() {
   // Cancel any in-flight fetch — explicit user action always wins
   clearFetchTimeout();
+  if (!_fetchReason) _fetchReason = 'Full fetch';
   isBackgroundFetch = false;
   _pendingInlineRefresh = false;
   document.getElementById('refresh-bar')?.remove();
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
-  bodyEl.innerHTML = statusHtml(null, 'Starting full fetch...');
+  bodyEl.innerHTML = statusHtml(null, _fetchReason ? `${_fetchReason} · Fetching all channels...` : 'Starting full fetch...');
   showEducationBanner(true);
   resetFetchState();
   isFastFetch = false;
@@ -2761,6 +2765,7 @@ function sortNoiseItems(items, noiseOrder = []) {
 
 
 function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], _unused = false, cachedTs = null) {
+  _fetchReason = ''; // clear reason — pipeline complete
   const { actNow, priority, whenFree, noise } = prioritized;
   _hiddenUnreadReplies.clear();
 
@@ -3221,7 +3226,7 @@ bodyEl.addEventListener('click', (e) => {
   }
 
   // Inline refresh link (e.g. "No Slack tab found" message)
-  if (e.target.closest('.inline-refresh')) { startFetch(); return; }
+  if (e.target.closest('.inline-refresh')) { _fetchReason = 'You pressed refresh'; startFetch(); return; }
 
   // Lightbox: intercept clicks on media thumbnails
   const thumb = e.target.closest('.file-thumb[data-lb-url]');
@@ -4239,6 +4244,7 @@ function showSettingsView({ fromApiGate = false, retryData = null } = {}) {
     saveBtn.disabled = true;
     chrome.storage.local.set({ claudeApiKey: key, userContext }, () => {
       saveBtn.disabled = false;
+      _fetchReason = 'Settings saved';
       if (fromApiGate && retryData) {
         prioritizeAndRender(retryData);
       } else {
@@ -4959,7 +4965,7 @@ function _prioritizeAndRenderInner(data, background = false) {
   }
 
   // Show loading while LLM works
-  if (!background) showStatusText('Summarizing messages...');
+  if (!background) showStatusText(_fetchReason ? `${_fetchReason} · Summarizing...` : 'Summarizing messages...');
 
   const selfName = data.users?.[data.selfId] || '';
 
@@ -5110,7 +5116,7 @@ function _prioritizeAndRenderInner(data, background = false) {
     console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
 
     // Step 2: Single lean prioritize call
-    if (!background) showStatusText('Prioritizing...');
+    if (!background) showStatusText(_fetchReason ? `${_fetchReason} · Prioritizing...` : 'Prioritizing...');
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
@@ -5921,6 +5927,7 @@ function handlePortMessage(msg) {
     // Don't auto-fetch if the welcome/setup screen is showing
     if (bodyEl.querySelector('.welcome-screen') || bodyEl.querySelector('.api-key-form')) return;
     if (showFromCache()) return;
+    _fetchReason = 'Slack tab connected';
     startFetch();
     return;
   }
@@ -5928,7 +5935,10 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:progress`) {
     clearFetchTimeout(); // got a response, fetch is alive — restart timeout
     startFetchTimeout(30000); // allow more time for in-progress fetches
-    if (!isBackgroundFetch) showStatusText(msg.detail || '');
+    if (!isBackgroundFetch) {
+      const detail = msg.detail || '';
+      showStatusText(_fetchReason ? `${_fetchReason} · ${detail}` : detail);
+    }
     return;
   }
 
@@ -6049,9 +6059,21 @@ function handlePortMessage(msg) {
       return;
     }
 
-    // Re-run prioritization with full data (summary caches will hit for Phase 1 items)
+    // Phase 2 arrives after Phase 1 already rendered — don't wipe the user's view.
+    // If user is interacting (scrolled, expanded, replying), stage the update.
+    // Otherwise, re-render silently (background=true to skip status messages).
     pendingUnreads = baseData;
-    prioritizeAndRender(baseData);
+    const hasInteraction = bodyEl.querySelector('.expanded, .is-expanded, .reply-form');
+    const userScrolled = bodyEl.scrollTop > 0 || document.documentElement.scrollTop > 0;
+    if (hasInteraction || userScrolled) {
+      stagedRenderData = baseData;
+      warmSummaryCache(baseData);
+      refreshLink.textContent = 'channels loaded — tap to update';
+      refreshLink.classList.add('has-update');
+      refreshLink.style.display = '';
+      return;
+    }
+    prioritizeAndRender(baseData, true);
     return;
   }
 
