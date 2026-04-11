@@ -594,7 +594,7 @@ ul.slack-list, ol.slack-list {
    ═══════════════════════════════════════════════════ */
 .priority-section h2.act-now { color: var(--danger); }
 .priority-section h2.priority-header { color: var(--priority-orange); display: flex; align-items: baseline; gap: 8px; }
-.priority-expand-all { font-size: 11px; font-weight: 400; color: var(--text-muted); cursor: pointer; margin-left: auto; }
+.priority-expand-all { font-size: 11px; font-weight: 400; color: var(--text-muted); cursor: pointer; margin-left: auto; text-transform: none; letter-spacing: normal; }
 .priority-expand-all:hover { color: var(--text-secondary); }
 .priority-section h2.when-free { color: var(--text-muted); }
 .priority-section h2.interesting { color: var(--accent); }
@@ -675,11 +675,18 @@ ul.slack-list, ol.slack-list {
   text-transform: uppercase;
   letter-spacing: 1.5px;
 }
+.channels-header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 .channels-header-age {
   font-size: 12px;
   color: var(--text-muted);
 }
-.channels-header-age::before { content: '·'; margin-right: 8px; }
 .channels-header-age.channels-loading {
   animation: pulse-loading 1.5s ease-in-out infinite;
 }
@@ -688,11 +695,14 @@ ul.slack-list, ol.slack-list {
   50% { opacity: 0.4; }
 }
 .channels-header-refresh {
-  font-size: 12px;
-  color: var(--accent);
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
   cursor: pointer;
+  transition: color 0.15s;
 }
-.channels-header-refresh:hover { text-decoration: underline; }
+.channels-header-refresh:hover { color: var(--accent); }
+.channels-header-refresh svg { width: 14px; height: 14px; }
 
 /* Priority badges */
 .priority-badge {
