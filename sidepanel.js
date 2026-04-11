@@ -1593,7 +1593,7 @@ document.addEventListener('keydown', (e) => {
 
 
 // ── Nokia Snake loading animation ──
-const SNAKE_COLS = 20, SNAKE_ROWS = 10, SNAKE_TICK = 150, SNAKE_MAX = 15;
+const SNAKE_COLS = 10, SNAKE_ROWS = 6, SNAKE_TICK = 100, SNAKE_MAX = 10;
 const DIRS = [{dx:1,dy:0},{dx:-1,dy:0},{dx:0,dy:1},{dx:0,dy:-1}];
 
 class SnakeGame {
@@ -1634,20 +1634,18 @@ class SnakeGame {
 }
 
 function renderSnake(game) {
-  const border = '+' + '-'.repeat(SNAKE_COLS) + '+';
   const headKey = game.snake[0].x+','+game.snake[0].y;
   const bodySet = new Set(game.snake.slice(1).map(s => s.x+','+s.y));
   const foodKey = game.food.x+','+game.food.y;
-  const rows = [border];
+  const rows = [];
   for (let y=0;y<SNAKE_ROWS;y++) {
-    let row = '|';
+    let row = '';
     for (let x=0;x<SNAKE_COLS;x++) {
       const k = x+','+y;
-      row += k===headKey ? '@' : bodySet.has(k) ? 'o' : k===foodKey ? '*' : ' ';
+      row += k===headKey ? '\u2588' : bodySet.has(k) ? '\u2593' : k===foodKey ? '\u2591' : '\u00B7';
     }
-    rows.push(row + '|');
+    rows.push(row);
   }
-  rows.push(border);
   return rows.join('\n');
 }
 
