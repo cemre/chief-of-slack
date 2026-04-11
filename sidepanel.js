@@ -2733,9 +2733,6 @@ function renderDeepSummarizedItem(cp, data) {
     ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
     <div class="item-right">
       ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
-      <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
-        <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark read</span>
-      </div>
     </div>
     ${gutterCheck(cp.channel_id, latest?.ts, null, false)}
   </div>`;
@@ -2787,7 +2784,6 @@ function renderBotThreadItem(cp, data, cssClass) {
         <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
         <div style="display:flex;gap:12px;margin-top:6px;">
           <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${allMsgs.length} message${allMsgs.length === 1 ? '' : 's'} ↓</span>
-          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" style="margin-top:0">mark read</span>
         </div>
       </div></div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>`;
@@ -4668,7 +4664,6 @@ function runBotThreadSummarization(whenFreeItems, data) {
         <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
         <div style="display:flex;gap:12px;margin-top:6px;">
           <span class="show-messages-link" data-target="${deepMsgId}" style="margin-top:0">show ${cp.messages.length} message${cp.messages.length === 1 ? '' : 's'} ↓</span>
-          <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark read</span>
         </div>
       </div></div>
       <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>`;
