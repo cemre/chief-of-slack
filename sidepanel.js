@@ -2917,7 +2917,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
       const agoLabel = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.floor(mins / 60)}h ago`;
       html += `<span class="channels-header-age">${agoLabel}</span>`;
     }
-    html += '<span class="channels-header-refresh" id="cache-divider-refresh"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.312 11.424a5.5 5.5 0 0 1-9.201 2.466l-.312-.311h2.433a.75.75 0 0 0 0-1.5H4.598a.75.75 0 0 0-.75.75v3.634a.75.75 0 0 0 1.5 0v-2.033l.364.363a7 7 0 0 0 11.712-3.138.75.75 0 0 0-1.112-.231Zm-5.28-7.182a5.5 5.5 0 0 1 4.681 2.624l.312.311H12.59a.75.75 0 0 0 0 1.5h3.634a.75.75 0 0 0 .75-.75V4.293a.75.75 0 0 0-1.5 0v2.033l-.364-.363A7 7 0 0 0 3.398 9.1a.75.75 0 1 0 1.112.231 5.5 5.5 0 0 1 5.522-5.09Z" clip-rule="evenodd"/></svg></span>';
+    html += '<span class="channels-header-refresh" id="cache-divider-refresh"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08.681.75.75 0 0 1-1.3-.75 6 6 0 0 1 9.44-.908l.84.84V3.227a.75.75 0 0 1 .75-.75Zm-1.7 7.024a.75.75 0 0 1 .357.907 6 6 0 0 1-9.44.908l-.84-.84v1.456a.75.75 0 0 1-1.5 0V8.75a.75.75 0 0 1 .75-.75h3.182a.75.75 0 0 1 0 1.5h-1.37l.84.841a4.5 4.5 0 0 0 7.08-.681.75.75 0 0 1 .942-.36Z" clip-rule="evenodd"/></svg></span>';
     html += '</span>';
     html += '</div>';
   }
