@@ -2211,7 +2211,7 @@ function reasonIcons(item) {
 
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
-  const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
+  const cls = cssClass === 'act-now' ? 'reason-act-now' : cssClass === 'priority-item' ? 'reason-priority' : `reason-${cssClass}`;
   const markTs = item.sort_ts || item.messages?.[0]?.ts || item.ts || '';
   const threadTs = item.ts || '';
   const channel = item.channel_id || '';
