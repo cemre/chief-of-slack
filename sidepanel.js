@@ -2306,9 +2306,10 @@ function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
 }
 
 // Header expand link for item-left: "N msgs ↓"
-function headerExpandHtml(targetId, count, unit) {
+function headerExpandHtml(targetId, count, unit, { startExpanded } = {}) {
   if (!unit) unit = count === 1 ? 'msg' : 'msgs';
-  return `<span class="header-expand summary-toggle" data-target="${targetId}"><span class="summary-reply-count"><span class="expand-label"><span class="item-sep">·</span> ${count} ${unit} ↓</span><span class="collapse-label">collapse ↑</span></span></span>`;
+  const cls = startExpanded ? ' is-expanded' : '';
+  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">collapse ↑</span></span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -2571,7 +2572,7 @@ function renderChannelItem(cp, data, cssClass) {
     html += `<div class="item-left">`;
     html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
-    if (csMsgId) html += ` ${headerExpandHtml(csMsgId, cp.messages.length)}`;
+    if (csMsgId) html += ` ${headerExpandHtml(csMsgId, cp.messages.length, undefined, { startExpanded: !cp._channelSummary })}`;
     // Inline mark-read for noise items (accessible in compact mode)
     if (cssClass === 'noise-item') {
       html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
@@ -4713,6 +4714,9 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
     const rightEl = itemEl.querySelector('.item-right');
     const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
     rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml);
+    // Summary arrived — messages are now behind toggle, so collapse the header-expand
+    const headerExp = itemEl.querySelector('.header-expand');
+    if (headerExp) headerExp.classList.remove('is-expanded');
     // Update compact preview with ALL summary bullets joined
     const previewEl = itemEl.querySelector('.compact-preview');
     if (previewEl && cp._channelSummary) {

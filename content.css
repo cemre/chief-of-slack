@@ -635,13 +635,10 @@ ul.slack-list, ol.slack-list {
 .item.noise-item:hover .noise-inline-actions { opacity: 1; }
 
 /* Expand/collapse */
-.header-expand { color: var(--text-secondary); cursor: pointer; }
-.header-expand:hover { color: var(--text-bright); text-decoration: underline; }
-.header-expand .collapse-label { display: none; }
-.header-expand .expand-label { display: inline; }
-.header-expand.is-expanded .expand-label { display: none; }
-.header-expand.is-expanded .collapse-label { display: inline; position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
-.header-expand.is-expanded .collapse-label:hover { color: var(--text-secondary); }
+.header-expand { display: none; }
+.header-expand.is-expanded { display: inline; }
+.header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
+.header-expand .collapse-label:hover { color: var(--text-secondary); text-decoration: underline; }
 .noise-items { display: none; }
 .noise-items.expanded { display: block; }
 .when-free-items { display: none; }
