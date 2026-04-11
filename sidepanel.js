@@ -3489,7 +3489,7 @@ bodyEl.addEventListener('click', (e) => {
 
   // Mark all read / undo
   const markAll = e.target.closest('.mark-all-read');
-  if (markAll && e.shiftKey && (markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read')) && shiftPreviewItems.length > 0) {
+  if (markAll && e.shiftKey && (markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check')) && shiftPreviewItems.length > 0) {
     let count = 0;
     for (const { item, gc } of shiftPreviewItems) {
       const { channel, ts, threadTs, hasMention } = gc.dataset;
@@ -3509,7 +3509,7 @@ bodyEl.addEventListener('click', (e) => {
     if (markAll.classList.contains('done') && !markAll.dataset.pending) {
       // Undo: mark unread
       const { channel, ts, threadTs } = markAll.dataset;
-      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check');
       markAll.dataset.pending = 'true';
       markAll.classList.remove('done');
       if (!isIconCheck) markAll.textContent = '...';
@@ -3519,14 +3519,14 @@ bodyEl.addEventListener('click', (e) => {
       const _undoSiblings = _undoItem ? _undoItem.querySelectorAll('.mark-all-read') : [];
       for (const sib of _undoSiblings) {
         if (sib === markAll) continue;
-        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read') || sib.classList.contains('header-check');
         sib.classList.remove('done');
         if (!sibIsIcon) sib.textContent = '...';
       }
       sendToInject({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` });
     } else if (!markAll.dataset.pending) {
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check');
       if (isIconCheck) {
         markAll.textContent = '✓';
       } else {
@@ -3540,7 +3540,7 @@ bodyEl.addEventListener('click', (e) => {
       const _markSiblings = _markItem ? _markItem.querySelectorAll('.mark-all-read') : [];
       for (const sib of _markSiblings) {
         if (sib === markAll) continue;
-        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read') || sib.classList.contains('header-check');
         if (sibIsIcon) {
           sib.textContent = '✓';
         } else {
@@ -4210,7 +4210,7 @@ function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   const { channel, ts, threadTs, hasMention } = markAll.dataset;
   const markTs = overrideTs || ts;
   if (overrideTs) markAll.dataset.ts = markTs;
-  const _isIcon = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+  const _isIcon = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check');
   if (!_isIcon) markAll.textContent = '...';
   markAll.dataset.pending = 'true';
   sendToInject({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
@@ -5924,7 +5924,7 @@ function syncMarkReadSiblings(itemEl, done) {
   if (!itemEl) return;
   for (const sib of itemEl.querySelectorAll('.mark-all-read')) {
     if (sib.dataset.pending) continue;
-    const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+    const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read') || sib.classList.contains('header-check');
     if (done) {
       if (!sibIsIcon) sib.textContent = 'undo';
       sib.classList.add('done');
