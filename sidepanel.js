@@ -2576,7 +2576,7 @@ function renderChannelItem(cp, data, cssClass) {
     if (csMsgId) html += ` ${headerExpandHtml(csMsgId, cp.messages.length, undefined, { startExpanded: !cp._channelSummary, channel: cp.channel_id, markTs: latest?.ts, hasMention: cp._isMentioned || cp.mention_count > 0 })}`;
     // Inline mark-read for noise items (accessible in compact mode)
     if (cssClass === 'noise-item') {
-      html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
+
     }
     html += muteIcon(cp.channel_id, null);
     html += `</div>`;
@@ -2727,7 +2727,6 @@ function renderDeepSummarizedItem(cp, data) {
       <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       ${headerExpandHtml(deepMsgId, msgs.length, undefined, { channel: cp.channel_id, markTs: latest?.ts, hasMention: false })}
-      <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
       ${muteIcon(cp.channel_id, null)}
     </div>
     ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
@@ -2800,7 +2799,6 @@ function renderBotThreadItem(cp, data, cssClass) {
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
       ${itemLeftLink(`<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
-      ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
       ${muteIcon(cp.channel_id, null)}
     </div>
     <div class="item-right">
