@@ -397,7 +397,6 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
   margin-left: 6px;
   vertical-align: middle;
   transition: opacity 0.15s, color 0.1s;
-  font-size: 12px;
 }
 .channel-mute-icon .mute-icon { vertical-align: -2px; }
 .channel-mute-icon .mute-label { display: none; margin-left: 3px; }

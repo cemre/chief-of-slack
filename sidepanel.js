@@ -3316,6 +3316,8 @@ bodyEl.addEventListener('click', (e) => {
   const compactItem = e.target.closest('.when-free-items .item:not(.detail-expanded), .noise-items .item:not(.detail-expanded)');
   if (compactItem && !e.target.closest('a, button:not(.assess-btn), .mark-all-read, .action-mute-channel, .assess-picker, .assess-feedback-panel')) {
     compactItem.classList.add('detail-expanded');
+    const he = compactItem.querySelector('.header-expand');
+    if (he) he.classList.add('is-expanded');
     return;
   }
 
@@ -3736,6 +3738,8 @@ bodyEl.addEventListener('click', (e) => {
     if (item?.classList.contains('detail-expanded') && (item.closest('.when-free-items') || item.closest('.noise-items'))
         && !(summaryToggle.classList.contains('header-expand') && item.querySelector('.msg-row.summarized'))) {
       item.classList.remove('detail-expanded');
+      const he = item.querySelector('.header-expand');
+      if (he) he.classList.remove('is-expanded');
       return;
     }
     const itemRight = item?.querySelector('.item-right');
