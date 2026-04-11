@@ -769,6 +769,9 @@ function exportAssessmentData() {
   // Include full pipeline chain: raw text → summary → classification
   if (_lastPipelineData) {
     const { rawItems, summaries, leanItems, priorities, reasons } = _lastPipelineData;
+    // Save raw LLM inputs for replay (batchSummarize input + prioritize input)
+    snapshot.rawItems = rawItems;
+    snapshot.leanItems = leanItems;
     snapshot.pipeline = rawItems.map((raw) => ({
       id: raw.id,
       type: raw.type,
