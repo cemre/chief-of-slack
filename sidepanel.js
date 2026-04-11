@@ -3656,7 +3656,7 @@ bodyEl.addEventListener('click', (e) => {
     const markAllBtn = muteBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs: tTs, hasMention } = markAllBtn.dataset;
-      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
+      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read') || markAllBtn.classList.contains('header-check');
       if (!_isMuteIcon) markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
@@ -3695,7 +3695,7 @@ bodyEl.addEventListener('click', (e) => {
     const markAllBtn = muteChannelBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs, hasMention } = markAllBtn.dataset;
-      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
+      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read') || markAllBtn.classList.contains('header-check');
       if (!_isMuteIcon) markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
@@ -3994,7 +3994,7 @@ function clearShiftPreview() {
 }
 
 bodyEl.addEventListener('mouseover', (e) => {
-  let markEl = e.target.closest('.gutter-check, .reason-mark-read');
+  let markEl = e.target.closest('.gutter-check, .reason-mark-read, .header-check');
   // Fallback: hovering anywhere on reason-toggle row (large padding) targets its checkmark
   if (!markEl) {
     const toggle = e.target.closest('.item-reason-toggle');
