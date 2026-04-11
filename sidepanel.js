@@ -4828,7 +4828,7 @@ function runRootSummarization(allItems, data) {
 // ── Async channel-post thread summarization (fetch replies then summarize) ──
 function runChannelThreadSummarization(allItems, data) {
   console.log(`[chThreadSumm] called with ${allItems.length} items, types:`, allItems.map(i => `${i._type}/${i._summarizeThreads ? 'summ' : 'no'}`));
-  const items = allItems.filter((item) => item._type === 'channel' && item._summarizeThreads);
+  const items = allItems.filter((item) => item._type === 'channel' && item._summarizeThreads && !item._deepSummary);
   if (items.length === 0) { console.log('[chThreadSumm] no qualifying items, returning'); return; }
 
   const MAX_PAYLOAD_BYTES = 3000;

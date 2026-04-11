@@ -90,6 +90,7 @@ const LLM_TYPES = new Set([
   `${FSLACK}:summarizeBotThread`,
   `${FSLACK}:summarizeChannelPost`,
   `${FSLACK}:summarizeFullThread`,
+  `${FSLACK}:summarizeThreadReplies`,
   /* DEV_ONLY_START */ `${FSLACK}:anonymize`, /* DEV_ONLY_END */
   `${FSLACK}:setApiKey`,
   `${FSLACK}:getApiKey`,
@@ -650,7 +651,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     handleVipSummarize(msg.data).then(sendResponse);
     return true;
   }
-  if (msg.type === `${FSLACK}:summarizeBotThread` || msg.type === `${FSLACK}:summarizeFullThread`) {
+  if (msg.type === `${FSLACK}:summarizeBotThread` || msg.type === `${FSLACK}:summarizeFullThread` || msg.type === `${FSLACK}:summarizeThreadReplies`) {
     handleThreadSummarize(msg.data).then(sendResponse);
     return true;
   }
