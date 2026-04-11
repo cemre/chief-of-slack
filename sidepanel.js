@@ -2026,7 +2026,7 @@ function channelLink(label, channelId) {
 
 function itemLeftLink(innerHtml, href) {
   if (!href) return innerHtml;
-  return `<a class="item-left-link" href="${href}" target="_blank">${innerHtml}<span class="open-slack-label">open in Slack ↗</span></a>`;
+  return `<a class="item-left-link" href="${href}" target="_blank">${innerHtml}</a>`;
 }
 
 const THREAD_BADGE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
@@ -2278,7 +2278,7 @@ function renderThreadItem(t, data, cssClass) {
   const threadOpenHref = slackPermalink(t.channel_id, t.ts, t.ts) || `https://app.slack.com/archives/${t.channel_id}`;
   if (shouldSummarize) {
     html += `<div class="item-left">`;
-    html += `<a class="item-channel-link" href="${threadOpenHref}" target="_blank"><span class="item-channel">${channelLabel}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+    html += `<a class="item-channel-link" href="${threadOpenHref}" target="_blank"><span class="item-channel">${channelLabel}</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
     if (!t._mentionInReplies && t.mention_count > 0) {
       html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
@@ -2507,7 +2507,7 @@ function renderChannelItem(cp, data, cssClass) {
   if (needsChannelSummary || cssClass === 'noise-item') {
     // Split header: channel link + metadata + expand toggle
     html += `<div class="item-left">`;
-    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+    html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
     if (csMsgId) html += ` <span class="item-sep">·</span> ${headerExpandHtml(csMsgId, cp.messages.length)}`;
     // Inline mark-read for noise items (accessible in compact mode)
@@ -2659,7 +2659,7 @@ function renderDeepSummarizedItem(cp, data) {
   const deepOpenHref = slackPermalink(cp.channel_id, newestTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
-      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
+      <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
       <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
@@ -4484,10 +4484,10 @@ async function kickoffVipSection(data) {
     for (const [chId, ch] of byChannel) {
       const chHref = ch.permalink ? escapeHtml(ch.permalink.replace(/\/p\d+$/, '')) : '#';
       const prefix = ch.isDm ? ENVELOPE_ICON : chPrefix(chId, data);
-      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">${prefix}${escapeHtml(ch.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>`;
+      const channelLabel = `<a class="item-channel-link vip-channel-link" href="${chHref}" target="_blank"><span class="item-channel">${prefix}${escapeHtml(ch.name)}</span></a>`;
       messagesHtml += `<div class="vip-channel-group">${channelLabel}<ul class="vip-msg-list">`;
       for (const m of ch.messages) {
-        const msgLink = m.permalink ? `<a class="vip-msg-slack-link" href="${escapeHtml(m.permalink)}" target="_blank">open in Slack ↗</a>` : '';
+        const msgLink = m.permalink ? `<a class="vip-msg-slack-link" href="${escapeHtml(m.permalink)}" target="_blank">↗</a>` : '';
         messagesHtml += `<li class="item-text vip-msg-row">${formatSlackHtml(m.text || '', data?.users)}${renderFiles(m.files)}${msgLink}</li>`;
       }
       messagesHtml += '</ul></div>';
@@ -4514,7 +4514,7 @@ async function kickoffVipSection(data) {
     }).join('');
     vipHtml += `<div class="item vip-item">
       <div class="item-left">
-        <a class="item-channel-link" href="${vipHref}" target="_blank"><span class="item-channel">${escapeHtml(vip.name)}</span><span class="open-in-slack"> open in Slack ↗</span></a>
+        <a class="item-channel-link" href="${vipHref}" target="_blank"><span class="item-channel">${escapeHtml(vip.name)}</span></a>
         <span class="item-sep">·</span> <span class="item-time">${formatTime(latestTs)}</span>
       </div>
       <div class="item-right">
