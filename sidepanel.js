@@ -536,6 +536,44 @@ let _hasApiKey = false;            // true once a Claude API key is confirmed in
 let shiftPreviewItems = [];   // [{ item, gc }] — items highlighted for Shift+click batch mark
 let shiftPreviewTarget = null; // gutter-check element currently hovered
 
+// ── Behavior learning: per-channel skip/engage tracking ──
+let _channelBehavior = {}; // { "C1234": ["s","e","s",...], ... }
+const _engagedItems = new Set(); // "channel:ts" dedup — cleared each fetch cycle
+const BEHAVIOR_KEY = 'fslackChannelBehavior';
+const BEHAVIOR_CAP = 30;
+let _behaviorDirty = false;
+let _behaviorFlushTimer = null;
+
+function recordChannelBehavior(channelId, action) {
+  if (!channelId) return;
+  const arr = _channelBehavior[channelId] || [];
+  arr.push(action);
+  if (arr.length > BEHAVIOR_CAP) arr.shift();
+  _channelBehavior[channelId] = arr;
+  _behaviorDirty = true;
+  if (!_behaviorFlushTimer) {
+    _behaviorFlushTimer = setTimeout(() => {
+      _behaviorFlushTimer = null;
+      if (_behaviorDirty) {
+        chrome.storage.local.set({ [BEHAVIOR_KEY]: _channelBehavior });
+        _behaviorDirty = false;
+      }
+    }, 1000);
+  }
+}
+
+function recordEngage(channelId, ts) {
+  const key = `${channelId}:${ts}`;
+  _engagedItems.add(key);
+  recordChannelBehavior(channelId, 'e');
+}
+
+function recordSkip(channelId, ts) {
+  const key = `${channelId}:${ts}`;
+  if (_engagedItems.has(key)) return; // already engaged — don't double-count
+  recordChannelBehavior(channelId, 's');
+}
+
 // ── LLM result caches (persist across fetches) ──
 // Prioritization: hash-based dedup to skip Claude calls when inbox unchanged
 let _prioritizationCache = null; // { importantHash, publicHash, result: { priorities, noiseOrder, reasons } }
@@ -898,10 +936,11 @@ function muteThreadLocally(channel, threadTs) {
   removeCachedItem(channel, threadTs);
 }
 function loadCachedPrefs(callback) {
-  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads'], (cached) => {
+  chrome.storage.local.get(['fslackUsers', 'fslackFullNames', 'fslackUserMentionHints', 'fslackChannels', 'fslackChannelMeta', 'fslackSavedMsgs', 'fslackEmoji', 'fslackEmojiTs', 'fslackVipSeen', 'fslackMutedThreads', BEHAVIOR_KEY], (cached) => {
     savedMsgKeys = new Set(cached.fslackSavedMsgs || []);
     vipSeenTimestamps = cached.fslackVipSeen || {};
     mutedThreadKeys = new Set(cached.fslackMutedThreads || []);
+    _channelBehavior = cached[BEHAVIOR_KEY] || {};
     mergeCachedUsers(cached.fslackUsers || {});
     mergeCachedFullNames(cached.fslackFullNames || {});
     mergeCachedMentionHints(cached.fslackUserMentionHints || {}, { replace: true });
@@ -921,6 +960,7 @@ function loadCachedPrefs(callback) {
 
 function startFetch(background = false) {
   if (fetchBtn.disabled) return;
+  _engagedItems.clear(); // reset dedup for new fetch cycle
   _snapshotMode = false; // exit snapshot mode on any fetch
   if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
   // If we already have content, keep it visible and fetch in background
@@ -3424,6 +3464,7 @@ bodyEl.addEventListener('click', (e) => {
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
+      recordSkip(channel, threadTs || ts);
       count++;
     }
     if (count > 0) updateSectionToggleCount(shiftPreviewItems[0].item);
@@ -3498,6 +3539,7 @@ bodyEl.addEventListener('click', (e) => {
       sendToInject({ type: `${FSLACK}:addReaction`, channel, ts, emoji, requestId });
       reactBtn.dataset.pending = requestId;
       reactBtn.dataset.pendingKind = 'react';
+      recordEngage(channel, ts);
     }
     return;
   }
@@ -3524,6 +3566,7 @@ bodyEl.addEventListener('click', (e) => {
       savedMsgKeys.add(key);
       chrome.storage.local.set({ fslackSavedMsgs: [...savedMsgKeys] });
       sendToInject({ type: `${FSLACK}:saveMessage`, channel, ts, requestId: `save_${Date.now()}` });
+      recordEngage(channel, ts);
       // Also mark as read
       const markBtn = saveBtn.closest('.item')?.querySelector('.mark-all-read:not(.done):not([data-pending])');
       if (markBtn) markBtn.click();
@@ -3587,6 +3630,7 @@ bodyEl.addEventListener('click', (e) => {
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
+    recordSkip(channel, threadTs);
     muteThreadLocally(channel, threadTs);
     const itemEl = muteBtn.closest('.item');
     if (itemEl) itemEl.classList.add('muted-pending');
@@ -3635,6 +3679,7 @@ bodyEl.addEventListener('click', (e) => {
     if (itemEl) itemEl.classList.add('muted-pending');
     muteChannelBtn.title = 'Undo mute (T)';
     muteChannelBtn.classList.add('undo-mute');
+    recordSkip(channel, 'mute');
     sendToInject({ type: `${FSLACK}:muteChannel`, channel, requestId: `mutech_${Date.now()}` });
     return;
   }
@@ -3776,6 +3821,7 @@ bodyEl.addEventListener('click', (e) => {
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
+      recordSkip(channel, threadTs || ts);
       count++;
     }
     priorityMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -3798,6 +3844,7 @@ bodyEl.addEventListener('click', (e) => {
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
+      recordSkip(channel, threadTs || ts);
       count++;
     }
     whenfreeMarkRead.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -3827,6 +3874,7 @@ bodyEl.addEventListener('click', (e) => {
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
+      recordSkip(channel, threadTs || ts);
       count++;
     }
     noiseMarkRecent.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -3854,6 +3902,7 @@ bodyEl.addEventListener('click', (e) => {
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
+      recordSkip(channel, threadTs || ts);
       count++;
     }
     noiseMarkOlder.textContent = count > 0 ? `Marked ${count} as read` : 'Nothing to mark';
@@ -4144,6 +4193,7 @@ function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   if (!_isIcon) markAll.textContent = '...';
   markAll.dataset.pending = 'true';
   sendToInject({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
+  recordSkip(channel, threadTs || ts);
 }
 
 function setupImagePaste(form, input) {
@@ -4213,6 +4263,7 @@ function showItemReplyForm(itemEl, channel, ts, isDm) {
 }
 
 function sendReply(form, channel, threadTs, text) {
+  if (channel) recordEngage(channel, threadTs || 'dm');
   const input = form.querySelector('.reply-input');
   const btn = form.querySelector('.reply-send');
   const finalText = text ? convertUserMentions(text) : '';
@@ -5079,6 +5130,15 @@ function _prioritizeAndRenderInner(data, background = false) {
       if (item.isGroup) lean.isGroup = true;
       if (item.participants) lean.participants = item.participants;
       if (item.mentionCount) lean.mentionCount = item.mentionCount;
+      if (item._channelId) {
+        const history = _channelBehavior[item._channelId];
+        if (history && history.length >= 10) {
+          const skipCount = history.filter(a => a === 's').length;
+          const rate = Math.round((skipCount / history.length) * 100);
+          if (rate >= 70) lean.userSkipRate = rate;
+          else if (rate <= 20) lean.userEngageRate = 100 - rate;
+        }
+      }
       return lean;
     });
   }
@@ -6268,7 +6328,7 @@ function handlePortMessage(msg) {
 
 // ── Initialization ──
 // Load persisted cache, then connect port
-chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', 'claudeApiKey', DRAFT_KEY, 'priorityRules'], (result) => {
+chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetchTs', 'fslackVipSeen', 'fslackMutedThreads', 'claudeApiKey', DRAFT_KEY, 'priorityRules', BEHAVIOR_KEY], (result) => {
   if (result.priorityRules) priorityRules = result.priorityRules;
   _drafts = result[DRAFT_KEY] || {};
   if (result.fslackViewCache && !cachedView) {
@@ -6278,6 +6338,7 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
   savedMsgKeys = new Set(result.fslackSavedMsgs || []);
   vipSeenTimestamps = result.fslackVipSeen || {};
   mutedThreadKeys = new Set(result.fslackMutedThreads || []);
+  _channelBehavior = result[BEHAVIOR_KEY] || {};
 
   // First run: no API key and no cache → show welcome screen
   const hasApiKey = !!result.claudeApiKey;

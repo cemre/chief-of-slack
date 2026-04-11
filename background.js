@@ -153,6 +153,8 @@ CRITICAL — these are NOT priority:
 KEY TEST: Before classifying priority, ask: "Do I need to do something about this soon?" If it's just interesting/relevant, it's when_free.
 
 If userReplied=true and someone asks a question → treat as directed at me.
+If userSkipRate is set (e.g. userSkipRate=85): I almost always skip items from this channel without reading. Lean toward noise unless there's a strong specific reason (direct question, @mention, urgent blocker).
+If userEngageRate is set (e.g. userEngageRate=90): I almost always engage with items from this channel. Lean toward when_free or higher even if the content seems routine.
 
 ITEMS:
 ${serialized}
@@ -329,6 +331,7 @@ Example: "julia tagged you asking to review the spacing changes in her top bar P
 
 "recentContext" = messages I already read (for conversation flow). "newReplies" / "messages" = the unread messages.
 Focus on the UNREAD messages, referencing context only to explain what they're responding to.
+If userSkipRate or userEngageRate is present, it reflects how often I engage with items from that channel. High skip rate = I usually ignore it.
 
 ITEMS:
 ${serialized}

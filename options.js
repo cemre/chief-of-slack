@@ -42,6 +42,8 @@ CRITICAL — these are NOT priority:
 KEY TEST: Before classifying priority, ask: "Do I need to do something about this soon?" If it's just interesting/relevant, it's when_free.
 
 If userReplied=true and someone asks a question → treat as directed at me.
+If userSkipRate is set (e.g. userSkipRate=85): I almost always skip items from this channel without reading. Lean toward noise unless there's a strong specific reason (direct question, @mention, urgent blocker).
+If userEngageRate is set (e.g. userEngageRate=90): I almost always engage with items from this channel. Lean toward when_free or higher even if the content seems routine.
 
 ITEMS:
 \${serialized}
@@ -85,6 +87,7 @@ Example: "julia tagged you asking to review the spacing changes in her top bar P
 
 "recentContext" = messages I already read (for conversation flow). "newReplies" / "messages" = the unread messages.
 Focus on the UNREAD messages, referencing context only to explain what they're responding to.
+If userSkipRate or userEngageRate is present, it reflects how often I engage with items from that channel. High skip rate = I usually ignore it.
 
 ITEMS:
 \${serialized}
@@ -208,7 +211,7 @@ function buildRuleSelect(currentRule) {
   ).join('');
 }
 
-chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarSectionChannels', 'sidebarTierMap', 'tokenUsage', 'tokenLog', 'priorityRules', 'customPrompts'], (result) => {
+chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarSectionChannels', 'sidebarTierMap', 'tokenUsage', 'tokenLog', 'priorityRules', 'customPrompts', 'fslackChannelBehavior', 'fslackChannels'], (result) => {
   if (result.claudeApiKey) apiKeyInput.value = result.claudeApiKey;
   if (result.userContext) userContextInput.value = result.userContext;
   charCount.textContent = `${(result.userContext || '').length}/400`;
@@ -259,6 +262,58 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
     }
 
   }
+
+  // Render learned behavior
+  const behavior = result.fslackChannelBehavior || {};
+  const channelNames = result.fslackChannels || {};
+  const reverseChannels = {};
+  for (const [id, name] of Object.entries(channelNames)) reverseChannels[id] = name;
+  const behaviorList = document.getElementById('behavior-list');
+  const resetAllBtn = document.getElementById('reset-behavior');
+  const entries = Object.entries(behavior)
+    .filter(([, arr]) => arr.length >= 10)
+    .map(([id, arr]) => {
+      const skipCount = arr.filter(a => a === 's').length;
+      const skipRate = Math.round((skipCount / arr.length) * 100);
+      return { id, name: reverseChannels[id] || id, skipRate, count: arr.length };
+    })
+    .sort((a, b) => Math.abs(b.skipRate - 50) - Math.abs(a.skipRate - 50));
+  if (entries.length > 0) {
+    behaviorList.innerHTML = '';
+    resetAllBtn.style.display = '';
+    for (const entry of entries) {
+      const engageRate = 100 - entry.skipRate;
+      const label = entry.skipRate >= 70 ? `${entry.skipRate}% skip` : entry.skipRate <= 20 ? `${engageRate}% engage` : `${engageRate}% engage`;
+      const barColor = entry.skipRate >= 70 ? '#e74c3c' : entry.skipRate <= 20 ? '#2ecc71' : '#888';
+      const row = document.createElement('div');
+      row.className = 'tier-row';
+      row.style.alignItems = 'center';
+      row.innerHTML = `<span class="section-name" style="min-width:120px">#${entry.name}</span>` +
+        `<span style="display:inline-flex;align-items:center;gap:6px;flex:1">` +
+        `<span style="display:inline-block;width:80px;height:8px;background:#333;border-radius:4px;overflow:hidden">` +
+        `<span style="display:block;width:${engageRate}%;height:100%;background:${barColor};border-radius:4px"></span></span>` +
+        `<span style="font-size:11px;color:#999">${label} (${entry.count})</span></span>` +
+        `<a class="behavior-reset" data-channel="${entry.id}" style="font-size:11px;color:#666;cursor:pointer;text-decoration:underline">reset</a>`;
+      behaviorList.appendChild(row);
+    }
+    for (const link of behaviorList.querySelectorAll('.behavior-reset')) {
+      link.addEventListener('click', () => {
+        const ch = link.dataset.channel;
+        delete behavior[ch];
+        chrome.storage.local.set({ fslackChannelBehavior: behavior });
+        link.closest('.tier-row').remove();
+        if (behaviorList.children.length === 0) {
+          behaviorList.innerHTML = '<span class="vip-empty">Not enough data yet — use the extension for a while.</span>';
+          resetAllBtn.style.display = 'none';
+        }
+      });
+    }
+  }
+  resetAllBtn.addEventListener('click', () => {
+    chrome.storage.local.remove('fslackChannelBehavior');
+    behaviorList.innerHTML = '<span class="vip-empty">Not enough data yet — use the extension for a while.</span>';
+    resetAllBtn.style.display = 'none';
+  });
 
   // Render token table
   const usage = result.tokenUsage || {};
