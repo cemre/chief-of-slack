@@ -1262,6 +1262,7 @@ ul.deep-summary li + li { border-top: none; }
 .item.interesting .gutter-check.done { background: var(--accent); }
 .item.noise-item .gutter-check.done { background: var(--text-primary); }
 .item.vip-item > .gutter-check { top: 12px; transform: none; }
+.item.vip-item .deep-summary { font-size: 14px; }
 /* Shift+hover batch mark-read preview — base (when-free, noise, interesting) */
 .gutter-check.shift-mark-preview,
 .reason-mark-read.shift-mark-preview {
