@@ -323,7 +323,7 @@ section h2 {
 }
 .item-sep { color: var(--text-muted); }
 .item-channel {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--text-primary);
   font-weight: 700;
 }
@@ -384,7 +384,7 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 
 /* Reason badges — bolder, primary text for urgent items */
 .item-reason {
-  font-size: 12px;
+  font-size: 14px;
   font-style: normal;
   font-weight: 500;
   line-height: 1.35;
@@ -1292,7 +1292,7 @@ ul.deep-summary li + li { border-top: none; }
   background: rgba(232, 141, 58, 0.06) !important;
 }
 .item-details { display: none; }
-.item-details.expanded { display: block; }
+.item-details.expanded { display: block; font-size: 12px; }
 
 /* ═══════════════════════════════════════════════════════════
    Compact mode — Relevant & Noise sections
