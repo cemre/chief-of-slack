@@ -228,6 +228,11 @@ test('serializeForLlm keeps the lean payload shape for snapshot-derived base ite
   assert.equal(items[2].type, 'channel');
   assert.equal(items[2].channel, 'eng-ai-tools');
   assert.equal(items[2].messages[1].text, 'The new desktop build can control local GUI tools now. Read more');
+
+  // _channelId is a transient field for behavior learning lookup
+  assert.equal(items[0]._channelId, 'C_PRIVATE_THREAD', 'thread should carry _channelId');
+  assert.equal(items[1]._channelId, undefined, 'DM should not carry _channelId');
+  assert.equal(items[2]._channelId, 'C_PUBLIC', 'channel post should carry _channelId');
 });
 
 test('mapPriorities applies DM floors and mention floor on public channel', () => {
