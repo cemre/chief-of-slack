@@ -229,16 +229,30 @@ header {
 .help-btn:focus-visible { color: var(--text-primary); background: none; outline: none; box-shadow: none; }
 .last-updated { font-size: 12px; color: var(--text-muted); font-weight: 400; }
 .refresh-link { font-size: 12px; color: var(--danger); font-weight: 600; cursor: pointer; }
-#refresh-bar {
-  text-align: center;
-  padding: 6px;
+#refresh-overlay {
+  margin: 0 8px 6px;
+  padding: 8px 10px;
   font-size: 12px;
-  color: var(--accent);
-  background: rgba(91,156,245,0.08);
-  border-bottom: 1px solid rgba(91,156,245,0.15);
-  animation: refresh-pulse 1.5s ease-in-out infinite;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
-@keyframes refresh-pulse { 0%,100% { opacity: 0.6; } 50% { opacity: 1; } }
+#refresh-overlay .snake-game {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 8px;
+  line-height: 1.0;
+  white-space: pre;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+#refresh-overlay .refresh-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
 .refresh-link:hover { text-decoration: underline; }
 .refresh-link.has-update { color: var(--danger); font-weight: 700; }
 .last-updated.stale { color: var(--text-muted); }
