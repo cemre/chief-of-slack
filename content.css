@@ -400,9 +400,9 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
   align-items: center;
   transition: opacity 0.15s, color 0.1s;
 }
-.channel-mute-icon .mute-label { display: none; margin-left: 3px; }
-.item.detail-expanded .channel-mute-icon { display: inline-flex; opacity: 1; color: var(--text-secondary); }
-.channel-mute-icon:hover { opacity: 1 !important; color: var(--accent); }
+.channel-mute-icon .mute-label { display: none; margin-left: 3px; font-size: 12px; vertical-align: 3px; }
+.item.detail-expanded .channel-mute-icon { display: inline; color: var(--text-secondary); }
+.item.detail-expanded .channel-mute-icon:hover { color: var(--accent); }
 .channel-mute-icon:hover .mute-label { display: inline; }
 .channel-mute-icon.undo-mute { display: inline-flex; opacity: 0.7; color: var(--warning, #e8a735); }
 .channel-mute-icon.undo-mute:hover { opacity: 1; }
@@ -636,10 +636,11 @@ ul.slack-list, ol.slack-list {
 /* Expand/collapse */
 .header-expand { display: none; }
 .header-expand.is-expanded { display: inline; }
-.header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; margin: -4px -8px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
-.header-expand .collapse-label:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
-.header-check { color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 4px 6px; margin: -4px -6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
+.header-expand .collapse-label { position: absolute; right: 16px; top: 14px; font-size: 12px; display: flex; align-items: center; gap: 2px; }
+.header-check { color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
 .header-check:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
+.collapse-arrow { color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
+.collapse-arrow:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
 .item-left:has(.header-expand.is-expanded) > .item-time,
 .item-left:has(.header-expand.is-expanded) > .item-sep { display: none; }
 .noise-items { display: none; }

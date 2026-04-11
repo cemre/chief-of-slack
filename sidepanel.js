@@ -2310,7 +2310,7 @@ function headerExpandHtml(targetId, count, unit, { startExpanded, channel, markT
   if (!unit) unit = count === 1 ? 'msg' : 'msgs';
   const cls = startExpanded ? ' is-expanded' : '';
   const check = channel ? `<span class="header-check mark-all-read" data-channel="${channel}" data-ts="${markTs || ''}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}">✓</span>` : '';
-  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">${check}↑</span></span></span>`;
+  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">${check}<span class="collapse-arrow">↑</span></span></span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
