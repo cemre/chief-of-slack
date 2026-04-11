@@ -637,6 +637,7 @@ ul.slack-list, ol.slack-list {
 .header-expand { display: none; }
 .header-expand.is-expanded { display: inline; }
 .header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.header-expand .collapse-label:hover { color: var(--text-secondary); }
 .header-check { color: var(--text-muted); cursor: pointer; font-size: 12px; }
 .header-check:hover { color: var(--text-secondary); }
 .item-left:has(.header-expand.is-expanded) > .item-time,
@@ -1403,13 +1404,11 @@ ul.deep-summary li + li { border-top: none; }
 .when-free-items .item:not(.detail-expanded) .item-replied,
 .when-free-items .item:not(.detail-expanded) .item-mention,
 .when-free-items .item:not(.detail-expanded) .header-expand,
-.when-free-items .item:not(.detail-expanded) .compact-header-actions,
 .noise-items .item:not(.detail-expanded) .item-sep,
 .noise-items .item:not(.detail-expanded) .item-time,
 .noise-items .item:not(.detail-expanded) .item-replied,
 .noise-items .item:not(.detail-expanded) .item-mention,
-.noise-items .item:not(.detail-expanded) .header-expand,
-.noise-items .item:not(.detail-expanded) .compact-header-actions {
+.noise-items .item:not(.detail-expanded) .header-expand {
   display: none;
 }
 
@@ -1460,19 +1459,6 @@ ul.deep-summary li + li { border-top: none; }
 }
 .detail-expanded .compact-preview { display: none; }
 
-/* Compact header actions (kept in DOM for mark-read, hidden in compact) */
-.compact-header-actions {
-  display: inline;
-  font-size: 12px;
-}
-.compact-header-actions .mark-all-read {
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: color 0.1s;
-}
-.compact-header-actions .mark-all-read:hover { color: var(--text-primary); }
-.compact-header-actions .mark-all-read.done { color: var(--success); }
-.detail-expanded .compact-header-actions { display: none; }
 
 /* Smooth expand transition */
 .when-free-items .item > .item-right,

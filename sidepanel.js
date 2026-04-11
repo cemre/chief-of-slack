@@ -2576,7 +2576,7 @@ function renderChannelItem(cp, data, cssClass) {
     if (csMsgId) html += ` ${headerExpandHtml(csMsgId, cp.messages.length, undefined, { startExpanded: !cp._channelSummary, channel: cp.channel_id, markTs: latest?.ts, hasMention: cp._isMentioned || cp.mention_count > 0 })}`;
     // Inline mark-read for noise items (accessible in compact mode)
     if (cssClass === 'noise-item') {
-      html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
+
     }
     html += muteIcon(cp.channel_id, null);
     html += `</div>`;
@@ -2727,7 +2727,6 @@ function renderDeepSummarizedItem(cp, data) {
       <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       ${headerExpandHtml(deepMsgId, msgs.length, undefined, { channel: cp.channel_id, markTs: latest?.ts, hasMention: false })}
-      <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
       ${muteIcon(cp.channel_id, null)}
     </div>
     ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
@@ -2800,7 +2799,6 @@ function renderBotThreadItem(cp, data, cssClass) {
   return `<div class="item ${cssClass}" data-bot-thread-key="${key}">
     <div class="item-left">
       ${itemLeftLink(`<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
-      ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
       ${muteIcon(cp.channel_id, null)}
     </div>
     <div class="item-right">
@@ -3489,7 +3487,7 @@ bodyEl.addEventListener('click', (e) => {
 
   // Mark all read / undo
   const markAll = e.target.closest('.mark-all-read');
-  if (markAll && e.shiftKey && (markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read')) && shiftPreviewItems.length > 0) {
+  if (markAll && e.shiftKey && (markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check')) && shiftPreviewItems.length > 0) {
     let count = 0;
     for (const { item, gc } of shiftPreviewItems) {
       const { channel, ts, threadTs, hasMention } = gc.dataset;
@@ -3509,7 +3507,7 @@ bodyEl.addEventListener('click', (e) => {
     if (markAll.classList.contains('done') && !markAll.dataset.pending) {
       // Undo: mark unread
       const { channel, ts, threadTs } = markAll.dataset;
-      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check');
       markAll.dataset.pending = 'true';
       markAll.classList.remove('done');
       if (!isIconCheck) markAll.textContent = '...';
@@ -3519,14 +3517,14 @@ bodyEl.addEventListener('click', (e) => {
       const _undoSiblings = _undoItem ? _undoItem.querySelectorAll('.mark-all-read') : [];
       for (const sib of _undoSiblings) {
         if (sib === markAll) continue;
-        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read') || sib.classList.contains('header-check');
         sib.classList.remove('done');
         if (!sibIsIcon) sib.textContent = '...';
       }
       sendToInject({ type: `${FSLACK}:markUnread`, channel, ts, thread_ts: threadTs, requestId: `unread_${Date.now()}` });
     } else if (!markAll.dataset.pending) {
       const { channel, ts, threadTs, hasMention } = markAll.dataset;
-      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+      const isIconCheck = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check');
       if (isIconCheck) {
         markAll.textContent = '✓';
       } else {
@@ -3540,7 +3538,7 @@ bodyEl.addEventListener('click', (e) => {
       const _markSiblings = _markItem ? _markItem.querySelectorAll('.mark-all-read') : [];
       for (const sib of _markSiblings) {
         if (sib === markAll) continue;
-        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+        const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read') || sib.classList.contains('header-check');
         if (sibIsIcon) {
           sib.textContent = '✓';
         } else {
@@ -3656,7 +3654,7 @@ bodyEl.addEventListener('click', (e) => {
     const markAllBtn = muteBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs: tTs, hasMention } = markAllBtn.dataset;
-      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
+      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read') || markAllBtn.classList.contains('header-check');
       if (!_isMuteIcon) markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: tTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
@@ -3700,7 +3698,7 @@ bodyEl.addEventListener('click', (e) => {
     const markAllBtn = muteChannelBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs, hasMention } = markAllBtn.dataset;
-      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
+      const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read') || markAllBtn.classList.contains('header-check');
       if (!_isMuteIcon) markAllBtn.textContent = '...';
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
@@ -4001,7 +3999,7 @@ function clearShiftPreview() {
 }
 
 bodyEl.addEventListener('mouseover', (e) => {
-  let markEl = e.target.closest('.gutter-check, .reason-mark-read');
+  let markEl = e.target.closest('.gutter-check, .reason-mark-read, .header-check');
   // Fallback: hovering anywhere on reason-toggle row (large padding) targets its checkmark
   if (!markEl) {
     const toggle = e.target.closest('.item-reason-toggle');
@@ -4217,7 +4215,7 @@ function autoMarkItemRead(item, { requireThread = false, overrideTs } = {}) {
   const { channel, ts, threadTs, hasMention } = markAll.dataset;
   const markTs = overrideTs || ts;
   if (overrideTs) markAll.dataset.ts = markTs;
-  const _isIcon = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read');
+  const _isIcon = markAll.classList.contains('gutter-check') || markAll.classList.contains('reason-mark-read') || markAll.classList.contains('header-check');
   if (!_isIcon) markAll.textContent = '...';
   markAll.dataset.pending = 'true';
   sendToInject({ type: `${FSLACK}:markRead`, channel, ts: markTs, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
@@ -5931,7 +5929,7 @@ function syncMarkReadSiblings(itemEl, done) {
   if (!itemEl) return;
   for (const sib of itemEl.querySelectorAll('.mark-all-read')) {
     if (sib.dataset.pending) continue;
-    const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read');
+    const sibIsIcon = sib.classList.contains('gutter-check') || sib.classList.contains('reason-mark-read') || sib.classList.contains('header-check');
     if (done) {
       if (!sibIsIcon) sib.textContent = 'undo';
       sib.classList.add('done');
