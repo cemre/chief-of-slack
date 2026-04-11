@@ -696,19 +696,22 @@
     const uncached = channelIds.filter((cid) => !channels[cid]);
     if (progressCb) progressCb(0, uncached.length, channelIds.length - uncached.length);
     let done = 0;
-    await Promise.all(
-      uncached.map(async (cid) => {
-        try {
-          const info = await slackApi('conversations.info', { channel: cid });
-          channels[cid] = info.channel.name;
-          channelMeta[cid] = { isPrivate: info.channel.is_private || info.channel.is_im || info.channel.is_mpim || false };
-        } catch {
-          channels[cid] = cid;
-          channelMeta[cid] = { isPrivate: false };
-        }
-        if (progressCb) progressCb(++done, uncached.length, channelIds.length - uncached.length);
-      })
-    );
+    for (let i = 0; i < uncached.length; i += 20) {
+      const batch = uncached.slice(i, i + 20);
+      await Promise.all(
+        batch.map(async (cid) => {
+          try {
+            const info = await slackApi('conversations.info', { channel: cid });
+            channels[cid] = info.channel.name;
+            channelMeta[cid] = { isPrivate: info.channel.is_private || info.channel.is_im || info.channel.is_mpim || false };
+          } catch {
+            channels[cid] = cid;
+            channelMeta[cid] = { isPrivate: false };
+          }
+          if (progressCb) progressCb(++done, uncached.length, channelIds.length - uncached.length);
+        })
+      );
+    }
     return { channels, channelMeta };
   }
 
