@@ -141,32 +141,25 @@ ${identity.nameClause}${identity.userContextClause}
 ${vipList ? `VIPs: ${vipList}` : ''}
 
 CATEGORIES (be conservative — when in doubt, go lower):
-- "act_now": someone EXPLICITLY asked me a question, requested my review, or is waiting for MY response. There must be a direct ask addressed to me.
-- "priority": needs my attention soon, but nobody is stuck on me specifically
-- "when_free": worth reading — relevant to my work or area
+- "priority": needs my attention soon — someone asked me a question, requested my review, or I need to act on this
+- "when_free": worth reading — relevant to my work or area, but no action needed from me right now
 - "noise": doesn't need my attention
 - "drop": ONLY when userReplied=true and new messages are just acks/chatter
 
-CRITICAL — these are NOT act_now:
-- A bug that affects me but nobody asked me to fix it → noise or when_free
+CRITICAL — these are NOT priority:
+- A bug that affects me but nobody asked me to fix it → when_free or noise
 - Someone is blocked, but not blocked on ME specifically → when_free at most
 - A discussion in my area where someone else was explicitly asked (e.g., "@jlo what do you think?") → noise unless I'm also asked
 - A reply on a thread I started, but just informational / not asking me anything → when_free at most
 - An announcement, even about something I care about → when_free
-
-CRITICAL — these are NOT priority:
 - General product ideas or feature proposals, even from VIPs → when_free
 - Announcements, launches, or status updates with no ask → when_free
 - Dogfooding feedback or bug reports unless I'm asked to act → when_free
 - Someone else's conversation that's merely in a channel I follow → when_free or noise
 
-KEY TEST: Before classifying act_now, ask: "Who specifically is waiting for MY response?" If the answer is nobody, it's not act_now.
-Before classifying priority, ask: "Do I need to do something about this soon?" If it's just interesting/relevant, it's when_free.
+KEY TEST: Before classifying priority, ask: "Do I need to do something about this soon?" If it's just interesting/relevant, it's when_free.
 
-If isMentioned=true without a clear ask → priority (not act_now).
 If userReplied=true and someone asks a question → treat as directed at me.
-If sidebarSection="Minimum: Priority" → classify at least as priority.
-If sidebarSection="Minimum: Relevant" → classify at least as when_free.
 
 ITEMS:
 ${serialized}
@@ -176,14 +169,14 @@ Output a JSON object mapping each "id" to a [reason, category, summary] triple.
 REASON comes first — it drives the classification. Write the reason, then pick the category that follows.
 
 The reason must answer: "why does this belong here?" Be specific to my work.
-- act_now reasons must name WHO is waiting for me and WHAT they need.
+- priority reasons must name WHO needs me and WHAT they need.
 - when_free reasons must name the specific connection to my work. NOT "relevant to your area" — instead "Atlassian signup analysis, directly comparable to Dia signup flow".
 - If isMentioned in a long thread, the summary must say what the thread is about AND why I was tagged.
 
 Summary: under 10 words, lowercase, no period, "[person] [verb] [thing]".
 
 Examples:
-["josh asked me directly to confirm deploy", "act_now", "josh asked to confirm the deploy"],
+["josh asked me directly to confirm deploy", "priority", "josh asked to confirm the deploy"],
 ["direct invite to team event requiring response", "priority", "rosey asks to come to bug bash"],
 ["pod teammate shipped menu bar redesign I'll review", "when_free", "matthew merged menu bar redesign PR"],
 ["windows team update, different product area", "noise", "brahm shared windows alpha status update"],
@@ -191,7 +184,6 @@ Examples:
 ["someone blocked but asked someone else for help", "noise", "patrick asks jlo about model migration"],
 ["reply on my thread but just informational", "noise", "jane asked rishi about cpu issue on my post"]
 
-Also include "_noiseOrder": array of noise/drop IDs sorted most-relevant-first.
 Return ONLY the JSON object, no markdown fences.`;
 }
 
@@ -385,10 +377,10 @@ async function handlePrioritize(payload, selfName) {
     if (result.error) return result;
 
     const parsed = result.parsed;
-    const noiseOrder = Array.isArray(parsed._noiseOrder) ? parsed._noiseOrder : [];
-    delete parsed._noiseOrder;
+    delete parsed._noiseOrder; // legacy field, ignore if LLM still emits it
     const priorities = {};
     const reasons = {};
+    const noiseOrder = []; // infer from key order in response
     for (const [key, val] of Object.entries(parsed)) {
       if (Array.isArray(val) && val.length >= 3) {
         // New format: [reason, category, summary]
@@ -402,9 +394,11 @@ async function handlePrioritize(payload, selfName) {
       } else {
         priorities[key] = val;
       }
+      const cat = priorities[key];
+      if (cat === 'noise' || cat === 'drop') noiseOrder.push(key);
     }
     console.log('[fslack bg] LLM response:', JSON.stringify({ priorities, reasons }, null, 2));
-    const firstKey = Object.keys(parsed).find(k => k !== '_noiseOrder');
+    const firstKey = Object.keys(parsed)[0];
     if (firstKey) console.log(`[fslack bg] Format check: ${firstKey} = ${JSON.stringify(parsed[firstKey])}`);
     return { priorities, noiseOrder, reasons };
   } catch (err) {

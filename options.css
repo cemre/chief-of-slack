@@ -361,25 +361,24 @@ textarea {
 
 .reset-prompt-btn {
   margin-left: auto;
-  background: none;
-  border: 1px solid #d6d4d9;
+  background: #4a154b;
+  border: none;
   border-radius: 4px;
-  padding: 2px 10px;
+  padding: 3px 12px;
   font-size: 11px;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   font-weight: 500;
-  color: #89868d;
+  color: #fff;
   cursor: pointer;
   transition: all 0.15s;
 }
 
 .reset-prompt-btn:hover:not(:disabled) {
-  background: #f0eff2;
-  color: #1d1c1d;
+  background: #611f63;
 }
 
 .reset-prompt-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.3;
   cursor: default;
 }
 
