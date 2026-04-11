@@ -197,20 +197,36 @@ function handleSnapshotFile(file) {
       for (const key of SNAPSHOT_KEYS) {
         if (key in data) toStore[key] = data[key];
       }
-      if (toStore.fslackViewCache && toStore.fslackViewCache.ts) {
+      if (toStore.fslackViewCache) {
         toStore.fslackViewCache.ts = Date.now();
       }
       if ('fslackLastFetchTs' in toStore) {
         toStore.fslackLastFetchTs = Date.now();
       }
+      // Clear LLM caches so the pipeline re-runs from scratch
+      toStore.fslackPrioritizationCache = null;
+      toStore.fslackItemSummaryCache = null;
+      toStore.fslackSummaryCache = null;
+      toStore.fslackVipSummaryCache = null;
+      toStore.fslackAllSummaryCache = null;
       console.log('[fslack] storing', Object.keys(toStore).length, 'keys:', Object.keys(toStore));
       chrome.storage.local.set(toStore, () => {
         if (chrome.runtime.lastError) {
           console.error('[fslack] storage.set error:', chrome.runtime.lastError);
           return;
         }
-        console.log('[fslack] snapshot imported, reloading...');
-        window.location.href = window.location.href;
+        console.log('[fslack] snapshot imported, re-running pipeline...');
+        // Clear in-memory caches
+        _prioritizationCache = null;
+        _itemSummaryCache = {};
+        // Load the imported view cache and re-run the full pipeline
+        const vc = toStore.fslackViewCache;
+        if (vc && vc.data) {
+          cachedView = vc;
+          prioritizeAndRender(vc.data);
+        } else {
+          window.location.href = window.location.href;
+        }
       });
     } catch (e) {
       console.error('[fslack] snapshot import failed:', e);

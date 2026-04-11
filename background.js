@@ -117,14 +117,7 @@ chrome.commands.onCommand.addListener(async (command) => {
   if (command !== 'toggle-flack') return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url?.startsWith('https://app.slack.com')) return;
-  // Toggle: if panel port exists, close it; otherwise open
-  if (panelPort) {
-    try { await chrome.sidePanel.setOptions({ enabled: false, tabId: tab.id }); } catch {}
-    // Re-enable for future opens
-    setTimeout(() => { chrome.sidePanel.setOptions({ enabled: true, tabId: tab.id }).catch(() => {}); }, 100);
-  } else {
-    try { await chrome.sidePanel.open({ tabId: tab.id }); } catch {}
-  }
+  try { await chrome.sidePanel.open({ tabId: tab.id }); } catch {}
 });
 
 // ── Build the prioritization prompt ──
