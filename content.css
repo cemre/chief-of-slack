@@ -1115,7 +1115,6 @@ ul.deep-summary li + li { border-top: none; }
 .show-messages-link:hover { color: var(--text-bright); text-decoration: underline; }
 .deep-messages { display: none; margin-top: 8px; }
 .summary-toggle { cursor: pointer; }
-.summary-toggle-group { cursor: default; }
 .summary-reply-count { color: var(--text-secondary); }
 .summary-bullet-link { color: inherit; text-decoration: none; }
 .summary-bullet-link:hover { color: var(--text-bright); text-decoration: underline; }
@@ -1472,11 +1471,7 @@ ul.deep-summary li + li { border-top: none; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Expanded items: skip summary, show messages directly */
-.when-free-items .item.detail-expanded .deep-summary-wrap,
-.noise-items .item.detail-expanded .deep-summary-wrap {
-  display: none;
-}
+/* Expanded items: show messages directly */
 .when-free-items .item.detail-expanded .deep-messages,
 .noise-items .item.detail-expanded .deep-messages {
   display: block !important;

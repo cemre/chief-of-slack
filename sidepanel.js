@@ -2280,29 +2280,8 @@ function reasonBadge(item, cssClass) {
   return `<div class="item-reason item-reason-toggle ${cls}"><span class="reason-text">${reasonIcons(item)}${escapeHtml(item._reason)} ↓</span><span class="reason-mark-read mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs}" data-has-mention="${hasMention}" title="Mark read">✓</span></div>`;
 }
 
-// Shared toggle structure: bullet summary (clickable) → hidden messages
-// Parse channel summary bullet, extracting optional [ts] prefix for linking
-function renderChannelSummaryBullet(bullet, channelId) {
-  const stripped = bullet.replace(/^-\s*/, '');
-  const tsMatch = stripped.match(/^\[(\d+\.\d+)\]\s*/);
-  if (tsMatch && channelId) {
-    const ts = tsMatch[1];
-    const text = stripped.slice(tsMatch[0].length);
-    const href = slackPermalink(channelId, ts);
-    return `<li><a class="summary-bullet-link" href="${href}" target="_blank" data-channel="${channelId}" data-ts="${ts}">${escapeHtml(text)}</a></li>`;
-  }
-  return `<li>${escapeHtml(stripped)}</li>`;
-}
-
-function renderChannelSummaryBullets(summary, channelId) {
-  return summary.split('\n').filter(b => b.trim()).map(b => renderChannelSummaryBullet(b, channelId)).join('');
-}
-
-function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
-  return `<div class="summary-toggle-group" data-target="${targetId}">`
-    + `<div class="deep-summary-wrap">${extraContent || ''}<ul class="deep-summary">${bulletsHtml}</ul></div>`
-    + `</div>`
-    + `<div class="deep-messages" id="${targetId}">${messagesHtml}</div>`;
+function summaryToggleHtml(targetId, messagesHtml) {
+  return `<div class="deep-messages" id="${targetId}">${messagesHtml}</div>`;
 }
 
 // Header expand link for item-left: "N msgs ↓"
@@ -2649,8 +2628,7 @@ function renderChannelItem(cp, data, cssClass) {
       html += `<div class="unread-earlier-container" data-for="${chMsgsKey}"></div>`;
     }
     if (cp._channelSummary) {
-      const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
-      html += summaryToggleHtml(csMsgId, bullets, messagesHtml);
+      html += summaryToggleHtml(csMsgId, messagesHtml);
     } else {
       html += `<div class="msg-row"><div class="msg-content">
         <div id="${csKey}-loading" style="color:#3d4260;font-size:12px;font-style:italic;margin-bottom:4px">Summarizing...</div>
@@ -2715,7 +2693,6 @@ function renderDeepSummarizedItem(cp, data) {
     messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
   }
   const deepMsgId = `deep-msgs-${cp.channel_id}`;
-  const deepBullets = renderChannelSummaryBullets(cp._deepSummary || '', cp.channel_id);
   const deepOpenHref = slackPermalink(cp.channel_id, newestTs) || `https://app.slack.com/archives/${cp.channel_id}`;
   return `<div class="item noise-item">
     <div class="item-left">
@@ -2725,7 +2702,8 @@ function renderDeepSummarizedItem(cp, data) {
     </div>
     ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
     <div class="item-right">
-      ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
+      ${cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : ''}
+      ${summaryToggleHtml(deepMsgId, messagesHtml)}
     </div>
     ${gutterCheck(cp.channel_id, latest?.ts, null, false)}
   </div>`;
@@ -3740,13 +3718,11 @@ bodyEl.addEventListener('click', (e) => {
     }
     const itemRight = item?.querySelector('.item-right');
     const msgRow = itemRight?.querySelector('.msg-row.summarized');
-    const summaryWrap = itemRight?.querySelector('.deep-summary-wrap');
     const countSpan = item?.querySelector('.summary-reply-count');
 
     if (msgsDiv.style.display === 'block') {
       msgsDiv.style.display = 'none';
       if (msgRow) msgRow.classList.remove('expanded');
-      if (summaryWrap) summaryWrap.style.display = '';
       if (countSpan) {
         const headerExp = countSpan.closest('.header-expand');
         if (headerExp) headerExp.classList.remove('is-expanded');
@@ -3756,7 +3732,6 @@ bodyEl.addEventListener('click', (e) => {
     } else {
       msgsDiv.style.display = 'block';
       if (msgRow) msgRow.classList.add('expanded');
-      if (summaryWrap) summaryWrap.style.display = 'none';
       if (countSpan) {
         const headerExp = countSpan.closest('.header-expand');
         if (headerExp) headerExp.classList.add('is-expanded');
@@ -4711,8 +4686,7 @@ function runWhenFreeChannelSummarization(whenFreeItems, data) {
       messagesHtml += `<div class="msg-row"><div class="msg-content item-text"><div class="msg-body-text">${userLink(m.subtype === 'bot_message' ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${renderMsgBody(m, cp.channel_id, data.users, 400, threadUi)}</div></div>${threadRepliesContainer(m, cp.channel_id, threadUi)}${msgActions(cp.channel_id, m.ts)}</div>`;
     }
     const rightEl = itemEl.querySelector('.item-right');
-    const bullets = renderChannelSummaryBullets(cp._channelSummary, cp.channel_id);
-    rightEl.innerHTML = summaryToggleHtml(csMsgId, bullets, messagesHtml);
+    rightEl.innerHTML = summaryToggleHtml(csMsgId, messagesHtml);
     // Summary arrived — messages are now behind toggle, so collapse the header-expand
     const headerExp = itemEl.querySelector('.header-expand');
     if (headerExp) headerExp.classList.remove('is-expanded');
