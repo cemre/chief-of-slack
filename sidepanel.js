@@ -310,7 +310,7 @@ function startFetchTimeout(ms = 15000) {
     } else {
       refreshLink.textContent = 'refresh now';
       refreshLink.style.display = '';
-      document.getElementById('refresh-bar')?.remove();
+      removeRefreshOverlay();
       _pendingInlineRefresh = false;
       const statusEl = document.getElementById('status');
       if (statusEl && (statusEl.textContent.includes('Starting') || statusEl.textContent.includes('Fetching'))) {
@@ -341,8 +341,9 @@ let lastFetchTime = null;
 let lastUpdatedTimer = null;
 
 // Auto start/stop snake animation when status appears/disappears
+// (skip the refresh-overlay snake — it has its own timer)
 new MutationObserver(() => {
-  const el = bodyEl.querySelector('.snake-game');
+  const el = bodyEl.querySelector('#status .snake-game');
   if (el && el !== _snakeEl) startSnakeAnim(el);
   else if (!el && _snakeTimer) stopSnakeAnim();
 }).observe(bodyEl, { childList: true, subtree: true });
@@ -937,14 +938,13 @@ function startFetch(background = false) {
   if (!background) {
     fetchBtn.textContent = 'Fetching...';
     if (!keepVisible) {
-      bodyEl.innerHTML = statusHtml(null, _fetchReason ? `${_fetchReason} · Fetching...` : 'Starting fetch...');
+      let _fetchDetail = 'Fetching...';
+      /* DEV_ONLY_START */ if (_fetchReason) _fetchDetail = `${_fetchReason} · ${_fetchDetail}`; /* DEV_ONLY_END */
+      bodyEl.innerHTML = statusHtml(null, _fetchDetail);
       showEducationBanner(true);
     } else {
-      // Show inline loading indicator without wiping current view
-      const bar = document.createElement('div');
-      bar.id = 'refresh-bar';
-      bar.textContent = 'Refreshing...';
-      bodyEl.insertBefore(bar, bodyEl.firstChild);
+      // Show floating progress overlay without wiping current view
+      showProgress('Fetching...');
     }
     stagedRenderData = null;
     refreshLink.style.display = 'none';
@@ -1017,13 +1017,19 @@ function startFullFetch() {
   clearFetchTimeout();
   if (!_fetchReason) _fetchReason = 'Full fetch';
   isBackgroundFetch = false;
-  _pendingInlineRefresh = false;
-  document.getElementById('refresh-bar')?.remove();
+  _pendingInlineRefresh = !!cachedView?.prioritized;
+  removeRefreshOverlay();
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
-  bodyEl.innerHTML = statusHtml(null, _fetchReason ? `${_fetchReason} · Fetching all channels...` : 'Starting full fetch...');
-  showEducationBanner(true);
+  if (_pendingInlineRefresh) {
+    showProgress('Fetching all channels...');
+  } else {
+    let _fullDetail = 'Fetching all channels...';
+    /* DEV_ONLY_START */ if (_fetchReason) _fullDetail = `${_fetchReason} · ${_fullDetail}`; /* DEV_ONLY_END */
+    bodyEl.innerHTML = statusHtml(null, _fullDetail);
+    showEducationBanner(true);
+  }
   resetFetchState();
   isFastFetch = false;
   if (!port) {
@@ -1684,6 +1690,38 @@ function showStatusText(text) {
   const d = bodyEl.querySelector('#status .detail');
   if (d && _snakeTimer) d.textContent = text;
   else bodyEl.innerHTML = statusHtml(null, text);
+}
+
+/** Show/update an inline progress box (keeps cached content visible) or full-screen status */
+let _overlaySnakeTimer = null, _overlaySnakeGame = null;
+function showProgress(detail) {
+  if (_pendingInlineRefresh) {
+    let overlay = document.getElementById('refresh-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'refresh-overlay';
+      const game = new SnakeGame();
+      overlay.innerHTML = `<pre class="snake-game">${renderSnake(game)}</pre><span class="refresh-detail"></span>`;
+      bodyEl.insertBefore(overlay, bodyEl.firstChild);
+      // Start snake animation (separate from the full-screen one)
+      _overlaySnakeGame = game;
+      const snakeEl = overlay.querySelector('.snake-game');
+      _overlaySnakeTimer = setInterval(() => {
+        _overlaySnakeGame.tick();
+        snakeEl.textContent = renderSnake(_overlaySnakeGame);
+      }, SNAKE_TICK);
+    }
+    overlay.querySelector('.refresh-detail').textContent = detail || 'Refreshing...';
+  } else {
+    /* DEV_ONLY_START */ if (_fetchReason) detail = `${_fetchReason} · ${detail}`; /* DEV_ONLY_END */
+    showStatusText(detail);
+  }
+}
+
+function removeRefreshOverlay() {
+  if (_overlaySnakeTimer) { clearInterval(_overlaySnakeTimer); _overlaySnakeTimer = null; }
+  _overlaySnakeGame = null;
+  document.getElementById('refresh-overlay')?.remove();
 }
 
 function formatErrorTwoLines(err) {
@@ -5040,7 +5078,7 @@ function _prioritizeAndRenderInner(data, background = false) {
   }
 
   // Show loading while LLM works
-  if (!background) showStatusText(_fetchReason ? `${_fetchReason} · Summarizing...` : 'Summarizing messages...');
+  if (!background) showProgress('Summarizing...');
 
   const selfName = data.users?.[data.selfId] || '';
 
@@ -5191,7 +5229,7 @@ function _prioritizeAndRenderInner(data, background = false) {
     console.log(`[fslack] Got ${Object.keys(summaries).length} total summaries (${Object.keys(cachedSummaries).length} cached, ${uncachedItems.length} fresh)`);
 
     // Step 2: Single lean prioritize call
-    if (!background) showStatusText(_fetchReason ? `${_fetchReason} · Prioritizing...` : 'Prioritizing...');
+    if (!background) showProgress('Prioritizing...');
     const leanItems = buildLeanItems(allItems, summaries);
     return sendPrioritize(leanItems).then((resp) => {
       if (resp?.error) { handleLlmError(resp.error, 'Prioritization'); return; }
@@ -5636,7 +5674,7 @@ function runPrioritize() {
   if (_pendingInlineRefresh) {
     _pendingInlineRefresh = false;
     isBackgroundFetch = false;
-    document.getElementById('refresh-bar')?.remove();
+    removeRefreshOverlay();
     refreshLink.textContent = 'refresh now';
     refreshLink.style.display = '';
     fetchBtn.textContent = 'Fetch Unreads';
@@ -6025,8 +6063,7 @@ function handlePortMessage(msg) {
     clearFetchTimeout(); // got a response, fetch is alive — restart timeout
     startFetchTimeout(30000); // allow more time for in-progress fetches
     if (!isBackgroundFetch) {
-      const detail = msg.detail || '';
-      showStatusText(_fetchReason ? `${_fetchReason} · ${detail}` : detail);
+      showProgress(msg.detail || '');
     }
     return;
   }
@@ -6243,7 +6280,7 @@ function handlePortMessage(msg) {
     clearFetchTimeout();
     fetchBtn.disabled = false;
     fetchBtn.textContent = 'Fetch Unreads';
-    document.getElementById('refresh-bar')?.remove();
+    removeRefreshOverlay();
     if (isBackgroundFetch || _pendingInlineRefresh) {
       // Silently fail — don't wipe the UI
       console.warn('[fslack] Background fetch error:', msg.error);
