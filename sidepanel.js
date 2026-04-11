@@ -2266,7 +2266,7 @@ function reasonIcons(item) {
   if (item._type === 'thread' && !isDm) icons.push(REASON_SVG.thread);
   if (item._isMentioned) icons.push(REASON_SVG.mention);
   if (isSection && !isVip) icons.push(REASON_SVG.section);
-  return icons.length ? `<span class="reason-icons">${icons.join('')}</span> ` : '';
+  return `<span class="reason-icons">${icons.join('')}</span>`;
 }
 
 function reasonBadge(item, cssClass) {
@@ -2276,7 +2276,7 @@ function reasonBadge(item, cssClass) {
   const threadTs = item.ts || '';
   const channel = item.channel_id || '';
   const hasMention = item._isMentioned || item.mention_count > 0 ? '1' : '0';
-  return `<div class="item-reason item-reason-toggle ${cls}"><span class="reason-text">${reasonIcons(item)}${escapeHtml(item._reason)} ↓</span><span class="reason-mark-read mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs}" data-has-mention="${hasMention}" title="Mark read">✓</span></div>`;
+  return `<div class="item-reason item-reason-toggle ${cls}">${reasonIcons(item)}<span class="reason-text">${escapeHtml(item._reason)} ↓</span><span class="reason-mark-read mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs}" data-has-mention="${hasMention}" title="Mark read">✓</span></div>`;
 }
 
 function summaryToggleHtml(targetId, messagesHtml) {
@@ -3292,7 +3292,7 @@ bodyEl.addEventListener('click', (e) => {
     if (!details?.classList.contains('item-details')) return;
     const expanded = details.classList.toggle('expanded');
     const reasonText = reasonToggle.querySelector('.reason-text');
-    if (reasonText) reasonText.textContent = reasonText.textContent.replace(/[↓↑]$/, expanded ? '↑' : '↓');
+    if (reasonText) reasonText.innerHTML = reasonText.innerHTML.replace(/[↓↑]/, expanded ? '↑' : '↓');
     // Auto-open reply box for DMs when expanding via click (not keyboard)
     if (expanded && !reasonToggle._kbExpand) {
       const item = reasonToggle.closest('.item');
