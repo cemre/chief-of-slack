@@ -89,6 +89,7 @@ body.assess-mode .assess-wrap { display: flex; }
 }
 .assess-btn:hover { opacity: 1; background: none; }
 .assess-btn.assessed { opacity: 0.8; }
+.assess-btn svg { vertical-align: middle; }
 
 /* Feedback panel (shown below assess-wrap on thumbs-down) */
 .assess-feedback-panel {

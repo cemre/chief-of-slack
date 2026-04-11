@@ -615,11 +615,11 @@ function _injectAssessButtons(prioritized) {
     if (item.querySelector('.assess-btn')) continue;
     const btn = document.createElement('button');
     btn.className = 'assess-btn';
-    btn.textContent = '👎';
+    btn.innerHTML = THUMB_DOWN_SVG_12;
     btn.title = 'Wrong bucket';
     const upBtn = document.createElement('button');
     upBtn.className = 'assess-btn assess-up';
-    upBtn.textContent = '👍';
+    upBtn.innerHTML = THUMB_UP_SVG_12;
     upBtn.title = 'Correct bucket';
     upBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -713,7 +713,7 @@ function _showAssessPicker(btn, itemEl) {
     e.stopPropagation();
     _logAssessment(itemEl, currentCat, currentCat, comment.value.trim());
     btn.classList.add('assessed');
-    btn.textContent = '👎 ✓';
+    btn.innerHTML = THUMB_DOWN_SVG_12 + ' ✓';
     const upBtn = wrap.querySelector('.assess-up');
     if (upBtn) upBtn.style.display = 'none';
     panel.remove();
@@ -733,7 +733,7 @@ function _showAssessPicker(btn, itemEl) {
       e.stopPropagation();
       _logAssessment(itemEl, currentCat, cat, comment.value.trim());
       btn.classList.add('assessed');
-      btn.textContent = '👎 → ' + labels[cat];
+      btn.innerHTML = THUMB_DOWN_SVG_12 + ' → ' + labels[cat];
       const upBtn = wrap.querySelector('.assess-up');
       if (upBtn) upBtn.style.display = 'none';
       panel.remove();
@@ -2034,6 +2034,12 @@ const THREAD_BADGE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 const HEART_ICON = '<svg class="engage-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M2 6.342a3.375 3.375 0 0 1 6-2.088 3.375 3.375 0 0 1 5.997 2.26c-.063 2.134-1.618 3.76-2.955 4.784a14.437 14.437 0 0 1-2.676 1.61c-.02.01-.038.017-.05.022l-.014.006-.004.002h-.002a.75.75 0 0 1-.592.001h-.002l-.004-.003-.015-.006a5.528 5.528 0 0 1-.232-.107 14.395 14.395 0 0 1-2.535-1.557C3.564 10.22 1.999 8.558 1.999 6.38L2 6.342Z"/></svg>';
 const COMMENT_ICON = '<svg class="engage-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
 
+const THUMB_UP_SVG_14 = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M2.09 15a1 1 0 0 0 1-1V8a1 1 0 1 0-2 0v6a1 1 0 0 0 1 1ZM5.765 13H4.09V8c.663 0 1.218-.466 1.556-1.037a4.02 4.02 0 0 1 1.358-1.377c.478-.292.907-.706.989-1.26V4.32a9.03 9.03 0 0 0 0-2.642c-.028-.194.048-.394.224-.479A2 2 0 0 1 11.09 3c0 .812-.08 1.605-.235 2.371a.521.521 0 0 0 .502.629h1.733c1.104 0 2.01.898 1.901 1.997a19.831 19.831 0 0 1-1.081 4.788c-.27.747-.998 1.215-1.793 1.215H9.414c-.215 0-.428-.035-.632-.103l-2.384-.794A2.002 2.002 0 0 0 5.765 13Z"/></svg>';
+const THUMB_DOWN_SVG_14 = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M10.325 3H12v5c-.663 0-1.219.466-1.557 1.037a4.02 4.02 0 0 1-1.357 1.377c-.478.292-.907.706-.989 1.26v.005a9.031 9.031 0 0 0 0 2.642c.028.194-.048.394-.224.479A2 2 0 0 1 5 13c0-.812.08-1.605.234-2.371a.521.521 0 0 0-.5-.629H3C1.896 10 .99 9.102 1.1 8.003A19.827 19.827 0 0 1 2.18 3.215C2.45 2.469 3.178 2 3.973 2h2.703a2 2 0 0 1 .632.103l2.384.794a2 2 0 0 0 .633.103ZM14 2a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0V3a1 1 0 0 0-1-1Z"/></svg>';
+const HEART_SVG_14 = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M2 6.342a3.375 3.375 0 0 1 6-2.088 3.375 3.375 0 0 1 5.997 2.26c-.063 2.134-1.618 3.76-2.955 4.784a14.437 14.437 0 0 1-2.676 1.61c-.02.01-.038.017-.05.022l-.014.006-.004.002h-.002a.75.75 0 0 1-.592.001h-.002l-.004-.003-.015-.006a5.528 5.528 0 0 1-.232-.107 14.395 14.395 0 0 1-2.535-1.557C3.564 10.22 1.999 8.558 1.999 6.38L2 6.342Z"/></svg>';
+const THUMB_UP_SVG_12 = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M2.09 15a1 1 0 0 0 1-1V8a1 1 0 1 0-2 0v6a1 1 0 0 0 1 1ZM5.765 13H4.09V8c.663 0 1.218-.466 1.556-1.037a4.02 4.02 0 0 1 1.358-1.377c.478-.292.907-.706.989-1.26V4.32a9.03 9.03 0 0 0 0-2.642c-.028-.194.048-.394.224-.479A2 2 0 0 1 11.09 3c0 .812-.08 1.605-.235 2.371a.521.521 0 0 0 .502.629h1.733c1.104 0 2.01.898 1.901 1.997a19.831 19.831 0 0 1-1.081 4.788c-.27.747-.998 1.215-1.793 1.215H9.414c-.215 0-.428-.035-.632-.103l-2.384-.794A2.002 2.002 0 0 0 5.765 13Z"/></svg>';
+const THUMB_DOWN_SVG_12 = '<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M10.325 3H12v5c-.663 0-1.219.466-1.557 1.037a4.02 4.02 0 0 1-1.357 1.377c-.478.292-.907.706-.989 1.26v.005a9.031 9.031 0 0 0 0 2.642c.028.194-.048.394-.224.479A2 2 0 0 1 5 13c0-.812.08-1.605.234-2.371a.521.521 0 0 0-.5-.629H3C1.896 10 .99 9.102 1.1 8.003A19.827 19.827 0 0 1 2.18 3.215C2.45 2.469 3.178 2 3.973 2h2.703a2 2 0 0 1 .632.103l2.384.794a2 2 0 0 0 .633.103ZM14 2a1 1 0 0 0-1 1v6a1 1 0 1 0 2 0V3a1 1 0 0 0-1-1Z"/></svg>';
+
 function threadBadge(m, channel, truncId, opts = {}) {
   const rc = m.reaction_count || 0;
   const n = m.reply_count || 0;
@@ -2145,7 +2151,7 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   const replyBtn = showReply
     ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread">${replySvg}<kbd>R</kbd></span>`
     : '';
-  return `<div class="msg-actions"><span class="action-btn action-react${likeClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">👍<kbd>L</kbd></span><span class="action-btn action-react${heartClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="Heart">💛<kbd>H</kbd></span><span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save">${bookmarkSvg}<kbd>S</kbd></span>${replyBtn}</div>`;
+  return `<div class="msg-actions"><span class="action-btn action-react${likeClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="+1" title="+1">${THUMB_UP_SVG_14}<kbd>L</kbd></span><span class="action-btn action-react${heartClass}" data-channel="${channel}" data-ts="${ts}" data-emoji="yellow_heart" title="Heart">${HEART_SVG_14}<kbd>H</kbd></span><span class="action-btn action-save${saveClass}" data-channel="${channel}" data-ts="${ts}" title="Save">${bookmarkSvg}<kbd>S</kbd></span>${replyBtn}</div>`;
 }
 
 function slackPermalink(channel, ts, threadTs) {
@@ -3232,7 +3238,7 @@ bodyEl.addEventListener('click', (e) => {
   // If already assessed, undo: remove from log, reset button
   if (btn.classList.contains('assessed')) {
     btn.classList.remove('assessed');
-    btn.textContent = '👎';
+    btn.innerHTML = THUMB_DOWN_SVG_12;
     const upBtn = wrap.querySelector('.assess-up');
     if (upBtn) upBtn.style.display = '';
     // Remove last matching assessment from log
