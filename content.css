@@ -636,10 +636,10 @@ ul.slack-list, ol.slack-list {
 /* Expand/collapse */
 .header-expand { display: none; }
 .header-expand.is-expanded { display: inline; }
-.header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-.header-expand .collapse-label:hover { color: var(--accent); }
-.header-check { color: var(--text-muted); cursor: pointer; font-size: 12px; }
-.header-check:hover { color: var(--accent); }
+.header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 4px 8px; margin: -4px -8px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
+.header-expand .collapse-label:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
+.header-check { color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 4px 6px; margin: -4px -6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
+.header-check:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
 .item-left:has(.header-expand.is-expanded) > .item-time,
 .item-left:has(.header-expand.is-expanded) > .item-sep { display: none; }
 .noise-items { display: none; }
@@ -725,7 +725,7 @@ ul.slack-list, ol.slack-list {
   transition: color 0.15s;
 }
 .channels-header-refresh:hover { color: var(--accent); }
-.channels-header-refresh svg { width: 16px; height: 16px; vertical-align: -3px; }
+.channels-header-refresh svg { width: 12px; height: 12px; vertical-align: -2px; }
 
 /* Priority badges */
 .priority-badge {
