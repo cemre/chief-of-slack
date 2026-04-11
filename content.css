@@ -284,9 +284,7 @@ section { padding: 0; }
 
 /* Section headers — floating HUD labels */
 section h2 {
-  height: 36px;
-  box-sizing: border-box;
-  padding: 0 16px;
+  padding: 10px 16px;
   display: flex;
   align-items: center;
   font-size: 10px;
@@ -467,7 +465,7 @@ a.item-user[data-channel]:hover::before { opacity: 1; }
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 0.85em;
   background: rgba(130,150,220,0.08);
-  color: var(--priority-orange);
+  color: var(--text-primary);
   padding: 1px 4px;
   border-radius: 3px;
   border: 1px solid rgba(130,150,220,0.06);
@@ -943,8 +941,9 @@ ul.slack-list, ol.slack-list {
   letter-spacing: 0.5px;
 }
 .msg-row.kb-focused > .msg-actions kbd { display: block; }
-.action-btn.reacted { opacity: 0.3; }
-.action-btn.saved { color: var(--warning); }
+.action-btn:active { color: var(--accent); }
+.action-btn.reacted { color: var(--accent); opacity: 0.5; }
+.action-btn.saved { color: var(--accent); }
 .root-seen .msg-files { display: none; }
 .item.muted-pending { opacity: 0.3; }
 .undo-mute { color: var(--priority-orange) !important; }
@@ -1003,16 +1002,26 @@ ul.slack-list, ol.slack-list {
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   color: var(--text-bright);
-  font-size: 14px;
+  font-size: 12px;
   font-family: inherit;
   resize: none;
   overflow: hidden;
-  min-height: 32px;
   max-height: 200px;
   line-height: 1.4;
   transition: border-color 0.15s;
 }
 .reply-input:focus { outline: none; border-color: var(--accent); }
+.reply-send {
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 1;
+}
+.reply-send:hover { color: var(--text-primary); border-color: var(--text-secondary); }
 
 /* Warning banner */
 .warning-banner {
@@ -1187,7 +1196,7 @@ ul.deep-summary li + li { border-top: none; }
 }
 
 /* Collapsible reason-badge toggle */
-.item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: 0 -16px -12px -16px; padding: 0 16px 12px 16px; border-radius: 0; transition: background 0.1s; }
+.item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: -12px -16px -12px -16px; padding: 12px 16px 12px 16px; border-radius: 0; transition: background 0.1s; }
 .act-now .item-reason-toggle { background: linear-gradient(90deg, rgba(240,71,112,0.07) 0%, transparent 50%); }
 .priority-item .item-reason-toggle { background: linear-gradient(90deg, rgba(232,141,58,0.06) 0%, transparent 50%); }
 .interesting .item-reason-toggle { background: linear-gradient(90deg, rgba(91,156,245,0.04) 0%, transparent 40%); }
@@ -1311,7 +1320,7 @@ ul.deep-summary li + li { border-top: none; }
   background: rgba(232, 141, 58, 0.06) !important;
 }
 .item-details { display: none; }
-.item-details.expanded { display: block; font-size: 12px; }
+.item-details.expanded { display: block; font-size: 12px; margin-top: 8px; }
 
 /* ═══════════════════════════════════════════════════════════
    Compact mode — Relevant & Noise sections

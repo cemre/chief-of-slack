@@ -860,6 +860,7 @@ fetch(chrome.runtime.getURL('standard-emoji.json'))
   .catch(e => console.warn('[fslack] failed to load standard emoji:', e));
 
 function saveViewCache(data, popular, prioritized, savedItems = []) {
+  if (_snapshotMode) return; // don't overwrite imported snapshot
   cachedView = { data, popular, prioritized, saved: savedItems, ts: Date.now() };
   chrome.storage.local.set({ fslackLastFetchTs: cachedView.ts, fslackViewCache: cachedView }, () => {
     if (chrome.runtime.lastError) {
@@ -926,6 +927,7 @@ function loadCachedPrefs(callback) {
 
 function startFetch(background = false) {
   if (fetchBtn.disabled) return;
+  _snapshotMode = false; // exit snapshot mode on any fetch
   if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
   // If we already have content, keep it visible and fetch in background
   const keepVisible = !background && cachedView?.prioritized;
@@ -1002,6 +1004,7 @@ function startFetch(background = false) {
 }
 
 function scheduleBackgroundPoll() {
+  if (_snapshotMode) return;
   if (autoRefreshTimer) clearTimeout(autoRefreshTimer);
   autoRefreshTimer = setTimeout(() => {
     autoRefreshTimer = null;
@@ -2146,7 +2149,7 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   const myReactions = myReactionsMap[`${channel}:${ts}`] || [];
   const likeClass = myReactions.includes('+1') ? ' reacted' : '';
   const heartClass = myReactions.includes('yellow_heart') ? ' reacted' : '';
-  const bookmarkSvg = `<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="${fill}" stroke="currentColor" stroke-width="0.75" width="14" height="14"><path d="M3.75 2a.75.75 0 0 0-.75.75v10.5a.75.75 0 0 0 1.28.53L8 10.06l3.72 3.72a.75.75 0 0 0 1.28-.53V2.75a.75.75 0 0 0-.75-.75h-8.5Z"/></svg>`;
+  const bookmarkSvg = `<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M3.75 2a.75.75 0 0 0-.75.75v10.5a.75.75 0 0 0 1.28.53L8 10.06l3.72 3.72a.75.75 0 0 0 1.28-.53V2.75a.75.75 0 0 0-.75-.75h-8.5Z"/></svg>`;
   const replySvg = `<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M12.5 9.75A2.75 2.75 0 0 0 9.75 7H4.56l2.22 2.22a.75.75 0 1 1-1.06 1.06l-3.5-3.5a.75.75 0 0 1 0-1.06l3.5-3.5a.75.75 0 0 1 1.06 1.06L4.56 5.5h5.19a4.25 4.25 0 0 1 0 8.5h-1a.75.75 0 0 1 0-1.5h1a2.75 2.75 0 0 0 2.75-2.75Z" clip-rule="evenodd"/></svg>`;
   const replyBtn = showReply
     ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread">${replySvg}<kbd>R</kbd></span>`
@@ -2166,8 +2169,8 @@ function msgTime(ts, channel, threadTs) {
   if (!t) return '';
   const attrs = channel && ts ? ` data-channel="${channel}" data-ts="${ts}"` : '';
   const href = slackPermalink(channel, ts, threadTs);
-  if (href) return `<a class="msg-time"${attrs} href="${href}" target="_blank">${t}</a>`;
-  return `<span class="msg-time"${attrs}>${t}</span>`;
+  if (href) return ` <a class="msg-time"${attrs} href="${href}" target="_blank">${t}</a>`;
+  return ` <span class="msg-time"${attrs}>${t}</span>`;
 }
 
 function itemTime(ts, channel) {
@@ -2821,7 +2824,6 @@ function sortNoiseItems(items, noiseOrder = []) {
 
 function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], _unused = false, cachedTs = null) {
   _fetchReason = ''; // clear reason — pipeline complete
-  _snapshotMode = false; // allow live data again after snapshot replay
   const { actNow, priority, whenFree, noise } = prioritized;
   _hiddenUnreadReplies.clear();
 
