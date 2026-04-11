@@ -340,13 +340,6 @@ const lastUpdatedEl = document.getElementById('last-updated');
 let lastFetchTime = null;
 let lastUpdatedTimer = null;
 
-// Auto start/stop snake animation when status appears/disappears
-// (skip the refresh-overlay snake — it has its own timer)
-new MutationObserver(() => {
-  const el = bodyEl.querySelector('#status .snake-game');
-  if (el && el !== _snakeEl) startSnakeAnim(el);
-  else if (!el && _snakeTimer) stopSnakeAnim();
-}).observe(bodyEl, { childList: true, subtree: true });
 
 function updateLastUpdated() {
   if (!lastFetchTime) return;
@@ -938,12 +931,10 @@ function startFetch(background = false) {
   if (!background) {
     fetchBtn.textContent = 'Fetching...';
     if (!keepVisible) {
-      let _fetchDetail = 'Fetching...';
-      /* DEV_ONLY_START */ if (_fetchReason) _fetchDetail = `${_fetchReason} · ${_fetchDetail}`; /* DEV_ONLY_END */
-      bodyEl.innerHTML = statusHtml(null, _fetchDetail);
+      bodyEl.innerHTML = '';
+      showProgress('Fetching...');
       showEducationBanner(true);
     } else {
-      // Show floating progress overlay without wiping current view
       showProgress('Fetching...');
     }
     stagedRenderData = null;
@@ -1022,14 +1013,11 @@ function startFullFetch() {
   fetchBtn.disabled = true;
   fetchBtn.textContent = 'Fetching...';
   refreshLink.style.display = 'none';
-  if (_pendingInlineRefresh) {
-    showProgress('Fetching all channels...');
-  } else {
-    let _fullDetail = 'Fetching all channels...';
-    /* DEV_ONLY_START */ if (_fetchReason) _fullDetail = `${_fetchReason} · ${_fullDetail}`; /* DEV_ONLY_END */
-    bodyEl.innerHTML = statusHtml(null, _fullDetail);
+  if (!_pendingInlineRefresh) {
+    bodyEl.innerHTML = '';
     showEducationBanner(true);
   }
+  showProgress('Fetching all channels...');
   resetFetchState();
   isFastFetch = false;
   if (!port) {
@@ -1672,58 +1660,29 @@ function renderSnake(game) {
   return rows.join('\n');
 }
 
-let _snakeTimer = null, _snakeGame = null, _snakeEl = null;
-function startSnakeAnim(el) {
-  stopSnakeAnim();
-  _snakeEl = el;
-  _snakeGame = new SnakeGame();
-  el.textContent = renderSnake(_snakeGame);
-  _snakeTimer = setInterval(() => {
-    _snakeGame.tick();
-    el.textContent = renderSnake(_snakeGame);
-  }, SNAKE_TICK);
-}
-function stopSnakeAnim() {
-  if (_snakeTimer) { clearInterval(_snakeTimer); _snakeTimer = null; }
-  _snakeGame = null;
-  _snakeEl = null;
-}
-
-function statusHtml(_face, detail) {
-  const game = new SnakeGame();
-  return `<div id="status"><div class="status-face snake-game">${renderSnake(game)}</div><div class="detail">${detail}</div></div>`;
-}
-
 function showStatusText(text) {
-  const d = bodyEl.querySelector('#status .detail');
-  if (d && _snakeTimer) d.textContent = text;
-  else bodyEl.innerHTML = statusHtml(null, text);
+  showProgress(text);
 }
 
-/** Show/update an inline progress box (keeps cached content visible) or full-screen status */
+/** Show/update an inline progress overlay (always uses compact refresh-overlay) */
 let _overlaySnakeTimer = null, _overlaySnakeGame = null;
 function showProgress(detail) {
-  if (_pendingInlineRefresh) {
-    let overlay = document.getElementById('refresh-overlay');
-    if (!overlay) {
-      overlay = document.createElement('div');
-      overlay.id = 'refresh-overlay';
-      const game = new SnakeGame();
-      overlay.innerHTML = `<pre class="snake-game">${renderSnake(game)}</pre><span class="refresh-detail"></span>`;
-      bodyEl.insertBefore(overlay, bodyEl.firstChild);
-      // Start snake animation (separate from the full-screen one)
-      _overlaySnakeGame = game;
-      const snakeEl = overlay.querySelector('.snake-game');
-      _overlaySnakeTimer = setInterval(() => {
-        _overlaySnakeGame.tick();
-        snakeEl.textContent = renderSnake(_overlaySnakeGame);
-      }, SNAKE_TICK);
-    }
-    overlay.querySelector('.refresh-detail').textContent = detail || 'Refreshing...';
-  } else {
-    /* DEV_ONLY_START */ if (_fetchReason) detail = `${_fetchReason} · ${detail}`; /* DEV_ONLY_END */
-    showStatusText(detail);
+  /* DEV_ONLY_START */ if (_fetchReason) detail = `${_fetchReason} · ${detail}`; /* DEV_ONLY_END */
+  let overlay = document.getElementById('refresh-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'refresh-overlay';
+    const game = new SnakeGame();
+    overlay.innerHTML = `<pre class="snake-game">${renderSnake(game)}</pre><span class="refresh-detail"></span>`;
+    bodyEl.insertBefore(overlay, bodyEl.firstChild);
+    _overlaySnakeGame = game;
+    const snakeEl = overlay.querySelector('.snake-game');
+    _overlaySnakeTimer = setInterval(() => {
+      _overlaySnakeGame.tick();
+      snakeEl.textContent = renderSnake(_overlaySnakeGame);
+    }, SNAKE_TICK);
   }
+  overlay.querySelector('.refresh-detail').textContent = detail || 'Refreshing...';
 }
 
 function removeRefreshOverlay() {
@@ -2921,10 +2880,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     html += '</section>';
   }
 
-  // Loading indicator while LLM is working
-  if (loading) {
-    html += statusHtml(null, 'Analyzing remaining messages with AI...');
-  }
+  // Loading indicator while LLM is working — handled by showProgress overlay, no inline status needed
 
   // Channel Messages (noise)
   const hasChannelMessages = !loading && (noise.length > 0 || deepNoiseLoading);
@@ -4295,7 +4251,8 @@ function restoreMainView() {
     return;
   }
   if (!showFromCache()) {
-    bodyEl.innerHTML = statusHtml(null, 'Waiting for Slack tab...');
+    bodyEl.innerHTML = '';
+    showProgress('Waiting for Slack tab...');
   }
 }
 
@@ -6331,7 +6288,8 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
     return;
   }
   if (!hadCache) {
-    bodyEl.innerHTML = statusHtml(null, 'Waiting for Slack tab...');
+    bodyEl.innerHTML = '';
+    showProgress('Waiting for Slack tab...');
     showEducationBanner(true);
   }
 
@@ -6429,7 +6387,8 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const nowSet = !!changes.claudeApiKey.newValue;
   _hasApiKey = nowSet;
   if (nowSet && bodyEl.querySelector('.welcome-screen')) {
-    bodyEl.innerHTML = statusHtml(null, 'Waiting for Slack tab...');
+    bodyEl.innerHTML = '';
+    showProgress('Waiting for Slack tab...');
     if (!port) connectPort();
   }
 });
