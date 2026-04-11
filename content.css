@@ -1209,6 +1209,10 @@ ul.deep-summary li + li { border-top: none; }
 .msg-row.kb-focused > .msg-content .msg-time { opacity: 1; }
 .msg-row.kb-focused > .msg-content > .thread-replies-container .msg-time { opacity: 0; }
 .thread-replies-container .msg-row:hover .msg-time { opacity: 1; }
+/* Keyboard nav wins over hover */
+.item.kb-focused .item-reason-toggle:hover { background: transparent; }
+.act-now.kb-focused .item-reason-toggle:hover { background: rgba(240,71,112,0.17); }
+.priority-item.kb-focused .item-reason-toggle:hover { background: rgba(232,141,58,0.17); }
 
 /* Collapsible reason-badge toggle */
 .item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: -12px -16px -12px -16px; padding: 12px 16px 12px 16px; border-radius: 0; transition: background 0.1s; }
