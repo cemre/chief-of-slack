@@ -189,11 +189,6 @@ const TOKEN_DEFAULTS = {
   threadSummary: 300,
 };
 
-// ── Load token limits (user overrides or defaults) ──
-async function getTokenLimits() {
-  const { tokenLimits } = await chrome.storage.local.get('tokenLimits');
-  return { ...TOKEN_DEFAULTS, ...(tokenLimits || {}) };
-}
 
 // ── Token usage tracking (read-modify-write to avoid race with service worker startup) ──
 async function trackUsage(type, usage, model) {
@@ -225,7 +220,7 @@ const MODEL_FOR = {
   batchSummarize: MODEL_SONNET,
 };
 
-async function callClaude(apiKey, prompt, limitKey, limits) {
+async function callClaude(apiKey, prompt, limitKey) {
   const model = MODEL_FOR[limitKey] || MODEL_HAIKU;
   const resp = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -236,7 +231,7 @@ async function callClaude(apiKey, prompt, limitKey, limits) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: limits[limitKey] || TOKEN_DEFAULTS[limitKey],
+      max_tokens: TOKEN_DEFAULTS[limitKey],
       messages: [{ role: 'user', content: prompt }],
     }),
   });
@@ -346,11 +341,11 @@ async function handleBatchSummarize(items) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const [identity, customPrompts] = await Promise.all([getIdentity(), getCustomPrompts()]);
   const prompt = buildBatchSummarizePrompt(items, identity, customPrompts);
 
   try {
-    const result = await callClaude(claudeApiKey, prompt, 'batchSummarize', limits);
+    const result = await callClaude(claudeApiKey, prompt, 'batchSummarize');
     if (result.error) return result;
     return { summaries: result.parsed };
   } catch (err) {
@@ -363,11 +358,11 @@ async function handlePrioritize(payload, selfName) {
   const { claudeApiKey, vipNames } = await chrome.storage.local.get(['claudeApiKey', 'vipNames']);
   if (!claudeApiKey) return { error: 'no_api_key' };
 
-  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const [identity, customPrompts] = await Promise.all([getIdentity(), getCustomPrompts()]);
   const prompt = buildPrompt(payload, selfName, identity, vipNames, customPrompts);
 
   try {
-    const result = await callClaude(claudeApiKey, prompt, 'prioritize', limits);
+    const result = await callClaude(claudeApiKey, prompt, 'prioritize');
     if (result.error) return result;
 
     const parsed = result.parsed;
@@ -431,9 +426,9 @@ No markdown fences, no explanation.`;
 async function handleChannelSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const [identity, customPrompts] = await Promise.all([getIdentity(), getCustomPrompts()]);
   try {
-    const result = await callClaude(claudeApiKey, buildChannelSummaryPrompt(item, identity, customPrompts), 'channelSummary', limits);
+    const result = await callClaude(claudeApiKey, buildChannelSummaryPrompt(item, identity, customPrompts), 'channelSummary');
     if (result.error) return result;
     return { summary: result.parsed };
   } catch (err) { return { error: err.message }; }
@@ -472,9 +467,9 @@ No explanation, no markdown fences, just the JSON object.`;
 async function handleVipSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const [identity, customPrompts] = await Promise.all([getIdentity(), getCustomPrompts()]);
   try {
-    const result = await callClaude(claudeApiKey, buildVipSummarizePrompt(item, identity, customPrompts), 'vipSummary', limits);
+    const result = await callClaude(claudeApiKey, buildVipSummarizePrompt(item, identity, customPrompts), 'vipSummary');
     if (result.error) return result;
     return { summary: result.parsed };
   } catch (err) { return { error: err.message }; }
@@ -529,9 +524,9 @@ No markdown fences, no explanation.`;
 async function handleThreadSummarize(item) {
   const { claudeApiKey } = await chrome.storage.local.get('claudeApiKey');
   if (!claudeApiKey) return { error: 'no_api_key' };
-  const [identity, limits, customPrompts] = await Promise.all([getIdentity(), getTokenLimits(), getCustomPrompts()]);
+  const [identity, customPrompts] = await Promise.all([getIdentity(), getCustomPrompts()]);
   try {
-    const result = await callClaude(claudeApiKey, buildThreadSummaryPrompt(item, identity, customPrompts), 'threadSummary', limits);
+    const result = await callClaude(claudeApiKey, buildThreadSummaryPrompt(item, identity, customPrompts), 'threadSummary');
     if (result.error) return result;
     return { summary: result.parsed };
   } catch (err) { return { error: err.message }; }

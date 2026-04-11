@@ -454,7 +454,8 @@
       if (cat === 'act_now' || cat === 'priority') {
         item._reason = reasons[item._llmId] || undefined;
         if (!item._reason && isMentioned) {
-          item._reason = item._mentionInReplies && !mentionInRoot ? 'You were mentioned in a reply' : 'You were mentioned';
+          const inChannel = channelLabel ? ` in #${channelLabel}` : '';
+          item._reason = item._mentionInReplies && !mentionInRoot ? `mentioned in a reply${inChannel}` : `mentioned${inChannel}`;
         }
         if (!item._reason) {
           let raw = '';

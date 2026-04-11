@@ -8,15 +8,8 @@ const openInBrowserCheckbox = document.getElementById('open-in-browser');
 const saveBtn = document.getElementById('save-btn');
 const saveStatus = document.getElementById('save-status');
 
-// ── Token limit defaults (editable subset of background.js TOKEN_DEFAULTS) ──
-const TOKEN_DEFAULTS = {
-  prioritize: 8192,
-  channelSummary: 200,
-  vipSummary: 300,
-  threadSummary: 300,
-};
-
 const TOKEN_LABELS = {
+  batchSummarize: 'Summarization',
   prioritize: 'Prioritization',
   channelSummary: 'Channel Summary',
   vipSummary: 'VIP Summary',
@@ -215,7 +208,7 @@ function buildRuleSelect(currentRule) {
   ).join('');
 }
 
-chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarSectionChannels', 'sidebarTierMap', 'tokenLimits', 'tokenUsage', 'tokenLog', 'priorityRules', 'customPrompts'], (result) => {
+chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNames', 'sidebarSectionNames', 'sidebarSectionChannels', 'sidebarTierMap', 'tokenUsage', 'tokenLog', 'priorityRules', 'customPrompts'], (result) => {
   if (result.claudeApiKey) apiKeyInput.value = result.claudeApiKey;
   if (result.userContext) userContextInput.value = result.userContext;
   charCount.textContent = `${(result.userContext || '').length}/400`;
@@ -268,15 +261,13 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   }
 
   // Render token table
-  const limits = { ...TOKEN_DEFAULTS, ...(result.tokenLimits || {}) };
   const usage = result.tokenUsage || {};
   const tbody = document.querySelector('#token-table tbody');
-  for (const [key, defaultVal] of Object.entries(TOKEN_DEFAULTS)) {
+  for (const [key, label] of Object.entries(TOKEN_LABELS)) {
     const u = usage[key] || { calls: 0, inputTokens: 0, outputTokens: 0 };
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td>${TOKEN_LABELS[key]}</td>
-      <td><input type="number" data-key="${key}" value="${limits[key]}" min="50" max="16384" step="50" placeholder="${defaultVal}"></td>
+      <td>${label}</td>
       <td class="usage">${u.calls}</td>
       <td class="usage">${u.inputTokens.toLocaleString()}</td>
       <td class="usage">${u.outputTokens.toLocaleString()}</td>`;
@@ -377,13 +368,6 @@ saveBtn.addEventListener('click', () => {
     if (select.value) sidebarTierMap[select.dataset.section] = select.value;
   }
 
-  // Collect token limits from inputs
-  const tokenLimits = {};
-  for (const input of document.querySelectorAll('#token-table input[data-key]')) {
-    const val = parseInt(input.value, 10);
-    if (!isNaN(val) && val > 0) tokenLimits[input.dataset.key] = val;
-  }
-
   // Collect custom prompts (only save non-empty ones)
   const customPrompts = {};
   for (const textarea of document.querySelectorAll('#prompt-editors textarea[data-prompt]')) {
@@ -397,7 +381,6 @@ saveBtn.addEventListener('click', () => {
     openInBrowser: openInBrowserCheckbox.checked,
     priorityRules,
     sidebarTierMap,
-    tokenLimits,
     customPrompts,
   }, () => {
     saveStatus.textContent = 'Saved — go back to the Slack tab and refresh to see changes.';

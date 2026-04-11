@@ -219,12 +219,18 @@ function handleSnapshotFile(file) {
         // Clear in-memory caches
         _prioritizationCache = null;
         _itemSummaryCache = {};
+        // Suppress live Slack data while replaying snapshot
+        _snapshotMode = true;
         // Load the imported view cache and re-run the full pipeline
         const vc = toStore.fslackViewCache;
         if (vc && vc.data) {
           cachedView = vc;
+          // Restore sidebar mappings from snapshot data
+          if (vc.data.sidebarSections) sidebarSections = vc.data.sidebarSections;
+          if (vc.data.sidebarSectionNameMap) sidebarSectionNameMap = vc.data.sidebarSectionNameMap;
           prioritizeAndRender(vc.data);
         } else {
+          _snapshotMode = false;
           window.location.href = window.location.href;
         }
       });
@@ -2182,6 +2188,15 @@ function gutterCheck(channel, markTs, threadTs, hasMention) {
 }
 
 
+function reasonIcons(item) {
+  const icons = [];
+  const isDm = item._type === 'dm' || item._isDmThread;
+  if (isDm) icons.push('✉');
+  if (item._type === 'thread' && !isDm) icons.push('💬');
+  if (item._isMentioned) icons.push('@');
+  return icons.length ? `<span class="reason-icons">${icons.join('')}</span> ` : '';
+}
+
 function reasonBadge(item, cssClass) {
   if (!item._reason) return '';
   const cls = cssClass === 'act-now' ? 'reason-act-now' : 'reason-priority';
@@ -2189,7 +2204,7 @@ function reasonBadge(item, cssClass) {
   const threadTs = item.ts || '';
   const channel = item.channel_id || '';
   const hasMention = item._isMentioned || item.mention_count > 0 ? '1' : '0';
-  return `<div class="item-reason item-reason-toggle ${cls}"><span class="reason-text">${escapeHtml(item._reason)} ↓</span><span class="reason-mark-read mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs}" data-has-mention="${hasMention}" title="Mark read">✓</span></div>`;
+  return `<div class="item-reason item-reason-toggle ${cls}"><span class="reason-text">${reasonIcons(item)}${escapeHtml(item._reason)} ↓</span><span class="reason-mark-read mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs}" data-has-mention="${hasMention}" title="Mark read">✓</span></div>`;
 }
 
 // Shared toggle structure: bullet summary (clickable) → hidden messages
@@ -2790,6 +2805,7 @@ function sortNoiseItems(items, noiseOrder = []) {
 
 function renderPrioritized(prioritized, data, popular, loading = false, deepNoiseLoading = false, savedItems = [], _unused = false, cachedTs = null) {
   _fetchReason = ''; // clear reason — pipeline complete
+  _snapshotMode = false; // allow live data again after snapshot replay
   const { actNow, priority, whenFree, noise } = prioritized;
   _hiddenUnreadReplies.clear();
 
@@ -4960,6 +4976,7 @@ function _prioritizeAndRenderInner(data, background = false) {
   const preFiltered = applyPreFilters(data);
   const { forLlm } = preFiltered;
   const totalItems = forLlm.threads.length + forLlm.dms.length + forLlm.channelPosts.length;
+  console.log(`[fslack] preFilter: ${totalItems} for LLM (${forLlm.threads.length}t ${forLlm.dms.length}d ${forLlm.channelPosts.length}c), ${preFiltered.whenFree.length} whenFree, ${preFiltered.noise.length} noise, ${preFiltered.digests.length} digests | input: ${(data.threads||[]).length}t ${(data.dms||[]).length}d ${(data.channelPosts||[]).length}c`);
 
   if (totalItems === 0) {
     // Only noise/dropped/bot — render what we have
@@ -5530,6 +5547,7 @@ let pendingUnreads = null;
 let gotUnreads = false;
 let gotPopular = false;
 let isFastFetch = false;
+let _snapshotMode = false; // true while replaying a snapshot — suppresses live data
 let _renderGeneration = 0; // bumped each prioritizeAndRender call; guards async saveViewCache
 
 function resetFetchState() {
@@ -5944,6 +5962,12 @@ function handleUploadAndPostResult(msg) {
 // ── Port message dispatch ──
 function handlePortMessage(msg) {
   if (!msg?.type?.startsWith(`${FSLACK}:`)) return;
+
+  // Suppress live data while replaying a snapshot
+  if (_snapshotMode && (msg.type === `${FSLACK}:result` || msg.type === `${FSLACK}:popular` || msg.type === `${FSLACK}:ready` || msg.type === `${FSLACK}:progress`)) {
+    console.log(`[fslack] snapshot mode — ignoring ${msg.type}`);
+    return;
+  }
 
   if (msg.type === `${FSLACK}:ready`) {
     // If the view is already rendered (reconnect after service worker idle),

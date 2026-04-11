@@ -391,6 +391,7 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 }
 .item-reason.reason-act-now { color: var(--danger); }
 .item-reason.reason-priority { color: var(--priority-orange); }
+.reason-icons { font-size: 11px; letter-spacing: 2px; opacity: 0.7; }
 
 .item-replied {
   font-size: 11px;
