@@ -1766,13 +1766,32 @@
         const current = _cachedBootPrefs?.muted_channels || '';
         const muted = current ? current.split(',') : [];
         if (!muted.includes(channel)) muted.push(channel);
+        const newValue = muted.join(',');
+        await slackApi('users.prefs.set', {
+          name: 'muted_channels',
+          value: newValue,
+        });
+        _cachedBootPrefs.muted_channels = newValue;
+        window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: true }, '*');
+      } catch {
+        window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: false }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:unmuteChannel`) {
+      const { channel, requestId } = event.data;
+      try {
+        if (!_cachedBootPrefs) _cachedBootPrefs = (await slackApi('client.userBoot')).prefs;
+        const current = _cachedBootPrefs?.muted_channels || '';
+        const muted = current ? current.split(',').filter(c => c !== channel) : [];
         await slackApi('users.prefs.set', {
           name: 'muted_channels',
           value: muted.join(','),
         });
-        window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: true }, '*');
+        _cachedBootPrefs.muted_channels = muted.join(',');
+        window.postMessage({ type: `${FSLACK}:unmuteChannelResult`, requestId, ok: true }, '*');
       } catch {
-        window.postMessage({ type: `${FSLACK}:muteChannelResult`, requestId, ok: false }, '*');
+        window.postMessage({ type: `${FSLACK}:unmuteChannelResult`, requestId, ok: false }, '*');
       }
     }
 

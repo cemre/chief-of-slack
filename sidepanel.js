@@ -3670,18 +3670,23 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Undo mute thread
+  // Undo mute thread or channel
   const undoMuteBtn = e.target.closest('.undo-mute');
   if (undoMuteBtn) {
     const { channel, threadTs } = undoMuteBtn.dataset;
-    const key = threadKey(channel, threadTs);
-    if (key) {
-      mutedThreadKeys.delete(key);
-      persistMutedThreads();
+    const isThreadMute = undoMuteBtn.classList.contains('action-mute');
+    if (isThreadMute) {
+      const key = threadKey(channel, threadTs);
+      if (key) {
+        mutedThreadKeys.delete(key);
+        persistMutedThreads();
+      }
+    } else {
+      sendToInject({ type: `${FSLACK}:unmuteChannel`, channel, requestId: `unmute_${Date.now()}` });
     }
     const itemEl = undoMuteBtn.closest('.item');
     if (itemEl) itemEl.classList.remove('muted-pending');
-    undoMuteBtn.title = undoMuteBtn.classList.contains('action-mute') ? 'Mute thread (T)' : 'Mute channel (T)';
+    undoMuteBtn.title = isThreadMute ? 'Mute thread (T)' : 'Mute channel (T)';
     undoMuteBtn.classList.remove('undo-mute');
     undoMuteBtn.dataset.pending = '';
     return;
@@ -3700,6 +3705,8 @@ bodyEl.addEventListener('click', (e) => {
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
+    const itemEl = muteChannelBtn.closest('.item');
+    if (itemEl) itemEl.classList.add('muted-pending');
     muteChannelBtn.title = 'Undo mute (T)';
     muteChannelBtn.classList.add('undo-mute');
     sendToInject({ type: `${FSLACK}:muteChannel`, channel, requestId: `mutech_${Date.now()}` });
@@ -5975,13 +5982,14 @@ function handleMuteThreadResult(msg) {
 function handleMuteChannelResult(msg) {
   const muteBtn = bodyEl.querySelector('.action-mute-channel[data-pending="true"]');
   if (muteBtn) {
-    if (msg.ok) {
-      muteBtn.closest('.item')?.remove();
-    } else {
+    if (!msg.ok) {
       delete muteBtn.dataset.pending;
       muteBtn.classList.remove('undo-mute');
       muteBtn.title = 'Mute channel (T)';
+      const itemEl = muteBtn.closest('.item');
+      if (itemEl) itemEl.classList.remove('muted-pending');
     }
+    // On success: leave item in muted-pending state with undo available
   }
 }
 
@@ -6330,6 +6338,7 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:markUnreadResult`) { handleMarkUnreadResult(msg); return; }
   if (msg.type === `${FSLACK}:muteThreadResult`) { handleMuteThreadResult(msg); return; }
   if (msg.type === `${FSLACK}:muteChannelResult`) { handleMuteChannelResult(msg); return; }
+  if (msg.type === `${FSLACK}:unmuteChannelResult`) { /* DOM already restored on undo click */ return; }
   if (msg.type === `${FSLACK}:postReplyResult`) { handlePostReplyResult(msg); return; }
   if (msg.type === `${FSLACK}:uploadAndPostResult`) { handleUploadAndPostResult(msg); return; }
 }
