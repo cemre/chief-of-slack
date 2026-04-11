@@ -233,7 +233,7 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   const sectionChannels = result.sidebarSectionChannels || {};
   const savedRules = result.sidebarTierMap || {};
   const defaultRules = {}; // all sections default to 'normal'
-  const infoSvg = `<svg class="section-info-icon" viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><text x="8" y="12" text-anchor="middle" font-size="11" font-weight="600" fill="currentColor">?</text></svg>`;
+  const infoSvg = `<svg class="section-info-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM7.293 5.293a1 1 0 1 1 .99 1.667c-.459.134-1.033.566-1.033 1.29v.25a.75.75 0 1 0 1.5 0v-.115a2.5 2.5 0 1 0-2.518-4.153.75.75 0 1 0 1.061 1.06Z" clip-rule="evenodd"/></svg>`;
   if (sectionNames.length) {
     const tierMapEl = document.getElementById('tier-map');
     tierMapEl.innerHTML = '';

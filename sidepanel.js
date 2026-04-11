@@ -655,7 +655,7 @@ function _injectAssessButtons(prioritized) {
       const info = document.createElement('span');
       info.className = 'assess-info';
       info.title = reasonWhy;
-      info.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg>';
+      info.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM7.293 5.293a1 1 0 1 1 .99 1.667c-.459.134-1.033.566-1.033 1.29v.25a.75.75 0 1 0 1.5 0v-.115a2.5 2.5 0 1 0-2.518-4.153.75.75 0 1 0 1.061 1.06Z" clip-rule="evenodd"/></svg>';
       wrap.appendChild(info);
     }
     wrap.appendChild(upBtn);
@@ -1722,8 +1722,8 @@ function escapeHtml(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-const LOCK_ICON = '<svg class="lock-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M12 7h1a1 1 0 011 1v6a1 1 0 01-1 1H3a1 1 0 01-1-1V8a1 1 0 011-1h1V5a4 4 0 118 0v2zm-2 0V5a2 2 0 10-4 0v2h4z"/></svg>';
-const ENVELOPE_ICON = '<svg class="envelope-icon" width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3.5l7 4.5 7-4.5V3a1 1 0 00-1-1H2a1 1 0 00-1 1v.5zM15 5.5l-7 4.5L1 5.5V13a1 1 0 001 1h12a1 1 0 001-1V5.5z"/></svg>';
+const LOCK_ICON = '<svg class="lock-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path fill-rule="evenodd" d="M8 1a3.5 3.5 0 0 0-3.5 3.5V7A1.5 1.5 0 0 0 3 8.5v5A1.5 1.5 0 0 0 4.5 15h7a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 11.5 7V4.5A3.5 3.5 0 0 0 8 1Zm2 6V4.5a2 2 0 1 0-4 0V7h4Z" clip-rule="evenodd"/></svg>';
+const ENVELOPE_ICON = '<svg class="envelope-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="11" height="11"><path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v.793c.026.009.051.02.076.032L7.674 8.51c.206.1.446.1.652 0l6.598-3.185A.755.755 0 0 1 15 5.293V4.5A1.5 1.5 0 0 0 13.5 3h-11Z"/><path d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z"/></svg>';
 function chPrefix(channelId, data) {
   return data?.channelMeta?.[channelId]?.isPrivate ? LOCK_ICON : '#';
 }
@@ -2029,10 +2029,10 @@ function itemLeftLink(innerHtml, href) {
   return `<a class="item-left-link" href="${href}" target="_blank">${innerHtml}<span class="open-slack-label">open in Slack ↗</span></a>`;
 }
 
-const THREAD_BADGE_ICON = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+const THREAD_BADGE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
 
-const HEART_ICON = '<svg class="engage-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8l1 1.1L12 21.3l7.8-7.8 1-1.1a5.5 5.5 0 0 0 0-7.8z"/></svg>';
-const COMMENT_ICON = '<svg class="engage-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>';
+const HEART_ICON = '<svg class="engage-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M2 6.342a3.375 3.375 0 0 1 6-2.088 3.375 3.375 0 0 1 5.997 2.26c-.063 2.134-1.618 3.76-2.955 4.784a14.437 14.437 0 0 1-2.676 1.61c-.02.01-.038.017-.05.022l-.014.006-.004.002h-.002a.75.75 0 0 1-.592.001h-.002l-.004-.003-.015-.006a5.528 5.528 0 0 1-.232-.107 14.395 14.395 0 0 1-2.535-1.557C3.564 10.22 1.999 8.558 1.999 6.38L2 6.342Z"/></svg>';
+const COMMENT_ICON = '<svg class="engage-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
 
 function threadBadge(m, channel, truncId, opts = {}) {
   const rc = m.reaction_count || 0;
@@ -2140,8 +2140,8 @@ function msgActions(channel, ts, { showReply = true } = {}) {
   const myReactions = myReactionsMap[`${channel}:${ts}`] || [];
   const likeClass = myReactions.includes('+1') ? ' reacted' : '';
   const heartClass = myReactions.includes('yellow_heart') ? ' reacted' : '';
-  const bookmarkSvg = `<svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" fill="${fill}" stroke="currentColor" stroke-width="1.5"><path d="M3.5 2.5h9v12l-4.5-3-4.5 3z"/></svg>`;
-  const replySvg = `<svg class="action-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5L1.5 8.5L5 12"/><path d="M1.5 8.5h7c3 0 5 1.5 5 4.5"/></svg>`;
+  const bookmarkSvg = `<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="${fill}" stroke="currentColor" stroke-width="0.75" width="14" height="14"><path d="M3.75 2a.75.75 0 0 0-.75.75v10.5a.75.75 0 0 0 1.28.53L8 10.06l3.72 3.72a.75.75 0 0 0 1.28-.53V2.75a.75.75 0 0 0-.75-.75h-8.5Z"/></svg>`;
+  const replySvg = `<svg class="action-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M12.5 9.75A2.75 2.75 0 0 0 9.75 7H4.56l2.22 2.22a.75.75 0 1 1-1.06 1.06l-3.5-3.5a.75.75 0 0 1 0-1.06l3.5-3.5a.75.75 0 0 1 1.06 1.06L4.56 5.5h5.19a4.25 4.25 0 0 1 0 8.5h-1a.75.75 0 0 1 0-1.5h1a2.75 2.75 0 0 0 2.75-2.75Z" clip-rule="evenodd"/></svg>`;
   const replyBtn = showReply
     ? `<span class="action-btn action-msg-reply" data-channel="${channel}" data-ts="${ts}" title="Reply in thread">${replySvg}<kbd>R</kbd></span>`
     : '';
@@ -2188,12 +2188,24 @@ function gutterCheck(channel, markTs, threadTs, hasMention) {
 }
 
 
+const REASON_SVG = {
+  dm: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M2.5 3A1.5 1.5 0 0 0 1 4.5v.793c.026.009.051.02.076.032L7.674 8.51c.206.1.446.1.652 0l6.598-3.185A.755.755 0 0 1 15 5.293V4.5A1.5 1.5 0 0 0 13.5 3h-11Z"/><path d="M15 6.954 8.978 9.86a2.25 2.25 0 0 1-1.956 0L1 6.954V11.5A1.5 1.5 0 0 0 2.5 13h11a1.5 1.5 0 0 0 1.5-1.5V6.954Z"/></svg>',
+  thread: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>',
+  mention: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M11.89 4.111a5.5 5.5 0 1 0 0 7.778.75.75 0 1 1 1.06 1.061A7 7 0 1 1 15 8a2.5 2.5 0 0 1-4.083 1.935A3.5 3.5 0 1 1 11.5 8a1 1 0 0 0 2 0 5.48 5.48 0 0 0-1.61-3.889ZM10 8a2 2 0 1 0-4 0 2 2 0 0 0 4 0Z" clip-rule="evenodd"/></svg>',
+  vip: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M8 1.75a.75.75 0 0 1 .692.462l1.41 3.393 3.664.293a.75.75 0 0 1 .428 1.317l-2.791 2.39.853 3.575a.75.75 0 0 1-1.12.814L7.998 12.08l-3.135 1.915a.75.75 0 0 1-1.12-.814l.852-3.574-2.79-2.39a.75.75 0 0 1 .427-1.318l3.663-.293 1.41-3.393A.75.75 0 0 1 8 1.75Z" clip-rule="evenodd"/></svg>',
+  section: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M7.487 2.89a.75.75 0 1 0-1.474-.28l-.455 2.388H3.61a.75.75 0 0 0 0 1.5h1.663l-.571 2.998H2.75a.75.75 0 0 0 0 1.5h1.666l-.403 2.114a.75.75 0 0 0 1.474.28l.456-2.394h2.973l-.403 2.114a.75.75 0 0 0 1.474.28l.456-2.394h1.947a.75.75 0 0 0 0-1.5h-1.661l.57-2.998h1.95a.75.75 0 0 0 0-1.5h-1.664l.402-2.108a.75.75 0 0 0-1.474-.28l-.455 2.388H7.085l.402-2.108ZM6.8 6.498l-.571 2.998h2.973l.57-2.998H6.8Z" clip-rule="evenodd"/></svg>',
+};
+
 function reasonIcons(item) {
   const icons = [];
   const isDm = item._type === 'dm' || item._isDmThread;
-  if (isDm) icons.push('✉');
-  if (item._type === 'thread' && !isDm) icons.push('💬');
-  if (item._isMentioned) icons.push('@');
+  const isVip = item._ruleOverride && item._ruleOverride.startsWith('VIP');
+  const isSection = item._sidebarSection === 'floor_priority' || item._sidebarSection === 'floor_whenfree';
+  if (isVip) icons.push(REASON_SVG.vip);
+  if (isDm) icons.push(REASON_SVG.dm);
+  if (item._type === 'thread' && !isDm) icons.push(REASON_SVG.thread);
+  if (item._isMentioned) icons.push(REASON_SVG.mention);
+  if (isSection && !isVip) icons.push(REASON_SVG.section);
   return icons.length ? `<span class="reason-icons">${icons.join('')}</span> ` : '';
 }
 
@@ -2684,9 +2696,7 @@ function renderSavedItem(item, data) {
       <div class="msg-row">
         <div class="msg-content item-text">${user ? userLink(uname(user, data.users), channel, ts) + ' ' : ''}${textHtml}${savedExtras}${msgTime(ts, channel)}</div>
         <span class="action-btn action-complete-saved" data-item-id="${escapeHtml(channel)}" data-ts="${escapeHtml(ts)}" title="Mark complete">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="20 6 9 17 4 12"></polyline>
-          </svg>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clip-rule="evenodd"/></svg>
         </span>
       </div>
     </div>
@@ -2824,7 +2834,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // Act Now + Priority
   if (actNow.length > 0 || (priority && priority.length > 0)) {
     html += '<section class="priority-section">';
-    html += '<h2 class="priority-header">Priority</h2>';
+    html += '<h2 class="priority-header">Priority <span class="priority-expand-all" id="priority-expand-all">expand all ↓</span></h2>';
     for (const item of actNow) html += renderAnyItem(item, data, 'act-now');
     for (const item of (priority || [])) html += renderAnyItem(item, data, 'priority-item');
     if (priority && priority.length > 0) {
@@ -3031,7 +3041,7 @@ function insertNewDm(dm, data) {
     sectionEl.className = 'priority-section';
     const h2 = document.createElement('h2');
     h2.className = 'priority-header';
-    h2.textContent = 'Priority';
+    h2.innerHTML = 'Priority <span class="priority-expand-all" id="priority-expand-all">expand all ↓</span>';
     sectionEl.appendChild(h2);
     // Insert after saved section if present, otherwise at top
     const savedSection = document.querySelector('#saved-items-toggle')?.closest('.priority-section');
@@ -3774,6 +3784,19 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
+  // Expand/collapse all priority items
+  const expandAllBtn = e.target.closest('#priority-expand-all');
+  if (expandAllBtn) {
+    const section = expandAllBtn.closest('.priority-section');
+    const allDetails = section.querySelectorAll('.item-details');
+    const allReasons = section.querySelectorAll('.item-reason-toggle .reason-text');
+    const anyCollapsed = [...allDetails].some(d => !d.classList.contains('expanded'));
+    for (const d of allDetails) d.classList.toggle('expanded', anyCollapsed);
+    for (const r of allReasons) r.textContent = r.textContent.replace(/[↓↑]$/, anyCollapsed ? '↑' : '↓');
+    expandAllBtn.textContent = anyCollapsed ? 'collapse all ↑' : 'expand all ↓';
+    return;
+  }
+
   // Mark all priority as read
   const priorityMarkRead = e.target.closest('#priority-mark-read-btn');
   if (priorityMarkRead && !priorityMarkRead.disabled) {
@@ -4350,7 +4373,7 @@ function showEducationBanner(bottom = false) {
     if (document.querySelector('.education-banner.edu-bottom')) return;
     const banner = document.createElement('div');
     banner.className = 'education-banner edu-bottom';
-    banner.innerHTML = `<div class="edu-tip">Tip: Use your keyboard to navigate! Click <svg class="edu-help-icon" width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><text x="8" y="11.5" text-anchor="middle" fill="currentColor" font-size="10" font-family="system-ui" font-weight="600">?</text></svg> to see what all you can do.</div>`;
+    banner.innerHTML = `<div class="edu-tip">Tip: Use your keyboard to navigate! Click <svg class="edu-help-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M15 8A7 7 0 1 1 1 8a7 7 0 0 1 14 0Zm-6 3.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM7.293 5.293a1 1 0 1 1 .99 1.667c-.459.134-1.033.566-1.033 1.29v.25a.75.75 0 1 0 1.5 0v-.115a2.5 2.5 0 1 0-2.518-4.153.75.75 0 1 0 1.061 1.06Z" clip-rule="evenodd"/></svg> to see what all you can do.</div>`;
     document.body.appendChild(banner);
   } else {
     // Inline banner at top of body — toggled via (?)

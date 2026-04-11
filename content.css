@@ -391,7 +391,8 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 }
 .item-reason.reason-act-now { color: var(--danger); }
 .item-reason.reason-priority { color: var(--priority-orange); }
-.reason-icons { font-size: 11px; letter-spacing: 2px; opacity: 0.7; }
+.reason-icons { display: inline-flex; align-items: center; gap: 3px; opacity: 0.7; vertical-align: middle; }
+.reason-icons svg { width: 12px; height: 12px; vertical-align: middle; }
 
 .item-replied {
   font-size: 12px;
@@ -573,7 +574,9 @@ ul.slack-list, ol.slack-list {
    Priority sections — ambient glow from the left edge
    ═══════════════════════════════════════════════════ */
 .priority-section h2.act-now { color: var(--danger); }
-.priority-section h2.priority-header { color: var(--priority-orange); }
+.priority-section h2.priority-header { color: var(--priority-orange); display: flex; align-items: baseline; gap: 8px; }
+.priority-expand-all { font-size: 11px; font-weight: 400; color: var(--text-muted); cursor: pointer; margin-left: auto; }
+.priority-expand-all:hover { color: var(--text-secondary); }
 .priority-section h2.when-free { color: var(--text-muted); }
 .priority-section h2.interesting { color: var(--accent); }
 .priority-section h2.noise-header { color: var(--text-muted); }
