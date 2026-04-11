@@ -287,12 +287,35 @@ chrome.storage.local.get(['claudeApiKey', 'userContext', 'openInBrowser', 'vipNa
   const log = result.tokenLog || [];
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   const recent = log.filter((e) => e.ts > cutoff);
-  // Haiku pricing: $0.80/M input, $4.00/M output
-  const totalIn = recent.reduce((s, e) => s + e.inputTokens, 0);
-  const totalOut = recent.reduce((s, e) => s + e.outputTokens, 0);
-  const cost24h = (totalIn * 0.80 + totalOut * 4.00) / 1_000_000;
-  document.getElementById('cost-24h').textContent =
-    `Last 24h: ${recent.length} calls, ${totalIn.toLocaleString()} in / ${totalOut.toLocaleString()} out — $${cost24h.toFixed(4)}`;
+  // Per-model pricing (per 1M tokens)
+  const PRICING = {
+    'claude-sonnet-4-5': { input: 3.00, output: 15.00 },
+  };
+  const DEFAULT_PRICING = { input: 0.80, output: 4.00 }; // Haiku
+  function computeCost(entries) {
+    let cost = 0;
+    for (const e of entries) {
+      const p = PRICING[e.model] || DEFAULT_PRICING;
+      cost += (e.inputTokens * p.input + e.outputTokens * p.output) / 1_000_000;
+    }
+    return cost;
+  }
+  function sumTokens(entries) {
+    let calls = entries.length, inTok = 0, outTok = 0;
+    for (const e of entries) { inTok += e.inputTokens; outTok += e.outputTokens; }
+    return { calls, inTok, outTok };
+  }
+  function formatUsageLine(label, entries) {
+    const { calls, inTok, outTok } = sumTokens(entries);
+    const cost = computeCost(entries);
+    return `${label}: ${calls} calls, ${inTok.toLocaleString()} in / ${outTok.toLocaleString()} out — $${cost.toFixed(4)}`;
+  }
+
+  document.getElementById('cost-24h').textContent = formatUsageLine('Last 24h', recent);
+
+  const cutoff7d = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recent7d = log.filter((e) => e.ts > cutoff7d);
+  document.getElementById('cost-7d').textContent = formatUsageLine('Last 7d', recent7d);
 
   // Render prompt editors
   const savedPrompts = result.customPrompts || {};
@@ -388,6 +411,7 @@ document.getElementById('reset-usage').addEventListener('click', () => {
     for (const td of document.querySelectorAll('#token-table .usage')) {
       td.textContent = '0';
     }
-    document.getElementById('cost-24h').textContent = 'Last 24h: 0 calls — $0.0000';
+    document.getElementById('cost-24h').textContent = 'Last 24h: 0 calls, 0 in / 0 out — $0.0000';
+    document.getElementById('cost-7d').textContent = 'Last 7d: 0 calls, 0 in / 0 out — $0.0000';
   });
 });

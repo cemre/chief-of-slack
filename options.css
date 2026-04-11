@@ -296,10 +296,16 @@ textarea {
 
 .cost-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 12px 24px 16px;
   border-top: 1px solid #f0eff2;
+}
+
+.cost-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .cost-label {

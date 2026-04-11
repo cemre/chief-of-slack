@@ -196,7 +196,7 @@ async function getTokenLimits() {
 }
 
 // ── Token usage tracking (read-modify-write to avoid race with service worker startup) ──
-async function trackUsage(type, usage) {
+async function trackUsage(type, usage, model) {
   const { tokenUsage = {}, tokenLog = [] } = await chrome.storage.local.get(['tokenUsage', 'tokenLog']);
   if (!tokenUsage[type]) tokenUsage[type] = { calls: 0, inputTokens: 0, outputTokens: 0 };
   tokenUsage[type].calls++;
@@ -206,11 +206,12 @@ async function trackUsage(type, usage) {
   tokenLog.push({
     ts: Date.now(),
     type,
+    model: model || 'unknown',
     inputTokens: usage?.input_tokens || 0,
     outputTokens: usage?.output_tokens || 0,
   });
-  // Prune entries older than 48h to prevent unbounded growth
-  const cutoff = Date.now() - 48 * 60 * 60 * 1000;
+  // Prune entries older than 8 days to support weekly reporting
+  const cutoff = Date.now() - 8 * 24 * 60 * 60 * 1000;
   const pruned = tokenLog.filter((e) => e.ts > cutoff);
   chrome.storage.local.set({ tokenUsage, tokenLog: pruned });
 }
@@ -246,7 +247,7 @@ async function callClaude(apiKey, prompt, limitKey, limits) {
   }
 
   const data = await resp.json();
-  trackUsage(limitKey, data.usage);
+  trackUsage(limitKey, data.usage, model);
 
   if (data.stop_reason === 'max_tokens') {
     console.warn(`[fslack bg] max_tokens truncation (${limitKey}): ${data.usage?.output_tokens} tokens used`);
@@ -587,7 +588,7 @@ Example: {"josh": "Marcus", "deploy-pipeline": "release-flow", "ProjectX": "Beac
     }
     const result = await resp.json();
     console.log(`[fslack bg] anonymize: output tokens = ${result.usage?.output_tokens}, stop = ${result.stop_reason}`);
-    trackUsage('anonymize', result.usage);
+    trackUsage('anonymize', result.usage, MODEL_HAIKU);
     const text = result.content?.[0]?.text || '';
     console.log('[fslack bg] anonymize: raw response length =', text.length, 'stop =', result.stop_reason);
     let cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
