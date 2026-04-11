@@ -536,7 +536,7 @@ ul.slack-list, ol.slack-list {
 .item-reply-count {
   margin-top: 6px;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--text-secondary);
   font-weight: 600;
 }
 .msg-thread-badge {
@@ -546,13 +546,14 @@ ul.slack-list, ol.slack-list {
   gap: 3px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--text-secondary);
   margin-left: 6px;
   margin-right: 10px;
   vertical-align: -2px;
   cursor: pointer;
 }
-.msg-thread-badge:hover { text-decoration: underline; }
+.msg-thread-badge:hover { color: var(--text-bright); }
+.msg-thread-badge .msg-time { text-decoration: none; }
 .msg-thread-badge svg { flex-shrink: 0; }
 .msg-thread-badge.loading { color: var(--text-muted); cursor: wait; }
 .msg-thread-badge.expanded { color: var(--text-secondary); }
@@ -632,10 +633,14 @@ ul.slack-list, ol.slack-list {
 .item.noise-item:hover .noise-inline-actions { opacity: 1; }
 
 /* Expand/collapse */
-.header-expand { color: var(--accent); cursor: pointer; }
-.header-expand:hover { text-decoration: underline; }
+.header-expand { color: var(--text-secondary); cursor: pointer; }
+.header-expand:hover { color: var(--text-bright); text-decoration: underline; }
 .header-expand .collapse-label { display: none; }
+.header-expand .expand-label { display: inline; }
+.header-expand.is-expanded { display: block; text-align: right; color: var(--text-muted); }
+.header-expand.is-expanded:hover { color: var(--text-secondary); }
 .header-expand.is-expanded .collapse-label { display: inline; }
+.header-expand.is-expanded .expand-label { display: none; }
 .noise-items { display: none; }
 .noise-items.expanded { display: block; }
 .when-free-items { display: none; }
@@ -874,13 +879,13 @@ ul.slack-list, ol.slack-list {
 
 /* See more/less */
 .see-more, .see-less {
-  color: var(--accent);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
   padding-right: 15px;
 }
-.see-more:hover, .see-less:hover { text-decoration: underline; }
+.see-more:hover, .see-less:hover { color: var(--text-bright); text-decoration: underline; }
 .seen-replies-toggle {
   margin-top: 6px;
   font-size: 12px;
@@ -1097,18 +1102,18 @@ ul.deep-summary li + li { border-top: none; }
   letter-spacing: 0.3px;
 }
 .show-messages-link {
-  color: var(--accent);
+  color: var(--text-secondary);
   cursor: pointer;
   font-size: 12px;
   margin-top: 6px;
   display: inline-block;
   user-select: none;
 }
-.show-messages-link:hover { text-decoration: underline; }
+.show-messages-link:hover { color: var(--text-bright); text-decoration: underline; }
 .deep-messages { display: none; margin-top: 8px; }
 .summary-toggle { cursor: pointer; }
 .summary-toggle-group { cursor: default; }
-.summary-reply-count { color: var(--accent); }
+.summary-reply-count { color: var(--text-secondary); }
 .summary-bullet-link { color: inherit; text-decoration: none; }
 .summary-bullet-link:hover { color: var(--text-bright); text-decoration: underline; }
 .vip-bullet-relevant .summary-bullet-link, .vip-bullet-relevant .summary-bullet-link:hover { color: var(--priority-orange); }

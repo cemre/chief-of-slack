@@ -2308,7 +2308,7 @@ function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
 // Header expand link for item-left: "N msgs ↓"
 function headerExpandHtml(targetId, count, unit) {
   if (!unit) unit = count === 1 ? 'msg' : 'msgs';
-  return `<span class="header-expand summary-toggle" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">collapse </span>${count} ${unit} ↓</span></span>`;
+  return `<span class="header-expand summary-toggle" data-target="${targetId}"><span class="summary-reply-count"><span class="expand-label">${count} ${unit} ↓</span><span class="collapse-label">collapse ↑</span></span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
