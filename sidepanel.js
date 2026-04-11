@@ -1430,6 +1430,13 @@ document.addEventListener('keydown', (e) => {
   if (lightbox.classList.contains('open')) return;
   const ae = document.activeElement;
   if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+  // Cmd+? (Cmd+Shift+/) — toggle keyboard hints
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === '?') {
+    e.preventDefault();
+    e.stopPropagation();
+    helpBtn.click();
+    return;
+  }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
   const key = e.key;
@@ -4298,8 +4305,9 @@ const eduBannerHtml = `
       <div class="edu-row"><kbd>o</kbd> <span class="edu-label">Open in Slack</span></div>
       <div class="edu-row"><kbd>r</kbd> <span class="edu-label">Reply</span></div>
       <div class="edu-row"><kbd>t</kbd> <span class="edu-label">Mute</span></div>
-      <div class="edu-row"><kbd>⌘.</kbd> <span class="edu-label">Toggle Chief of Slack</span></div>
+      <div class="edu-row"><kbd>⌘.</kbd> <span class="edu-label"><a href="dia://extensions/shortcuts" class="edu-link">Toggle Chief of Slack</a></span></div>
       <div class="edu-row"><kbd>⌘⇧.</kbd> <span class="edu-label">Toggle Slack sidebar</span></div>
+      <div class="edu-row"><kbd>⌘?</kbd> <span class="edu-label">Toggle this help</span></div>
     </div>
     <div class="edu-tip">Tip: Hold down <kbd>⇧</kbd> while clicking ✓ to mark multiple items as read quickly.</div>`;
 

@@ -780,6 +780,15 @@ ul.slack-list, ol.slack-list {
 .education-banner .edu-label {
   color: var(--text-secondary);
 }
+.education-banner .edu-link {
+  color: var(--text-secondary);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+.education-banner .edu-link:hover {
+  color: var(--text-primary);
+}
 .education-banner .edu-tip {
   margin-top: 8px;
   color: var(--text-secondary);
