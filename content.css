@@ -339,6 +339,8 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 .item-left-link:hover .item-time { color: var(--text-secondary); }
 /* Channel link hover */
 .item-channel-link { text-decoration: none; color: inherit; }
+.item-channel-link:hover .item-channel { color: var(--text-bright); text-decoration: underline; }
+.item-left:has(.item-channel-link:hover) { overflow: visible; }
 
 /* Open-in-Slack pill tooltip (shared by channel links, left links, VIP msg links) */
 .item-channel-link,
