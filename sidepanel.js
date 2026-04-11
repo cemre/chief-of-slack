@@ -931,7 +931,7 @@ function startFetch(background = false) {
   _snapshotMode = false; // exit snapshot mode on any fetch
   if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
   // If we already have content, keep it visible and fetch in background
-  const keepVisible = !background && cachedView?.prioritized;
+  const keepVisible = !background && cachedView?.prioritized && bodyEl.querySelector('.item');
   isBackgroundFetch = background;
   _pendingInlineRefresh = keepVisible;
   fetchBtn.disabled = true;
@@ -2080,9 +2080,9 @@ function itemLeftLink(innerHtml, href) {
 
 function muteIcon(channel, threadTs) {
   if (threadTs) {
-    return `<span class="action-mute channel-mute-icon" data-channel="${channel}" data-thread-ts="${threadTs}">${MUTE_SVG}</span>`;
+    return `<span class="action-mute channel-mute-icon" data-channel="${channel}" data-thread-ts="${threadTs}" title="Mute thread">${MUTE_SVG}</span>`;
   }
-  return `<span class="action-mute-channel channel-mute-icon" data-channel="${channel}">${MUTE_SVG}</span>`;
+  return `<span class="action-mute-channel channel-mute-icon" data-channel="${channel}" title="Mute channel">${MUTE_SVG}</span>`;
 }
 
 const THREAD_BADGE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
@@ -2309,9 +2309,9 @@ function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
 function headerExpandHtml(targetId, count, unit, { startExpanded, channel, markTs, threadTs, hasMention, muteHtml } = {}) {
   if (!unit) unit = count === 1 ? 'msg' : 'msgs';
   const cls = startExpanded ? ' is-expanded' : '';
-  const check = channel ? `<span class="header-check mark-all-read" data-channel="${channel}" data-ts="${markTs || ''}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}">✓</span>` : '';
+  const check = channel ? `<span class="header-check mark-all-read" data-channel="${channel}" data-ts="${markTs || ''}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}" title="Mark read">✓</span>` : '';
   const mute = muteHtml || '';
-  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">${mute}${check}<span class="collapse-arrow">↑</span></span></span></span>`;
+  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">${mute}${check}<span class="collapse-arrow" title="Collapse">↑</span></span></span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -3677,7 +3677,7 @@ bodyEl.addEventListener('click', (e) => {
       sendToInject({ type: `${FSLACK}:unmuteChannel`, channel, requestId: `unmute_${Date.now()}` });
     }
     const itemEl = undoMuteBtn.closest('.item');
-    if (itemEl) itemEl.classList.remove('muted-pending');
+    if (itemEl) { itemEl.classList.remove('muted-pending'); itemEl.classList.remove('read-done'); }
     undoMuteBtn.title = isThreadMute ? 'Mute thread (T)' : 'Mute channel (T)';
     undoMuteBtn.classList.remove('undo-mute');
     undoMuteBtn.dataset.pending = '';
