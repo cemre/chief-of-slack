@@ -636,6 +636,7 @@ ul.slack-list, ol.slack-list {
 .header-expand { display: none; }
 .header-expand.is-expanded { display: inline; }
 .header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.header-expand .collapse-label:hover { color: var(--text-secondary); }
 .header-check { color: var(--text-muted); cursor: pointer; font-size: 12px; }
 .header-check:hover { color: var(--text-secondary); }
 .item-left:has(.header-expand.is-expanded) > .item-time,
