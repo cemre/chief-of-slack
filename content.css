@@ -718,7 +718,7 @@ ul.slack-list, ol.slack-list {
   transition: color 0.15s;
 }
 .channels-header-refresh:hover { color: var(--accent); }
-.channels-header-refresh svg { width: 14px; height: 14px; }
+.channels-header-refresh svg { width: 16px; height: 16px; vertical-align: -3px; }
 
 /* Priority badges */
 .priority-badge {
