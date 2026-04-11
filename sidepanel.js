@@ -2080,9 +2080,9 @@ function itemLeftLink(innerHtml, href) {
 
 function muteIcon(channel, threadTs) {
   if (threadTs) {
-    return `<span class="action-mute channel-mute-icon" data-channel="${channel}" data-thread-ts="${threadTs}">${MUTE_SVG}<span class="mute-label">mute thread</span></span>`;
+    return `<span class="action-mute channel-mute-icon" data-channel="${channel}" data-thread-ts="${threadTs}">${MUTE_SVG}</span>`;
   }
-  return `<span class="action-mute-channel channel-mute-icon" data-channel="${channel}">${MUTE_SVG}<span class="mute-label">mute channel</span></span>`;
+  return `<span class="action-mute-channel channel-mute-icon" data-channel="${channel}">${MUTE_SVG}</span>`;
 }
 
 const THREAD_BADGE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
@@ -2306,11 +2306,12 @@ function summaryToggleHtml(targetId, bulletsHtml, messagesHtml, extraContent) {
 }
 
 // Header expand link for item-left: "N msgs ↓"
-function headerExpandHtml(targetId, count, unit, { startExpanded, channel, markTs, threadTs, hasMention } = {}) {
+function headerExpandHtml(targetId, count, unit, { startExpanded, channel, markTs, threadTs, hasMention, muteHtml } = {}) {
   if (!unit) unit = count === 1 ? 'msg' : 'msgs';
   const cls = startExpanded ? ' is-expanded' : '';
   const check = channel ? `<span class="header-check mark-all-read" data-channel="${channel}" data-ts="${markTs || ''}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}">✓</span>` : '';
-  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">${check}<span class="collapse-arrow">↑</span></span></span></span>`;
+  const mute = muteHtml || '';
+  return `<span class="header-expand summary-toggle${cls}" data-target="${targetId}"><span class="summary-reply-count"><span class="collapse-label">${mute}${check}<span class="collapse-arrow">↑</span></span></span></span>`;
 }
 
 // ── Render a single item (thread, DM, or channel) as HTML ──
@@ -2346,8 +2347,7 @@ function renderThreadItem(t, data, cssClass) {
     if (!t._mentionInReplies && t.mention_count > 0) {
       html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
     }
-    html += ` ${headerExpandHtml(repliesMsgId, unread.length, unread.length === 1 ? 'new reply' : 'new replies', { channel: t.channel_id, markTs: markAllTs, threadTs: t.ts, hasMention: t._isMentioned || t.mention_count > 0 })}`;
-    html += muteIcon(t.channel_id, t.ts);
+    html += ` ${headerExpandHtml(repliesMsgId, unread.length, unread.length === 1 ? 'new reply' : 'new replies', { channel: t.channel_id, markTs: markAllTs, threadTs: t.ts, hasMention: t._isMentioned || t.mention_count > 0, muteHtml: muteIcon(t.channel_id, t.ts) })}`;
     html += `</div>`;
   } else {
     let leftInner = `<span class="item-channel">${channelLabel}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
@@ -2573,12 +2573,7 @@ function renderChannelItem(cp, data, cssClass) {
     html += `<div class="item-left">`;
     html += `<a class="item-channel-link" href="${chOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>`;
     html += ` <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
-    if (csMsgId) html += ` ${headerExpandHtml(csMsgId, cp.messages.length, undefined, { startExpanded: !cp._channelSummary, channel: cp.channel_id, markTs: latest?.ts, hasMention: cp._isMentioned || cp.mention_count > 0 })}`;
-    // Inline mark-read for noise items (accessible in compact mode)
-    if (cssClass === 'noise-item') {
-
-    }
-    html += muteIcon(cp.channel_id, null);
+    if (csMsgId) html += ` ${headerExpandHtml(csMsgId, cp.messages.length, undefined, { startExpanded: !cp._channelSummary, channel: cp.channel_id, markTs: latest?.ts, hasMention: cp._isMentioned || cp.mention_count > 0, muteHtml: muteIcon(cp.channel_id, null) })}`;
     html += `</div>`;
     // Compact preview for when-free items: ALL summary bullets joined, or first message fallback
     if (cssClass === 'when-free' || cssClass === 'noise-item') {
@@ -2726,8 +2721,7 @@ function renderDeepSummarizedItem(cp, data) {
     <div class="item-left">
       <a class="item-channel-link" href="${deepOpenHref}" target="_blank"><span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span></a>
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
-      ${headerExpandHtml(deepMsgId, msgs.length, undefined, { channel: cp.channel_id, markTs: latest?.ts, hasMention: false })}
-      ${muteIcon(cp.channel_id, null)}
+      ${headerExpandHtml(deepMsgId, msgs.length, undefined, { channel: cp.channel_id, markTs: latest?.ts, hasMention: false, muteHtml: muteIcon(cp.channel_id, null) })}
     </div>
     ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
     <div class="item-right">
