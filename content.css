@@ -389,21 +389,22 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 .msg-time[data-channel]:hover { color: var(--text-bright); text-decoration: underline; }
 
 /* Item actions */
-.item-actions {
-  display: flex;
-  visibility: hidden;
-  height: 20px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--accent);
-  gap: 16px;
+/* Channel mute icon — appears on channel name hover */
+.channel-mute-icon {
+  display: inline;
+  opacity: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  margin-left: 6px;
+  vertical-align: middle;
+  transition: opacity 0.15s, color 0.1s;
 }
-.item:hover .item-actions,
-.item:has(.kb-focused) .item-actions { visibility: visible; }
-.item-actions span, .item-actions a { cursor: pointer; color: inherit; text-decoration: none; transition: color 0.1s; }
-.item-actions span:hover, .item-actions a:hover { color: var(--text-primary); }
-.item-actions .mark-all-read.done { color: var(--success); }
-.item.item-summarized > .item-actions { display: none; }
+.channel-mute-icon .mute-icon { vertical-align: -1px; }
+.item-left:hover .channel-mute-icon,
+.item:has(.kb-focused) .channel-mute-icon { opacity: 0.5; }
+.channel-mute-icon:hover { opacity: 1 !important; color: var(--text-primary); }
+.channel-mute-icon.undo-mute { opacity: 0.7; color: var(--warning, #e8a735); }
+.channel-mute-icon.undo-mute:hover { opacity: 1; }
 
 /* Mentions */
 .self-mention { color: var(--danger); font-weight: 700; }
@@ -1198,28 +1199,9 @@ ul.deep-summary li + li { border-top: none; }
   color: var(--text-secondary);
   background: rgba(130,150,220,0.12);
 }
-.item.kb-focused .item-actions { visibility: visible; }
 .msg-row.kb-focused > .msg-content .msg-time { opacity: 1; }
 .msg-row.kb-focused > .msg-content > .thread-replies-container .msg-time { opacity: 0; }
 .thread-replies-container .msg-row:hover .msg-time { opacity: 1; }
-/* Kbd labels */
-.item-actions kbd { display: none; }
-.item.kb-focused .item-actions kbd,
-.item:has(.kb-focused) .item-actions kbd {
-  display: inline-block;
-}
-.item-actions kbd {
-  background: rgba(130,150,220,0.08);
-  border: 1px solid rgba(130,150,220,0.12);
-  border-radius: 3px;
-  padding: 0 4px;
-  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 12px;
-  color: var(--text-secondary);
-  min-width: 14px;
-  text-align: center;
-  line-height: 16px;
-}
 
 /* Collapsible reason-badge toggle */
 .item-reason-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; margin: -12px -16px -12px -16px; padding: 12px 16px 12px 16px; border-radius: 0; transition: background 0.1s; }
@@ -1290,8 +1272,29 @@ ul.deep-summary li + li { border-top: none; }
   transition: opacity 0.15s, color 0.15s;
   z-index: 2;
 }
+/* Gutter reply icon (for DMs) */
+.gutter-reply {
+  position: absolute;
+  right: 6px;
+  top: calc(50% - 14px);
+  opacity: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: opacity 0.15s, color 0.15s;
+  z-index: 2;
+}
+.item:hover > .gutter-reply { opacity: 0.5; }
+.gutter-reply:hover { opacity: 1 !important; color: var(--accent); }
 .item:hover > .gutter-check,
 .item:hover .gutter-check { opacity: 0.5; }
+/* Shift gutter-check down when gutter-reply is present */
+.item > .gutter-reply ~ .gutter-check { top: calc(50% + 6px); }
 .when-free-items .item.detail-expanded > .gutter-check,
 .noise-items .item.detail-expanded > .gutter-check { display: none; }
 .gutter-check:hover { opacity: 1 !important; color: var(--accent); }
@@ -1355,9 +1358,7 @@ ul.deep-summary li + li { border-top: none; }
 
 /* Hide detail content by default in compact sections */
 .when-free-items .item:not(.detail-expanded) > .item-right,
-.noise-items .item:not(.detail-expanded) > .item-right,
-.when-free-items .item:not(.detail-expanded) > .item-actions,
-.noise-items .item:not(.detail-expanded) > .item-actions {
+.noise-items .item:not(.detail-expanded) > .item-right {
   display: none;
 }
 

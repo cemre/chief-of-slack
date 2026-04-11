@@ -1601,7 +1601,15 @@ document.addEventListener('keydown', (e) => {
     }
     else if (k === 't' && !isVip) (parentItem?.querySelector('.action-mute') || parentItem?.querySelector('.action-mute-channel'))?.click();
     else if (k === 'o' && !parentItem?.classList.contains('vip-item')) (parentItem?.querySelector('.item-left-link') || parentItem?.querySelector('.item-channel[data-channel]'))?.click();
-    else if (k === 'r') parentItem?.querySelector('.action-reply')?.click();
+    else if (k === 'r' && parentItem) {
+      const markEl = parentItem.querySelector('.mark-all-read');
+      if (markEl) {
+        const ch = markEl.dataset.channel;
+        const ts = markEl.dataset.threadTs || markEl.dataset.ts;
+        const isDm = parentItem.classList.contains('dm-item') || parentItem.querySelector('.envelope-icon');
+        showItemReplyForm(parentItem, ch, ts, !!isDm);
+      }
+    }
     return;
   }
 }, true);
@@ -2070,7 +2078,16 @@ function itemLeftLink(innerHtml, href) {
   return `<a class="item-left-link" href="${href}" target="_blank">${innerHtml}</a>`;
 }
 
+function muteIcon(channel, threadTs) {
+  if (threadTs) {
+    return `<span class="action-mute channel-mute-icon" data-channel="${channel}" data-thread-ts="${threadTs}" title="Mute thread (T)">${MUTE_SVG}</span>`;
+  }
+  return `<span class="action-mute-channel channel-mute-icon" data-channel="${channel}" title="Mute channel (T)">${MUTE_SVG}</span>`;
+}
+
 const THREAD_BADGE_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
+
+const MUTE_SVG = '<svg class="mute-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path d="M9.547 3.062A.75.75 0 0 1 10 3.75v12.5a.75.75 0 0 1-1.264.546L5.203 13H3.667a.75.75 0 0 1-.7-.48A6.985 6.985 0 0 1 2.5 10c0-.85.151-1.665.429-2.42a.75.75 0 0 1 .737-.58h1.537l3.533-3.754a.75.75 0 0 1 .81-.184ZM13.28 7.22a.75.75 0 1 0-1.06 1.06L13.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L15 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L16.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L15 8.94l-1.72-1.72Z"/></svg>';
 
 const HEART_ICON = '<svg class="engage-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M2 6.342a3.375 3.375 0 0 1 6-2.088 3.375 3.375 0 0 1 5.997 2.26c-.063 2.134-1.618 3.76-2.955 4.784a14.437 14.437 0 0 1-2.676 1.61c-.02.01-.038.017-.05.022l-.014.006-.004.002h-.002a.75.75 0 0 1-.592.001h-.002l-.004-.003-.015-.006a5.528 5.528 0 0 1-.232-.107 14.395 14.395 0 0 1-2.535-1.557C3.564 10.22 1.999 8.558 1.999 6.38L2 6.342Z"/></svg>';
 const COMMENT_ICON = '<svg class="engage-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.74c0 .983.713 1.825 1.69 1.943.764.092 1.534.164 2.31.216v2.351a.75.75 0 0 0 1.28.53l2.51-2.51c.182-.181.427-.286.684-.294a44.298 44.298 0 0 0 3.837-.293C14.287 10.565 15 9.723 15 8.74V4.26c0-.983-.713-1.825-1.69-1.943a44.447 44.447 0 0 0-10.62 0C1.712 2.435 1 3.277 1 4.26v4.482Z"/></svg>';
@@ -2218,20 +2235,17 @@ function itemTime(ts, channel) {
   return `<span class="item-time"${attrs}>${formatTime(ts)}</span>`;
 }
 
-function itemActions(channel, markTs, threadTs, isDm, channelName = '', _unused = false, hasMention = false, { isPrivate = false } = {}) {
-  const showReply = threadTs || isDm || isPrivate;
-  const replyLabel = isDm ? 'send a DM' : 'reply';
-  const replyTs = threadTs || markTs;
-  return `<div class="item-actions">
-    <span class="mark-all-read" data-channel="${channel}" data-ts="${markTs}"${threadTs ? ` data-thread-ts="${threadTs}"` : ''}${hasMention ? ' data-has-mention="1"' : ''}><kbd>M</kbd> mark read</span>
-    ${showReply ? `<span class="action-reply" data-channel="${channel}" data-ts="${replyTs}"${isDm ? ' data-dm="true"' : ''}><kbd>R</kbd> ${replyLabel}</span>` : ''}
-    ${threadTs ? `<span class="action-mute" data-channel="${channel}" data-thread-ts="${threadTs}"><kbd>T</kbd> mute thread</span>` : ''}
-    ${!threadTs && !isDm ? `<span class="action-mute-channel" data-channel="${channel}"><kbd>T</kbd> mute channel</span>` : ''}
-  </div>`;
+function itemActions() {
+  return '';
 }
 
 function gutterCheck(channel, markTs, threadTs, hasMention) {
   return `<span class="gutter-check mark-all-read" data-channel="${channel}" data-ts="${markTs}" data-thread-ts="${threadTs || ''}" data-has-mention="${hasMention ? '1' : '0'}" title="Mark read">✓</span>`;
+}
+
+function gutterReply(channel, ts, isDm) {
+  const REPLY_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path fill-rule="evenodd" d="M12.5 9.75A2.75 2.75 0 0 0 9.75 7H4.56l2.22 2.22a.75.75 0 1 1-1.06 1.06l-3.5-3.5a.75.75 0 0 1 0-1.06l3.5-3.5a.75.75 0 0 1 1.06 1.06L4.56 5.5h5.19a4.25 4.25 0 0 1 0 8.5h-1a.75.75 0 0 1 0-1.5h1a2.75 2.75 0 0 0 2.75-2.75Z" clip-rule="evenodd"/></svg>';
+  return `<span class="gutter-reply action-reply" data-channel="${channel}" data-ts="${ts}"${isDm ? ' data-dm="true"' : ''} title="${isDm ? 'Send a DM (R)' : 'Reply (R)'}">${REPLY_SVG}</span>`;
 }
 
 
@@ -2331,6 +2345,7 @@ function renderThreadItem(t, data, cssClass) {
       html += ` <span class="item-sep">·</span> <span class="item-mention">@mentioned</span>`;
     }
     html += ` <span class="item-sep">·</span> ${headerExpandHtml(repliesMsgId, unread.length, unread.length === 1 ? 'new reply' : 'new replies')}`;
+    html += muteIcon(t.channel_id, t.ts);
     html += `</div>`;
   } else {
     let leftInner = `<span class="item-channel">${channelLabel}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(markAllTs)}</span>`;
@@ -2340,7 +2355,7 @@ function renderThreadItem(t, data, cssClass) {
     if (unread.length > 0) {
       leftInner += ` <span class="item-sep">·</span> <span class="item-replied">${unread.length} new ${unread.length === 1 ? 'reply' : 'replies'}</span>`;
     }
-    html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}</div>`;
+    html += `<div class="item-left">${itemLeftLink(leftInner, threadOpenHref)}${muteIcon(t.channel_id, t.ts)}</div>`;
   }
   // Compact preview for when-free threads: show latest reply, not root post
   if (cssClass === 'when-free') {
@@ -2506,7 +2521,7 @@ function renderDmItem(dm, data, cssClass) {
     html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${timeHtml}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += '</div>'; // close item-right
-  html += itemActions(dm.channel_id, latest.ts, null, true);
+  if (!collapsible) html += gutterReply(dm.channel_id, latest.ts, true);
   if (!collapsible) html += gutterCheck(dm.channel_id, latest.ts, null, false);
   html += (collapsible ? '</div>' : '') + '</div>';
   return html;
@@ -2561,6 +2576,7 @@ function renderChannelItem(cp, data, cssClass) {
     if (cssClass === 'noise-item') {
       html += `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>`;
     }
+    html += muteIcon(cp.channel_id, null);
     html += `</div>`;
     // Compact preview for when-free items: ALL summary bullets joined, or first message fallback
     if (cssClass === 'when-free' || cssClass === 'noise-item') {
@@ -2594,7 +2610,7 @@ function renderChannelItem(cp, data, cssClass) {
     }
   } else {
     let chLeftInner = `<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(latest?.ts)}</span>`;
-    html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}</div>`;
+    html += `<div class="item-left">${itemLeftLink(chLeftInner, chOpenHref)}${muteIcon(cp.channel_id, null)}</div>`;
   }
   html += `<div class="item-right">`;
   if (cp._summary) {
@@ -2710,13 +2726,13 @@ function renderDeepSummarizedItem(cp, data) {
       <span class="item-sep">·</span> <span class="item-time">${timeDisplay}</span>
       <span class="item-sep">·</span> ${headerExpandHtml(deepMsgId, msgs.length)}
       <span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>
+      ${muteIcon(cp.channel_id, null)}
     </div>
     ${cp._deepSummary ? `<div class="compact-preview">${compactBulletsHtml(cp._deepSummary)}</div>` : ''}
     <div class="item-right">
       ${summaryToggleHtml(deepMsgId, deepBullets, messagesHtml, cp._deepFetchFailed ? `<div><span class="error" style="font-size:11px;">⚠ fetch failed, limited context</span></div>` : '')}
       <div class="noise-inline-actions" style="display:flex;gap:12px;margin-top:6px;">
         <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${latest?.ts}" style="margin-top:0">mark read</span>
-        <span class="show-messages-link action-mute-channel" data-channel="${cp.channel_id}" style="margin-top:0">mute channel</span>
       </div>
     </div>
     ${gutterCheck(cp.channel_id, latest?.ts, null, false)}
@@ -2787,10 +2803,10 @@ function renderBotThreadItem(cp, data, cssClass) {
     <div class="item-left">
       ${itemLeftLink(`<span class="item-channel">${chPrefix(cp.channel_id, data)}${escapeHtml(ch)}</span> <span class="item-sep">·</span> <span class="item-time">${formatTime(botOpenTs)}</span>`, botOpenHref)}
       ${cssClass === 'noise-item' ? `<span class="compact-header-actions"> <span class="item-sep">·</span> <span class="mark-all-read" data-channel="${cp.channel_id}" data-ts="${allMsgs[allMsgs.length - 1]?.ts}" data-thread-ts="" data-has-mention="0">mark read</span></span>` : ''}
+      ${muteIcon(cp.channel_id, null)}
     </div>
     <div class="item-right">
       ${contentHtml}
-      ${itemActions(cp.channel_id, allMsgs[allMsgs.length - 1]?.ts, null, false, ch, cssClass === 'noise-item')}
     </div>
   </div>`;
 }
@@ -3624,40 +3640,11 @@ bodyEl.addEventListener('click', (e) => {
     return;
   }
 
-  // Reply action (in item-actions)
+  // Reply action (in item-actions — legacy) or triggered via showItemReplyForm
   const replyBtn = e.target.closest('.action-reply');
   if (replyBtn) {
-    const itemActions = replyBtn.closest('.item-actions');
-    if (!itemActions || itemActions.previousElementSibling?.classList.contains('reply-form')) return;
-    const { channel, ts, dm } = replyBtn.dataset;
-    const isDm = dm === 'true';
-    const form = document.createElement('div');
-    form.className = 'reply-form';
-    const placeholder = isDm ? 'Send a DM... (⌘Enter to send)' : 'Reply... (⌘Enter to send)';
-    form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><span class="draft-saved">saved</span><button class="reply-send">Send</button></div>`;
-    itemActions.insertAdjacentElement('beforebegin', form);
-    const input = form.querySelector('.reply-input');
-    for (const evt of ['keydown', 'keyup', 'keypress', 'copy', 'cut', 'input']) {
-      input.addEventListener(evt, (ev) => ev.stopPropagation());
-    }
-    setupImagePaste(form, input);
-    loadDraftIntoForm(form, input, channel, isDm ? null : ts);
-    input.focus();
-    function autoResize() {
-      input.style.height = 'auto';
-      input.style.height = input.scrollHeight + 'px';
-    }
-    input.addEventListener('input', autoResize);
-    input.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && (input.value.trim() || form._pastedImageData)) {
-        ev.preventDefault();
-        sendReply(form, channel, isDm ? null : ts, input.value.trim());
-      }
-      if (ev.key === 'Escape') form.remove();
-    });
-    form.querySelector('.reply-send').addEventListener('click', () => {
-      if (input.value.trim() || form._pastedImageData) sendReply(form, channel, isDm ? null : ts, input.value.trim());
-    });
+    const itemEl = replyBtn.closest('.item');
+    if (itemEl) showItemReplyForm(itemEl, replyBtn.dataset.channel, replyBtn.dataset.ts, replyBtn.dataset.dm === 'true');
     return;
   }
 
@@ -3665,10 +3652,8 @@ bodyEl.addEventListener('click', (e) => {
   const muteBtn = e.target.closest('.action-mute');
   if (muteBtn && !muteBtn.dataset.pending) {
     const { channel, threadTs } = muteBtn.dataset;
-    muteBtn.textContent = '...';
     muteBtn.dataset.pending = 'true';
-    const markAllBtn = muteBtn.closest('.item-actions')?.querySelector('.mark-all-read')
-      || muteBtn.closest('.item')?.querySelector('.mark-all-read');
+    const markAllBtn = muteBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs: tTs, hasMention } = markAllBtn.dataset;
       const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
@@ -3679,7 +3664,7 @@ bodyEl.addEventListener('click', (e) => {
     muteThreadLocally(channel, threadTs);
     const itemEl = muteBtn.closest('.item');
     if (itemEl) itemEl.classList.add('muted-pending');
-    muteBtn.textContent = 'undo mute';
+    muteBtn.title = 'Undo mute (T)';
     muteBtn.classList.add('undo-mute');
     sendToInject({ type: `${FSLACK}:muteThread`, channel, thread_ts: threadTs, requestId: `mute_${Date.now()}` });
     return;
@@ -3696,7 +3681,7 @@ bodyEl.addEventListener('click', (e) => {
     }
     const itemEl = undoMuteBtn.closest('.item');
     if (itemEl) itemEl.classList.remove('muted-pending');
-    undoMuteBtn.textContent = 'mute thread';
+    undoMuteBtn.title = undoMuteBtn.classList.contains('action-mute') ? 'Mute thread (T)' : 'Mute channel (T)';
     undoMuteBtn.classList.remove('undo-mute');
     undoMuteBtn.dataset.pending = '';
     return;
@@ -3706,10 +3691,8 @@ bodyEl.addEventListener('click', (e) => {
   const muteChannelBtn = e.target.closest('.action-mute-channel');
   if (muteChannelBtn && !muteChannelBtn.dataset.pending) {
     const { channel } = muteChannelBtn.dataset;
-    muteChannelBtn.textContent = '...';
     muteChannelBtn.dataset.pending = 'true';
-    const markAllBtn = muteChannelBtn.closest('.item-actions')?.querySelector('.mark-all-read')
-      || muteChannelBtn.closest('.item')?.querySelector('.mark-all-read');
+    const markAllBtn = muteChannelBtn.closest('.item')?.querySelector('.mark-all-read');
     if (markAllBtn && !markAllBtn.classList.contains('done') && !markAllBtn.dataset.pending) {
       const { ts, threadTs, hasMention } = markAllBtn.dataset;
       const _isMuteIcon = markAllBtn.classList.contains('gutter-check') || markAllBtn.classList.contains('reason-mark-read');
@@ -3717,6 +3700,8 @@ bodyEl.addEventListener('click', (e) => {
       markAllBtn.dataset.pending = 'true';
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}` });
     }
+    muteChannelBtn.title = 'Undo mute (T)';
+    muteChannelBtn.classList.add('undo-mute');
     sendToInject({ type: `${FSLACK}:muteChannel`, channel, requestId: `mutech_${Date.now()}` });
     return;
   }
@@ -4262,6 +4247,39 @@ function setupImagePaste(form, input) {
   });
 }
 
+function showItemReplyForm(itemEl, channel, ts, isDm) {
+  if (itemEl.querySelector('.reply-form')) return;
+  const form = document.createElement('div');
+  form.className = 'reply-form';
+  const placeholder = isDm ? 'Send a DM... (\u2318Enter to send)' : 'Reply... (\u2318Enter to send)';
+  form.innerHTML = `<div class="reply-image-preview"><img class="reply-image-thumb"><button class="reply-image-remove">\u00d7</button></div><div class="reply-form-row"><textarea class="reply-input" rows="1" placeholder="${placeholder}"></textarea><span class="draft-saved">saved</span><button class="reply-send">Send</button></div>`;
+  const rightEl = itemEl.querySelector('.item-right');
+  if (rightEl) rightEl.insertAdjacentElement('afterend', form);
+  else itemEl.appendChild(form);
+  const input = form.querySelector('.reply-input');
+  for (const evt of ['keydown', 'keyup', 'keypress', 'copy', 'cut', 'input']) {
+    input.addEventListener(evt, (ev) => ev.stopPropagation());
+  }
+  setupImagePaste(form, input);
+  loadDraftIntoForm(form, input, channel, isDm ? null : ts);
+  input.focus();
+  function autoResize() {
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+  }
+  input.addEventListener('input', autoResize);
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey) && (input.value.trim() || form._pastedImageData)) {
+      ev.preventDefault();
+      sendReply(form, channel, isDm ? null : ts, input.value.trim());
+    }
+    if (ev.key === 'Escape') form.remove();
+  });
+  form.querySelector('.reply-send').addEventListener('click', () => {
+    if (input.value.trim() || form._pastedImageData) sendReply(form, channel, isDm ? null : ts, input.value.trim());
+  });
+}
+
 function sendReply(form, channel, threadTs, text) {
   const input = form.querySelector('.reply-input');
   const btn = form.querySelector('.reply-send');
@@ -4639,8 +4657,6 @@ function runBotThreadSummarization(whenFreeItems, data) {
       messagesHtml += `<div class="msg-row"><div class="msg-content item-text">${userLink(m.subtype === 'bot_message' || !m.user ? 'Bot' : uname(m.user, data.users), cp.channel_id, m.ts)} ${bTextHtml}${bExtras}${msgTime(m.ts, cp.channel_id)}</div>${msgActions(cp.channel_id, m.ts, { showReply: false })}</div>`;
     }
     const rightEl = itemEl.querySelector('.item-right');
-    const actionsEl = itemEl.querySelector('.item-actions');
-    const actionsHtml = actionsEl ? actionsEl.outerHTML : '';
     rightEl.innerHTML = `
       <div class="msg-row"><div class="msg-content">
         <div class="deep-summary">${escapeHtml(cp._botSummary)}</div>
@@ -4649,8 +4665,7 @@ function runBotThreadSummarization(whenFreeItems, data) {
           <span class="show-messages-link mark-all-read" data-channel="${cp.channel_id}" data-ts="${cp.messages[0]?.ts}" style="margin-top:0">mark read</span>
         </div>
       </div></div>
-      <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>
-      ${actionsHtml}`;
+      <div class="deep-messages" id="${deepMsgId}">${messagesHtml}</div>`;
   }));
 }
 
@@ -5960,7 +5975,8 @@ function handleMuteChannelResult(msg) {
       muteBtn.closest('.item')?.remove();
     } else {
       delete muteBtn.dataset.pending;
-      muteBtn.textContent = 'mute channel';
+      muteBtn.classList.remove('undo-mute');
+      muteBtn.title = 'Mute channel (T)';
     }
   }
 }
