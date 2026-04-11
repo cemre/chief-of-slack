@@ -660,10 +660,10 @@ function _injectAssessButtons(prioritized) {
     }
     wrap.appendChild(upBtn);
     wrap.appendChild(btn);
-    // Insert after reason badge as sibling, or at end of item
-    const reason = item.querySelector('.item-reason');
-    if (reason && reason.nextSibling) {
-      reason.parentNode.insertBefore(wrap, reason.nextSibling);
+    // Insert before reason badge as sibling, or at end of item
+    const reasonToggle = item.querySelector('.item-reason-toggle');
+    if (reasonToggle) {
+      reasonToggle.parentNode.insertBefore(wrap, reasonToggle);
     } else {
       item.appendChild(wrap);
     }
