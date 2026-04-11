@@ -401,7 +401,7 @@ a.item-channel, a.item-user, a.item-time, a.msg-time { text-decoration: none; co
 }
 .channel-mute-icon .mute-icon { vertical-align: -2px; }
 .channel-mute-icon .mute-label { display: none; margin-left: 3px; }
-.item.detail-expanded .channel-mute-icon { display: inline; opacity: 0.5; }
+.item.detail-expanded .channel-mute-icon { display: inline; opacity: 1; color: var(--text-secondary); }
 .channel-mute-icon:hover { opacity: 1 !important; color: var(--text-primary); }
 .channel-mute-icon:hover .mute-label { display: inline; }
 .channel-mute-icon.undo-mute { display: inline; opacity: 0.7; color: var(--warning, #e8a735); }
@@ -638,6 +638,8 @@ ul.slack-list, ol.slack-list {
 .header-expand.is-expanded { display: inline; }
 .header-expand .collapse-label { position: absolute; right: 16px; top: 14px; color: var(--text-muted); font-size: 12px; cursor: pointer; }
 .header-expand .collapse-label:hover { color: var(--text-secondary); text-decoration: underline; }
+.item-left:has(.header-expand.is-expanded) > .item-time,
+.item-left:has(.header-expand.is-expanded) > .item-sep { display: none; }
 .noise-items { display: none; }
 .noise-items.expanded { display: block; }
 .when-free-items { display: none; }
