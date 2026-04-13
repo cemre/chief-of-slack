@@ -121,8 +121,18 @@
       channelPost._sidebarSection = sidebarSections[channelPost.channel_id] || null;
       channelPost._sidebarSectionName = sidebarSectionNameMap[channelPost.channel_id] || null;
 
+      // Per-message mention detection: split mentioned vs non-mentioned messages
+      const mentionedMessages = [];
+      const nonMentionedMessages = [];
+      for (const message of channelPost.messages || []) {
+        if (containsSelfMention(message.text || '', selfId, { handleMentionRegex })) {
+          mentionedMessages.push(message);
+        } else {
+          nonMentionedMessages.push(message);
+        }
+      }
+      channelPost._isMentioned = mentionedMessages.length > 0;
       const allTexts = (channelPost.messages || []).map((message) => message.text || '').join(' ');
-      channelPost._isMentioned = containsSelfMention(allTexts, selfId, { handleMentionRegex });
 
       const channelLabel = channels[channelPost.channel_id] || channelPost.channel_id;
       const debugLog = (route) => {
@@ -210,7 +220,32 @@
       }
 
       // Default route: mentioned or floor-section → LLM (so floors can elevate), otherwise → noise
-      if (channelPost._isMentioned) {
+      // When only some messages are mentioned, split: mentioned messages → LLM as mentioned,
+      // non-mentioned messages → route normally (floor/noise) WITHOUT the mention flag.
+      if (channelPost._isMentioned && nonMentionedMessages.length > 0) {
+        // Split: mentioned messages go to LLM as mentioned
+        const mentionedPost = {
+          ...channelPost,
+          messages: mentionedMessages,
+          _isMentioned: true,
+          mention_count: mentionedMessages.length,
+        };
+        forLlm.channelPosts.push(mentionedPost);
+
+        // Non-mentioned messages route as if no mention exists
+        const restPost = {
+          ...channelPost,
+          messages: nonMentionedMessages,
+          _isMentioned: false,
+          mention_count: 0,
+        };
+        if (restPost._sidebarSection === 'floor_whenfree' || restPost._sidebarSection === 'floor_priority') {
+          forLlm.channelPosts.push(restPost);
+        } else {
+          noise.push(restPost);
+        }
+        debugLog('mentioned-split');
+      } else if (channelPost._isMentioned) {
         debugLog('mentioned-forLlm');
         forLlm.channelPosts.push(channelPost);
       } else if (channelPost._sidebarSection === 'floor_whenfree' || channelPost._sidebarSection === 'floor_priority') {

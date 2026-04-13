@@ -227,7 +227,9 @@ test('serializeForLlm keeps the lean payload shape for snapshot-derived base ite
 
   assert.equal(items[2].type, 'channel');
   assert.equal(items[2].channel, 'eng-ai-tools');
-  assert.equal(items[2].messages[1].text, 'The new desktop build can control local GUI tools now. Read more');
+  // After mention-split, only the mentioned message is in forLlm; non-mentioned goes to noise
+  assert.equal(items[2].messages.length, 1);
+  assert.match(items[2].messages[0].text, /plan review loop/);
 
   // _channelId is a transient field for behavior learning lookup
   assert.equal(items[0]._channelId, 'C_PRIVATE_THREAD', 'thread should carry _channelId');
@@ -263,15 +265,17 @@ test('mapPriorities applies DM floors and mention floor on public channel', () =
   assert.equal(mapped.actNow.length, 0);
   assert.equal(mapped.priority.length, 2);
   assert.equal(mapped.whenFree.length, 0);
-  assert.equal(mapped.noise.length, 1);
+  // 2 noise items: thread + non-mentioned channel messages (split from the mentioned post)
+  assert.equal(mapped.noise.length, 2);
 
   const dm = mapped.priority.find((item) => item._type === 'dm');
   assert.ok(dm);
   assert.equal(dm._ruleOverride, 'DM (Minimum: priority) — AI said noise');
 
-  // Channel is mentioned, so mention floor applies and cap is skipped (isMentioned guard)
+  // Only the mentioned message from the channel is prioritized (mention-split)
   const publicChannel = mapped.priority.find((item) => item._type === 'channel');
   assert.ok(publicChannel);
+  assert.equal(publicChannel._isMentioned, true);
   assert.equal(publicChannel._ruleOverride, '@mention (Minimum: priority)');
 
   const thread = mapped.noise.find((item) => item._type === 'thread');
