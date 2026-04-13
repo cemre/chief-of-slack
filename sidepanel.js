@@ -5855,9 +5855,14 @@ function handleReactResult(msg) {
     btn.style.opacity = '';
     if (msg.ok) {
       btn.classList.add('reacted');
+      const key = `${btn.dataset.channel}:${btn.dataset.ts}`;
+      if (!myReactionsMap[key]) myReactionsMap[key] = [];
+      if (!myReactionsMap[key].includes(btn.dataset.emoji)) myReactionsMap[key].push(btn.dataset.emoji);
       if (btn.dataset.emoji === '+1' || btn.dataset.emoji === 'yellow_heart') {
         autoMarkItemRead(btn.closest('.item'), { requireThread: true });
       }
+    } else {
+      btn.classList.remove('reacted');
     }
   }
 }
@@ -5870,7 +5875,15 @@ function handleUnreactResult(msg) {
     delete btn.dataset.pending;
     delete btn.dataset.pendingKind;
     btn.style.opacity = '';
-    if (!msg.ok) btn.classList.add('reacted');
+    if (msg.ok) {
+      const key = `${btn.dataset.channel}:${btn.dataset.ts}`;
+      if (myReactionsMap[key]) {
+        myReactionsMap[key] = myReactionsMap[key].filter(e => e !== btn.dataset.emoji);
+        if (myReactionsMap[key].length === 0) delete myReactionsMap[key];
+      }
+    } else {
+      btn.classList.add('reacted');
+    }
   }
 }
 

@@ -940,7 +940,8 @@ ul.slack-list, ol.slack-list {
   z-index: 1;
 }
 .msg-row:hover > .msg-actions,
-.msg-row.kb-focused > .msg-actions { opacity: 1; }
+.msg-row.kb-focused > .msg-actions,
+.msg-actions:has(.reacted) { opacity: 1; }
 .msg-time { color: var(--text-muted); font-size: 12px; margin-left: 6px; opacity: 0; transition: opacity 0.15s; white-space: nowrap; }
 .msg-row:hover > .msg-content .msg-time { opacity: 1; }
 .msg-row:hover > .msg-content > .thread-replies-container .msg-time { opacity: 0; }
@@ -960,7 +961,7 @@ ul.slack-list, ol.slack-list {
   line-height: 1;
   transition: color 0.1s, background 0.1s;
 }
-.action-btn:hover { color: var(--text-primary); background: rgba(130,150,220,0.08); }
+.action-btn:hover { color: #7b9bd4; background: rgba(130,150,220,0.08); }
 .action-icon { display: block; }
 .msg-actions kbd {
   display: none;
@@ -977,7 +978,8 @@ ul.slack-list, ol.slack-list {
 }
 .msg-row.kb-focused > .msg-actions kbd { display: block; }
 .action-btn:active { color: var(--accent); }
-.action-btn.reacted { color: var(--accent); opacity: 0.5; }
+.action-btn.reacted { color: var(--accent); }
+.action-btn.reacted:hover { color: var(--accent); opacity: 0.7; }
 .action-btn.saved { color: var(--accent); }
 .root-seen .msg-files { display: none; }
 .item.muted-pending { opacity: 0.3; }

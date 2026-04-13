@@ -1662,8 +1662,20 @@
       try {
         await slackApi('reactions.add', { channel, timestamp: ts, name: emoji });
         window.postMessage({ type: `${FSLACK}:reactResult`, requestId, ok: true }, '*');
-      } catch {
-        window.postMessage({ type: `${FSLACK}:reactResult`, requestId, ok: false }, '*');
+      } catch (err) {
+        const ok = err.message?.includes('already_reacted');
+        window.postMessage({ type: `${FSLACK}:reactResult`, requestId, ok }, '*');
+      }
+    }
+
+    if (msgType === `${FSLACK}:removeReaction`) {
+      const { channel, ts, emoji, requestId } = event.data;
+      try {
+        await slackApi('reactions.remove', { channel, timestamp: ts, name: emoji });
+        window.postMessage({ type: `${FSLACK}:unreactResult`, requestId, ok: true }, '*');
+      } catch (err) {
+        const ok = err.message?.includes('no_reaction');
+        window.postMessage({ type: `${FSLACK}:unreactResult`, requestId, ok }, '*');
       }
     }
 
