@@ -1501,6 +1501,12 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.metaKey || e.ctrlKey || e.altKey) return;
 
+  if (e.key === '?') {
+    e.preventDefault();
+    helpBtn.click();
+    return;
+  }
+
   const key = e.key;
 
   if (key === 'j' || key === 'ArrowDown') {
