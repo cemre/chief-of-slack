@@ -5699,10 +5699,11 @@ function runPrioritize() {
   if (isBackgroundFetch) {
     isBackgroundFetch = false;
 
-    // Auto-refresh if user hasn't scrolled or expanded anything
+    // Auto-refresh if user hasn't scrolled or expanded anything, and priority section is empty
     const hasExpanded = bodyEl.querySelector('.expanded, .is-expanded, .reply-form');
     const atTop = bodyEl.scrollTop === 0 && document.documentElement.scrollTop === 0;
-    if (atTop && !hasExpanded) {
+    const hasPriorityItems = bodyEl.querySelector('.item.act-now, .item.priority-item');
+    if (atTop && !hasExpanded && !hasPriorityItems) {
       console.log('[fslack] Auto-refresh: scroll at top, nothing expanded');
       refreshLink.textContent = 'refresh now';
       refreshLink.style.display = '';

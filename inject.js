@@ -986,21 +986,27 @@
       const p1UserIds = [...p1Mentions.userIds, ...p1DmMentions.userIds];
       const p1ChannelRefIds = [...threads.map(t => t.channel_id), ...p1Mentions.channelIds, ...p1DmMentions.channelIds];
 
-      progress(5, 'Resolving users for threads + DMs...');
-      const { users: p1Users, mentionHints: p1MentionHints, fullNames: p1FullNames } = await resolveUsers(
-        p1UserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
-        (done, total) => { if (total > 0) progress(5, `Resolving users... ${done}/${total}`); }
-      );
-      progress(6, 'Resolving channel names...');
-      const { channels: p1Channels, channelMeta: p1ChannelMeta } = await resolveChannelNames(
-        p1ChannelRefIds, cachedChannels, cachedChannelMeta,
-        (done, total, cached) => { if (total > 0) progress(6, `Resolving channel names... ${done}/${total} (${cached} cached)`); }
-      );
-
-      const emoji = await emojiPromise;
+      progress(5, 'Resolving users + channels...');
+      const [
+        { users: p1Users, mentionHints: p1MentionHints, fullNames: p1FullNames },
+        { channels: p1Channels, channelMeta: p1ChannelMeta },
+        emoji,
+        ..._sidebarResult
+      ] = await Promise.all([
+        resolveUsers(
+          p1UserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
+          (done, total) => { if (total > 0) progress(5, `Resolving users... ${done}/${total}`); }
+        ),
+        resolveChannelNames(
+          p1ChannelRefIds, cachedChannels, cachedChannelMeta,
+          (done, total, cached) => { if (total > 0) progress(6, `Resolving channel names... ${done}/${total} (${cached} cached)`); }
+        ),
+        emojiPromise,
+        ...(sidebarPromise ? [sidebarPromise] : []),
+      ]);
       const needsEmojiRefresh = !cachedEmoji;
       if (sidebarPromise) {
-        sidebarSections = await sidebarPromise;
+        sidebarSections = _sidebarResult[0];
         try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
       }
 
@@ -1045,14 +1051,16 @@
       const p2UserIds = [...p2Mentions.userIds, ...p2ExtraThreadMentions.userIds];
       const p2ChannelRefIds = [...channelPosts.map(cp => cp.channel_id), ...p2Mentions.channelIds, ...p2ExtraThreadMentions.channelIds];
 
-      progress(5, 'Resolving users for channels...');
-      const { users: p2Users, mentionHints: p2MentionHints, fullNames: p2FullNames } = await resolveUsers(
-        p2UserIds, p1Users, { ...cachedUserMentionHints, ...p1MentionHints }, { ...cachedFullNames, ...p1FullNames },
-      );
-      progress(6, 'Resolving channel names...');
-      const { channels: p2Channels, channelMeta: p2ChannelMeta } = await resolveChannelNames(
-        p2ChannelRefIds, p1Channels, p1ChannelMeta,
-      );
+      progress(5, 'Resolving users + channels for channel posts...');
+      const [
+        { users: p2Users, mentionHints: p2MentionHints, fullNames: p2FullNames },
+        { channels: p2Channels, channelMeta: p2ChannelMeta },
+      ] = await Promise.all([
+        resolveUsers(
+          p2UserIds, p1Users, { ...cachedUserMentionHints, ...p1MentionHints }, { ...cachedFullNames, ...p1FullNames },
+        ),
+        resolveChannelNames(p2ChannelRefIds, p1Channels, p1ChannelMeta),
+      ]);
 
       // Return Phase 2 data (sent by message handler)
       return {
@@ -1090,24 +1098,29 @@
     const allUserIds = [...allMentions.userIds, ...dmMentions.userIds, ...chMentions.userIds];
     const mentionedChannelIds = [...allMentions.channelIds, ...dmMentions.channelIds, ...chMentions.channelIds];
 
-    progress(5, 'Resolving user profiles...');
-    const { users, mentionHints, fullNames } = await resolveUsers(
-      allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
-      (done, total) => { if (total > 0) progress(5, `Resolving users... ${done}/${total}`); }
-    );
-
     const allChannelIds = [...threads.map(t => t.channel_id), ...channelPosts.map(cp => cp.channel_id), ...mentionedChannelIds];
-    progress(6, 'Resolving channel names...');
-    const { channels, channelMeta } = await resolveChannelNames(
-      allChannelIds, cachedChannels, cachedChannelMeta,
-      (done, total, cached) => { if (total > 0) progress(6, `Resolving channel names... ${done}/${total} (${cached} cached)`); }
-    );
-
+    progress(5, 'Resolving users + channels...');
+    const [
+      { users, mentionHints, fullNames },
+      { channels, channelMeta },
+      emoji,
+      ..._sidebarResult2
+    ] = await Promise.all([
+      resolveUsers(
+        allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
+        (done, total) => { if (total > 0) progress(5, `Resolving users... ${done}/${total}`); }
+      ),
+      resolveChannelNames(
+        allChannelIds, cachedChannels, cachedChannelMeta,
+        (done, total, cached) => { if (total > 0) progress(6, `Resolving channel names... ${done}/${total} (${cached} cached)`); }
+      ),
+      emojiPromise,
+      ...(sidebarPromise ? [sidebarPromise] : []),
+    ]);
     const lastRead = buildLastReadMap(counts);
-    const emoji = await emojiPromise;
     const needsEmojiRefresh = !cachedEmoji;
     if (sidebarPromise) {
-      sidebarSections = await sidebarPromise;
+      sidebarSections = _sidebarResult2[0];
       try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
@@ -1337,18 +1350,20 @@
       const p1UserIds = [...p1Mentions.userIds, ...p1DmMentions.userIds];
       const p1ChannelRefIds = [...threads.map(t => t.channel_id), ...p1Mentions.channelIds, ...p1DmMentions.channelIds];
 
-      progress(5, 'Resolving users for threads + DMs...');
-      const { users: p1Users, mentionHints: p1MentionHints, fullNames: p1FullNames } = await resolveUsers(
-        p1UserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {},
-      );
-      progress(6, 'Resolving channel names...');
-      const { channels: p1Channels, channelMeta: p1ChannelMeta } = await resolveChannelNames(
-        p1ChannelRefIds, cachedChannels, cachedChannelMeta,
-      );
-
-      const emoji = await emojiPromise;
+      progress(5, 'Resolving users + channels...');
+      const [
+        { users: p1Users, mentionHints: p1MentionHints, fullNames: p1FullNames },
+        { channels: p1Channels, channelMeta: p1ChannelMeta },
+        emoji,
+        ..._sidebarResultFast
+      ] = await Promise.all([
+        resolveUsers(p1UserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {}),
+        resolveChannelNames(p1ChannelRefIds, cachedChannels, cachedChannelMeta),
+        emojiPromise,
+        ...(sidebarPromise ? [sidebarPromise] : []),
+      ]);
       if (sidebarPromise) {
-        sidebarSections = await sidebarPromise;
+        sidebarSections = _sidebarResultFast[0];
         try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
       }
 
@@ -1390,12 +1405,15 @@
       const p2UserIds = [...p2Mentions.userIds, ...p2ExtraThreadMentions.userIds];
       const p2ChannelRefIds = [...channelPosts.map(cp => cp.channel_id), ...p2Mentions.channelIds, ...p2ExtraThreadMentions.channelIds];
 
-      const { users: p2Users, mentionHints: p2MentionHints, fullNames: p2FullNames } = await resolveUsers(
-        p2UserIds, p1Users, { ...cachedUserMentionHints, ...p1MentionHints }, { ...cachedFullNames, ...p1FullNames },
-      );
-      const { channels: p2Channels, channelMeta: p2ChannelMeta } = await resolveChannelNames(
-        p2ChannelRefIds, p1Channels, p1ChannelMeta,
-      );
+      const [
+        { users: p2Users, mentionHints: p2MentionHints, fullNames: p2FullNames },
+        { channels: p2Channels, channelMeta: p2ChannelMeta },
+      ] = await Promise.all([
+        resolveUsers(
+          p2UserIds, p1Users, { ...cachedUserMentionHints, ...p1MentionHints }, { ...cachedFullNames, ...p1FullNames },
+        ),
+        resolveChannelNames(p2ChannelRefIds, p1Channels, p1ChannelMeta),
+      ]);
 
       return {
         channelPosts, extraThreads,
@@ -1425,14 +1443,21 @@
     const allUserIds = [...allMentions.userIds, ...dmMentions.userIds, ...chMentions.userIds];
     const mentionedChannelIds = [...allMentions.channelIds, ...dmMentions.channelIds, ...chMentions.channelIds];
 
-    const { users, mentionHints, fullNames } = await resolveUsers(allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {});
     const allChannelIds = [...threads.map(t => t.channel_id), ...channelPosts.map(cp => cp.channel_id), ...mentionedChannelIds];
-    const { channels, channelMeta } = await resolveChannelNames(allChannelIds, cachedChannels, cachedChannelMeta);
-
+    const [
+      { users, mentionHints, fullNames },
+      { channels, channelMeta },
+      emoji,
+      ..._sidebarResultFast2
+    ] = await Promise.all([
+      resolveUsers(allUserIds, cachedUsers, cachedUserMentionHints, cachedFullNames || {}),
+      resolveChannelNames(allChannelIds, cachedChannels, cachedChannelMeta),
+      emojiPromise,
+      ...(sidebarPromise ? [sidebarPromise] : []),
+    ]);
     const lastRead = buildLastReadMap(counts);
-    const emoji = await emojiPromise;
     if (sidebarPromise) {
-      sidebarSections = await sidebarPromise;
+      sidebarSections = _sidebarResultFast2[0];
       try { sidebarSectionChannelIds = JSON.parse(localStorage.getItem('fslackSectionChannelIds') || '{}'); } catch {}
     }
 
