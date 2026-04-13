@@ -4966,48 +4966,61 @@ function warmSummaryCache(data) {
   if (totalItems === 0) return;
 
   const allItems = serializeForLlm(forLlm, data, 0);
+  const allHash = djb2Hash(JSON.stringify(allItems));
+
+  // If full pipeline is already cached, nothing to warm
+  if (_prioritizationCache && _prioritizationCache.allHash === allHash) {
+    console.log('[fslack] Warm: pipeline cache already valid');
+    return;
+  }
+
   const ITEMS_PER_BATCH = 30;
   const now = Date.now();
+  const cachedSummaries = {};
   const uncachedItems = [];
   for (const item of allItems) {
     const itemHash = djb2Hash(JSON.stringify(item));
     item._hash = itemHash;
     const cached = _itemSummaryCache[itemHash];
     if (cached?.s) {
+      cachedSummaries[item.id] = cached.s;
       cached.t = now;
     } else {
       uncachedItems.push(item);
     }
   }
-  if (uncachedItems.length === 0) {
-    console.log('[fslack] Summary cache warm: all items cached');
-    return;
-  }
-  console.log(`[fslack] Warming summary cache: ${uncachedItems.length} uncached items`);
+  console.log(`[fslack] Warming pipeline: ${uncachedItems.length} uncached summaries, ${Object.keys(cachedSummaries).length} cached`);
   const batches = [];
   for (let i = 0; i < uncachedItems.length; i += ITEMS_PER_BATCH) {
     batches.push(uncachedItems.slice(i, i + ITEMS_PER_BATCH));
   }
   function sendBatch(batch) {
     return new Promise((resolve) => {
+      if (batch.length === 0) { resolve({}); return; }
       chrome.runtime.sendMessage({ type: `${FSLACK}:batchSummarize`, data: batch }, (resp) => {
         if (chrome.runtime.lastError) { resolve({}); return; }
         resolve(resp?.summaries || {});
       });
     });
   }
-  Promise.all(batches.map(sendBatch)).then((results) => {
+  const summarizePromise = batches.length > 0
+    ? Promise.all(batches.map(sendBatch))
+    : Promise.resolve([]);
+
+  summarizePromise.then((results) => {
     const MAX_ITEM_SUMMARY_CACHE = 500;
-    let updated = false;
-    for (const summaries of results) {
+    let cacheUpdated = false;
+    const summaries = { ...cachedSummaries };
+    for (const batchSummaries of results) {
+      Object.assign(summaries, batchSummaries);
       for (const item of uncachedItems) {
-        if (summaries[item.id] && item._hash) {
-          _itemSummaryCache[item._hash] = { s: summaries[item.id], t: now };
-          updated = true;
+        if (batchSummaries[item.id] && item._hash) {
+          _itemSummaryCache[item._hash] = { s: batchSummaries[item.id], t: now };
+          cacheUpdated = true;
         }
       }
     }
-    if (updated) {
+    if (cacheUpdated) {
       const keys = Object.keys(_itemSummaryCache);
       if (keys.length > MAX_ITEM_SUMMARY_CACHE) {
         keys.sort((a, b) => (_itemSummaryCache[a].t || 0) - (_itemSummaryCache[b].t || 0));
@@ -5017,6 +5030,42 @@ function warmSummaryCache(data) {
       chrome.storage.local.set({ fslackItemSummaryCache: _itemSummaryCache });
     }
     console.log(`[fslack] Summary cache warmed: ${uncachedItems.length} items pre-summarized`);
+
+    // Now run prioritization so the full pipeline is cached when user taps "tap to update"
+    const selfName = data.users?.[data.selfId] || '';
+    const leanItems = allItems.map((item) => {
+      const lean = { id: item.id, type: item.type, summary: summaries[item.id] || '(no summary)' };
+      if (item.channel) lean.channel = item.channel;
+      if (item.isPrivate) lean.isPrivate = true;
+      if (item.isMentioned) lean.isMentioned = true;
+      if (item.sidebarSection && item.sidebarSection !== 'normal') {
+        const friendlySection = { floor_priority: 'Minimum: Priority', floor_whenfree: 'Minimum: Relevant', high_volume: 'High volume', hard_noise: 'Always noise' };
+        lean.sidebarSection = friendlySection[item.sidebarSection] || item.sidebarSection;
+      }
+      if (item.userReplied) lean.userReplied = true;
+      if (item.isGroup) lean.isGroup = true;
+      if (item.participants) lean.participants = item.participants;
+      if (item.mentionCount) lean.mentionCount = item.mentionCount;
+      if (item._channelId) {
+        const history = _channelBehavior[item._channelId];
+        if (history && history.length >= 10) {
+          const skipCount = history.filter(a => a === 's').length;
+          const rate = Math.round((skipCount / history.length) * 100);
+          if (rate >= 70) lean.userSkipRate = rate;
+          else if (rate <= 20) lean.userEngageRate = 100 - rate;
+        }
+      }
+      return lean;
+    });
+    chrome.runtime.sendMessage({ type: `${FSLACK}:prioritize`, data: leanItems, selfName }, (resp) => {
+      if (chrome.runtime.lastError || resp?.error) {
+        console.log('[fslack] Warm prioritization failed:', resp?.error || chrome.runtime.lastError);
+        return;
+      }
+      _prioritizationCache = { allHash, result: resp };
+      chrome.storage.local.set({ fslackPrioritizationCache: _prioritizationCache });
+      console.log('[fslack] Pipeline fully warmed: summarize + prioritize cached');
+    });
   });
 }
 
@@ -6003,13 +6052,14 @@ function handlePostReplyResult(msg) {
     clearDraft(form._draftChannel, form._draftThreadTs);
     const text = form.querySelector('.reply-input').value;
     const item = form.closest('.item');
-    const isMsgLevel = form.previousElementSibling?.classList.contains('msg-row');
+    const isDmReply = !form._draftThreadTs;
+    const isMsgLevel = isDmReply || form.previousElementSibling?.classList.contains('msg-row');
     const replyHtml = isMsgLevel
       ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${escapeHtml(text)}</div></div>`
       : `<div class="item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${escapeHtml(text)}</div>`;
     form.insertAdjacentHTML('beforebegin', replyHtml);
     form.remove();
-    autoMarkItemRead(item, { overrideTs: msg.ts });
+    if (!isDmReply) autoMarkItemRead(item, { overrideTs: msg.ts });
     // Focus next item in keyboard nav
     requestAnimationFrame(() => {
       const els = getNavigableElements();
@@ -6034,7 +6084,8 @@ function handleUploadAndPostResult(msg) {
     clearDraft(form._draftChannel, form._draftThreadTs);
     const text = form.querySelector('.reply-input').value;
     const item = form.closest('.item');
-    const isMsgLevel = form.previousElementSibling?.classList.contains('msg-row');
+    const isDmReply = !form._draftThreadTs;
+    const isMsgLevel = isDmReply || form.previousElementSibling?.classList.contains('msg-row');
     const label = text ? `${escapeHtml(text)} [image]` : '[image]';
     const replyHtml = isMsgLevel
       ? `<div class="msg-row"><div class="msg-content item-reply" style="color:#5b9cf5"><span class="item-user">You:</span> ${label}</div></div>`
@@ -6053,7 +6104,7 @@ function handleUploadAndPostResult(msg) {
     preview.classList.remove('visible');
     preview.querySelector('.reply-image-thumb').src = '';
     inp.focus();
-    autoMarkItemRead(item, { overrideTs: msg.ts });
+    if (!isDmReply) autoMarkItemRead(item, { overrideTs: msg.ts });
   } else {
     const btn = form.querySelector('.reply-send');
     btn.textContent = 'Upload failed';
