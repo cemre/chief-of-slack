@@ -2507,7 +2507,7 @@ function renderDmItem(dm, data, cssClass) {
     html += `<div class="msg-row"><div class="msg-content item-text">${sender}${dmTextHtml}${dmExtras}${timeHtml}</div>${msgActions(dm.channel_id, m.ts, { showReply: false })}</div>`;
   }
   html += '</div>'; // close item-right
-  if (!collapsible) html += gutterReply(dm.channel_id, latest.ts, true);
+  html += gutterReply(dm.channel_id, latest.ts, true);
   if (!collapsible) html += gutterCheck(dm.channel_id, latest.ts, null, false);
   html += (collapsible ? '</div>' : '') + '</div>';
   return html;
