@@ -236,7 +236,7 @@ header {
   font-size: 12px;
   color: var(--text-secondary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 8px;
   display: flex;
   align-items: center;
