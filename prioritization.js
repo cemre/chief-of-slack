@@ -498,10 +498,16 @@
           let raw = '';
           if (item._type === 'thread') {
             const replies = item.unread_replies || [];
-            raw = replies.reduce((best, reply) => ((reply.text || '').length > best.length ? reply.text : best), '') || item.root_text || '';
+            raw = replies.reduce((best, reply) => {
+              const t = reply.fwd ? `${reply.text || ''} [fwd] ${reply.fwd.text || ''}` : (reply.text || '');
+              return t.length > best.length ? t : best;
+            }, '') || (item.root_fwd ? `${item.root_text || ''} [fwd] ${item.root_fwd.text || ''}` : item.root_text || '');
           } else {
             const messages = item.messages || [];
-            raw = messages.reduce((best, message) => ((message.text || '').length > best.length ? message.text : best), '') || '';
+            raw = messages.reduce((best, message) => {
+              const t = message.fwd ? `${message.text || ''} [fwd] ${message.fwd.text || ''}` : (message.text || '');
+              return t.length > best.length ? t : best;
+            }, '') || '';
           }
           raw = raw.replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
           if (isDm) {
