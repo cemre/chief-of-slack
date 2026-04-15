@@ -6080,7 +6080,7 @@ function handlePortMessage(msg) {
   if (msg.type === `${FSLACK}:progress`) {
     clearFetchTimeout(); // got a response, fetch is alive — restart timeout
     startFetchTimeout(30000); // allow more time for in-progress fetches
-    if (!isBackgroundFetch) {
+    if (!isBackgroundFetch && !gotUnreads) {
       showProgress(msg.detail || '');
     }
     return;
