@@ -403,9 +403,8 @@ a.item-time, a.msg-time, .item-text a.msg-time, .item-reply a.msg-time { text-de
   transition: opacity 0.15s, color 0.1s;
 }
 .item.detail-expanded .channel-mute-icon { display: inline-flex; color: var(--text-muted); }
-.collapse-label .channel-mute-icon { display: inline-flex; color: var(--text-muted); padding: 4px 6px; border-radius: 4px; margin-left: 0; transition: background 0.1s, color 0.1s; }
-.item.detail-expanded .channel-mute-icon:hover,
-.collapse-label .channel-mute-icon:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
+.collapse-label .channel-mute-icon { display: inline-flex; margin-left: 0; }
+.item.detail-expanded .channel-mute-icon:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
 .channel-mute-icon.undo-mute { display: inline-flex; opacity: 0.7; color: var(--warning, #e8a735); }
 .channel-mute-icon.undo-mute:hover { opacity: 1; }
 
@@ -638,11 +637,9 @@ ul.slack-list, ol.slack-list {
 /* Expand/collapse */
 .header-expand { display: none; }
 .header-expand.is-expanded { display: inline; }
-.header-expand .collapse-label { position: absolute; right: 6px; top: -2px; font-size: 12px; display: flex; align-items: center; gap: 2px; }
-.header-check { color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
-.header-check:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
-.collapse-arrow { color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
-.collapse-arrow:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
+.header-expand .collapse-label { position: absolute; right: 0; top: -2px; font-size: 12px; display: flex; align-items: center; gap: 2px; }
+.collapse-label-btn { color: var(--text-muted); cursor: pointer; padding: 4px 6px; border-radius: 4px; transition: background 0.1s, color 0.1s; }
+.collapse-label-btn:hover { color: var(--accent); background: var(--hover-bg, rgba(255,255,255,0.06)); }
 .item-left:has(.header-expand.is-expanded) > .item-time,
 .item-left:has(.header-expand.is-expanded) > .item-sep { display: none; }
 .noise-items { display: none; }
