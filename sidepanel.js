@@ -3021,6 +3021,16 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
     }
   }
   wireNoiseToggle('when-free-toggle', 'when-free-items', 'Relevant');
+  // Auto-expand Relevant section when no priority items
+  if (actNow.length === 0 && (!priority || priority.length === 0)) {
+    const wfItems = document.getElementById('when-free-items');
+    const wfToggle = document.getElementById('when-free-toggle');
+    if (wfItems && wfToggle) {
+      wfItems.classList.add('expanded');
+      const count = wfItems.querySelectorAll('.item:not(.read-done)').length;
+      wfToggle.textContent = `Relevant · ${count} ↑`;
+    }
+  }
   wireNoiseToggle('noise-recent-toggle', 'noise-recent-items', 'Recent noise');
   wireNoiseToggle('noise-older-toggle', 'noise-older-items', 'Older noise');
   wireNoiseToggle('saved-items-toggle', 'saved-items-list', 'Saved');
