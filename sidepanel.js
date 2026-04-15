@@ -3069,7 +3069,7 @@ function insertNewDm(dm, data) {
   if (!dm._reason) {
     const partner = dmPartnerName(dm, data);
     const latest = (dm.messages || [])[0];
-    let preview = (latest?.text || '').replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
+    let preview = textWithFwd(latest?.text, latest?.fwd).replace(/<@[A-Z0-9]+>/g, '').replace(/<[^|>]+\|([^>]+)>/g, '$1').replace(/<[^>]+>/g, '').trim();
     if (preview.length > 100) preview = preview.slice(0, 100) + '...';
     dm._reason = preview ? `${partner}: ${preview}` : `${partner} DM'd you`;
   }
