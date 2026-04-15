@@ -1300,12 +1300,13 @@ ul.deep-summary li + li { border-top: none; }
   transition: opacity 0.15s, color 0.15s;
   z-index: 2;
 }
-.item:hover > .gutter-reply { opacity: 0.5; }
+.item:hover > .gutter-reply, .item:hover .gutter-reply { opacity: 0.5; }
 .gutter-reply:hover { opacity: 1 !important; color: var(--accent); }
 .item:hover > .gutter-check,
 .item:hover .gutter-check { opacity: 0.5; }
 /* Shift gutter-check down when gutter-reply is present */
-.item > .gutter-reply ~ .gutter-check { top: calc(50% + 6px); }
+.item > .gutter-reply ~ .gutter-check,
+.item-details > .gutter-reply ~ .gutter-check { top: calc(50% + 6px); }
 .when-free-items .item.detail-expanded > .gutter-check,
 .noise-items .item.detail-expanded > .gutter-check { display: none; }
 .gutter-check:hover { opacity: 1 !important; color: var(--accent); }

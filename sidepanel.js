@@ -3120,6 +3120,12 @@ function insertNewDm(dm, data) {
     if (details) details.classList.add('expanded');
     const reasonText = wrapper.querySelector('.item-reason-toggle .reason-text');
     if (reasonText) reasonText.textContent = reasonText.textContent.replace(/↓$/, '↑');
+    // Auto-open reply box for live-injected DMs
+    const dmReplyBtn = wrapper.querySelector('.action-reply[data-dm="true"]');
+    if (dmReplyBtn) {
+      const itemEl = wrapper.querySelector('.item');
+      if (itemEl) requestAnimationFrame(() => showItemReplyForm(itemEl, dmReplyBtn.dataset.channel, dmReplyBtn.dataset.ts, true));
+    }
   }
 
   // Update the cached view so mark-read etc. works
