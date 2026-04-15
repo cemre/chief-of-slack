@@ -2965,6 +2965,7 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   // All clear
   if (!loading && !deepNoiseLoading && !data._channelsPending && actNow.length === 0 && (!priority || priority.length === 0) && whenFree.length === 0 && (!popular || popular.length === 0) && noise.length === 0) {
     html += '<div id="status">All clear — nothing needs your attention.</div>';
+    refreshLink.style.display = '';
   }
 
   // VIP section placeholder (filled in async by kickoffVipSection)
