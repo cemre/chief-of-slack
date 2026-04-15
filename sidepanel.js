@@ -3492,6 +3492,8 @@ bodyEl.addEventListener('click', (e) => {
       item.classList.add('read-done');
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
+      const details = item.querySelector('.item-details.expanded');
+      if (details) details.classList.remove('expanded');
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       recordSkip(channel, threadTs || ts);
       count++;
@@ -3531,7 +3533,18 @@ bodyEl.addEventListener('click', (e) => {
       markAll.classList.add('done');
       markAll.dataset.pending = 'true';
       const _markItem = markAll.closest('.item');
-      if (_markItem) { _markItem.classList.add('read-done'); removeCachedItem(channel, threadTs); updateSectionToggleCount(_markItem); }
+      if (_markItem) {
+        _markItem.classList.add('read-done');
+        removeCachedItem(channel, threadTs);
+        updateSectionToggleCount(_markItem);
+        // Collapse expanded priority/act-now items on mark-read
+        const details = _markItem.querySelector('.item-details.expanded');
+        if (details) {
+          details.classList.remove('expanded');
+          const reasonText = _markItem.querySelector('.item-reason-toggle .reason-text');
+          if (reasonText) reasonText.textContent = reasonText.textContent.replace(/↑$/, '↓');
+        }
+      }
       // Sync sibling entry points
       const _markSiblings = _markItem ? _markItem.querySelectorAll('.mark-all-read') : [];
       for (const sib of _markSiblings) {
@@ -3849,6 +3862,8 @@ bodyEl.addEventListener('click', (e) => {
       item.classList.add('read-done');
       syncMarkReadSiblings(item, true);
       removeCachedItem(channel, threadTs);
+      const details = item.querySelector('.item-details.expanded');
+      if (details) details.classList.remove('expanded');
       sendToInject({ type: `${FSLACK}:markRead`, channel, ts, thread_ts: threadTs, has_mention: hasMention === '1', requestId: `readall_${Date.now()}_${count}` });
       recordSkip(channel, threadTs || ts);
       count++;
