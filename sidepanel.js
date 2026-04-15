@@ -2982,6 +2982,20 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   lastRenderData = data;
   mentionLookupDirty = true;
 
+  // Auto-expand all priority items when there are fewer than 10
+  const totalPriority = actNow.length + (priority?.length || 0);
+  if (totalPriority > 0 && totalPriority < 10) {
+    const section = bodyEl.querySelector('.priority-section');
+    if (section) {
+      for (const d of section.querySelectorAll('.item-details')) d.classList.add('expanded');
+      for (const r of section.querySelectorAll('.item-reason-toggle .reason-text')) {
+        r.textContent = r.textContent.replace(/↓$/, '↑');
+      }
+      const expandBtn = section.querySelector('#priority-expand-all');
+      if (expandBtn) expandBtn.textContent = 'collapse all ↑';
+    }
+  }
+
   // Show education banner during loading, remove when done
   if (loading) {
     showEducationBanner(true);
@@ -3087,6 +3101,15 @@ function insertNewDm(dm, data) {
   const h2 = sectionEl.querySelector('h2');
   if (h2 && h2.nextSibling) h2.after(wrapper);
   else sectionEl.appendChild(wrapper);
+
+  // Auto-expand if total priority items still under 10
+  const totalItems = sectionEl.querySelectorAll('.item').length;
+  if (totalItems < 10) {
+    const details = wrapper.querySelector('.item-details');
+    if (details) details.classList.add('expanded');
+    const reasonText = wrapper.querySelector('.item-reason-toggle .reason-text');
+    if (reasonText) reasonText.textContent = reasonText.textContent.replace(/↓$/, '↑');
+  }
 
   // Update the cached view so mark-read etc. works
   if (cachedView?.prioritized) {
