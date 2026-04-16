@@ -398,6 +398,16 @@
 
     const CAT_LABEL = { act_now: 'urgent', priority: 'priority', when_free: 'relevant', noise: 'noise', drop: 'drop' };
 
+    // Clean Slack markup from LLM-provided reasons: resolve <@U..> mentions to names, strip other tags
+    function cleanSlackMarkup(text) {
+      if (!text) return text;
+      return text
+        .replace(/<@([A-Z0-9]+)>/g, (_, uid) => data.users?.[uid] || uid)
+        .replace(/<[^|>]+\|([^>]+)>/g, '$1')
+        .replace(/<[^>]+>/g, '')
+        .trim();
+    }
+
     function place(item, cat) {
       const isPrivate = meta[item.channel_id]?.isPrivate || item._type === 'dm' || item._isDmThread;
       const isDm = item._type === 'dm' || item._isDmThread;
@@ -486,10 +496,10 @@
         }
       }
 
-      item._reasonWhy = reasons[item._llmId + '_why'] || undefined;
+      item._reasonWhy = cleanSlackMarkup(reasons[item._llmId + '_why']) || undefined;
 
       if (cat === 'act_now' || cat === 'priority') {
-        item._reason = reasons[item._llmId] || undefined;
+        item._reason = cleanSlackMarkup(reasons[item._llmId]) || undefined;
         if (!item._reason && isMentioned) {
           const inChannel = channelLabel ? ` in #${channelLabel}` : '';
           item._reason = item._mentionInReplies && !mentionInRoot ? `mentioned in a reply${inChannel}` : `mentioned${inChannel}`;
