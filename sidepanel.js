@@ -2983,10 +2983,14 @@ function renderPrioritized(prioritized, data, popular, loading = false, deepNois
   lastRenderData = data;
   mentionLookupDirty = true;
 
-  // Auto-expand all priority items when there are fewer than 10
+  // Auto-expand all priority items when there are fewer than 10.
+  // Scope to the Priority section via its unique header — multiple sections
+  // (Saved, Relevant, Popular, etc.) share the `.priority-section` class, so
+  // querySelector('.priority-section') would grab the wrong one when Saved is
+  // present and the expand would silently no-op.
   const totalPriority = actNow.length + (priority?.length || 0);
   if (totalPriority > 0 && totalPriority < 10) {
-    const section = bodyEl.querySelector('.priority-section');
+    const section = bodyEl.querySelector('.priority-header')?.closest('.priority-section');
     if (section) {
       for (const d of section.querySelectorAll('.item-details')) d.classList.add('expanded');
       for (const r of section.querySelectorAll('.item-reason-toggle .reason-text')) {
@@ -6323,12 +6327,14 @@ function handlePortMessage(msg) {
     }
 
     // Phase 2 arrives after Phase 1 already rendered — don't wipe the user's view.
-    // If user is interacting (scrolled, expanded, replying), stage the update.
-    // Otherwise, re-render silently (background=true to skip status messages).
+    // Stage only if the user is mid-interaction, or is scrolled through priority
+    // items that shouldn't jump. Otherwise (collapsed + no priority), auto-load —
+    // channel noise arrivals shouldn't require a tap.
     pendingUnreads = baseData;
     const hasInteraction = bodyEl.querySelector('.expanded, .is-expanded, .reply-form');
+    const hasPriorityItems = bodyEl.querySelector('.item.act-now, .item.priority-item');
     const userScrolled = bodyEl.scrollTop > 0 || document.documentElement.scrollTop > 0;
-    if (hasInteraction || userScrolled) {
+    if (hasInteraction || (userScrolled && hasPriorityItems)) {
       stagedRenderData = baseData;
       warmSummaryCache(baseData);
       removeRefreshOverlay();
@@ -6337,6 +6343,13 @@ function handlePortMessage(msg) {
       refreshLink.style.display = '';
       return;
     }
+    // Auto-render and reflect the refresh in the header's last-updated state.
+    lastFetchTime = Date.now();
+    updateLastUpdated();
+    if (lastUpdatedTimer) clearInterval(lastUpdatedTimer);
+    lastUpdatedTimer = setInterval(updateLastUpdated, 1000);
+    refreshLink.textContent = 'refresh now';
+    refreshLink.classList.remove('has-update');
     prioritizeAndRender(baseData, true);
     return;
   }
