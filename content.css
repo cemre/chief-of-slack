@@ -45,13 +45,13 @@ body {
   bottom: 8px;
   right: 8px;
   z-index: 9999;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 12px;
-  opacity: 0.01;
+  opacity: 0.9;
   transition: opacity 0.15s;
 }
-#demo-bar:hover { opacity: 0.9; }
+body.show-demo-bar #demo-bar { display: flex; }
 .demo-group { display: flex; align-items: center; gap: 3px; }
 #demo-label { cursor: pointer; font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 3px; }
 #demo-checkbox { margin: 0; cursor: pointer; }

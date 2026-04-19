@@ -6563,9 +6563,24 @@ chrome.storage.local.get(['fslackViewCache', 'fslackSavedMsgs', 'fslackLastFetch
     });
   }
 
-  // ── Shift+E: export eval data ──
+  // ── Debug rail show/hide (Shift+D, sticky) ──
+  chrome.storage.local.get('fslackShowDemoBar', (r) => {
+    if (r.fslackShowDemoBar) document.body.classList.add('show-demo-bar');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.shiftKey && e.key === 'D' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
+      e.preventDefault();
+      const shown = document.body.classList.toggle('show-demo-bar');
+      chrome.storage.local.set({ fslackShowDemoBar: shown });
+    }
+  });
+
+  // ── Shift+E: export eval data (only when debug rail is visible) ──
   document.addEventListener('keydown', (e) => {
     if (e.shiftKey && e.key === 'E' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (!document.body.classList.contains('show-demo-bar')) return;
       const ae = document.activeElement;
       if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return;
       e.preventDefault();

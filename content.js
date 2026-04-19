@@ -57,7 +57,7 @@ function showSlackNav() { _navHideStyle.remove(); }
 
 // Apply on load based on stored preference (default: true)
 chrome.storage.local.get(['fslackHideNav', 'sidebarTierMap'], (r) => {
-  if (r.fslackHideNav !== false) hideSlackNav();
+  // if (r.fslackHideNav !== false) hideSlackNav();
   // Sync tier map to localStorage for inject.js
   if (r.sidebarTierMap) {
     try { localStorage.setItem('fslackTierMap', JSON.stringify(r.sidebarTierMap)); } catch {}
