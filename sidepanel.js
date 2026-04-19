@@ -2263,16 +2263,17 @@ const REASON_SVG = {
 };
 
 function reasonIcons(item) {
-  const icons = [];
   const isDm = item._type === 'dm' || item._isDmThread;
   const isVip = item._ruleOverride && item._ruleOverride.startsWith('VIP');
   const isSection = item._sidebarSection === 'floor_priority' || item._sidebarSection === 'floor_whenfree';
-  if (isVip) icons.push(REASON_SVG.vip);
-  if (isDm) icons.push(REASON_SVG.dm);
-  if (item._type === 'thread' && !isDm) icons.push(REASON_SVG.thread);
-  if (item._isMentioned) icons.push(REASON_SVG.mention);
-  if (isSection && !isVip) icons.push(REASON_SVG.section);
-  return `<span class="reason-icons">${icons.join('')}</span>`;
+  // Show one icon, ranked by signal strength: mention > dm > vip > thread > section
+  let icon = '';
+  if (item._isMentioned) icon = REASON_SVG.mention;
+  else if (isDm) icon = REASON_SVG.dm;
+  else if (isVip) icon = REASON_SVG.vip;
+  else if (item._type === 'thread') icon = REASON_SVG.thread;
+  else if (isSection) icon = REASON_SVG.section;
+  return `<span class="reason-icons">${icon}</span>`;
 }
 
 function reasonBadge(item, cssClass) {
