@@ -2,7 +2,7 @@
 
 Chief of Slack puts all your unreads — DMs, mentions, threads, channels — in one place, sorted by what actually needs you. Before you open a single message, you already know what each one is about and how urgent it is.
 
-<img width="654" height="429" alt="Image" src="https://github.com/user-attachments/assets/c5b320d1-bd85-4a9c-a865-b38903cd77d4" />
+<img width="640" height="400" alt="Image" src="https://github.com/user-attachments/assets/cb4faae9-d211-4d33-9110-8fcd95085b6e" />
 
 ## Features
 
