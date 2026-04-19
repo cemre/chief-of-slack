@@ -30,12 +30,11 @@
     "default_path": "sidepanel.html"
   },
   "commands": {
-    "toggle-flack": {
+    "_execute_action": {
       "suggested_key": {
         "default": "Ctrl+Period",
         "mac": "Command+Period"
-      },
-      "description": "Toggle Chief of Slack sidebar"
+      }
     }
   },
   "web_accessible_resources": [

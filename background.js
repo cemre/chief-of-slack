@@ -113,14 +113,6 @@ async function getSlackTabId() {
   return null;
 }
 
-// ── Keyboard shortcut toggle ──
-chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== 'toggle-flack') return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url?.startsWith('https://app.slack.com')) return;
-  try { await chrome.sidePanel.open({ tabId: tab.id }); } catch {}
-});
-
 // ── Build the prioritization prompt ──
 function buildPrompt(items, selfName, identity, vipNames, customPrompts) {
   const vipList = (vipNames || []).map((v) => v.charAt(0).toUpperCase() + v.slice(1)).join(', ');

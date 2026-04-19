@@ -4474,6 +4474,7 @@ const eduBannerHtml = `
       <div class="edu-row"><kbd>↑</kbd> <kbd>↓</kbd> <span class="edu-label">Move up/down</span></div>
       <div class="edu-row"><kbd>←</kbd> <kbd>→</kbd> <span class="edu-label">Expand/collapse</span></div>
       <div class="edu-row"><kbd>m</kbd> <span class="edu-label">Mark read</span></div>
+      <div class="edu-row"><kbd>⇧</kbd> <span class="edu-label">Hold down and click ✓ to mark multiple items as read</span></div>
       <div class="edu-row"><kbd>o</kbd> <span class="edu-label">Open in Slack</span></div>
       <div class="edu-row"><kbd>r</kbd> <span class="edu-label">Reply</span></div>
       <div class="edu-row"><kbd>t</kbd> <span class="edu-label">Mute</span></div>
@@ -4481,7 +4482,7 @@ const eduBannerHtml = `
       <div class="edu-row"><kbd>⌘⇧.</kbd> <span class="edu-label">Toggle Slack sidebar</span></div>
       <div class="edu-row"><kbd>⌘?</kbd> <span class="edu-label">Toggle this help</span></div>
     </div>
-    <div class="edu-tip">Tip: Hold down <kbd>⇧</kbd> while clicking ✓ to mark multiple items as read quickly.</div>`;
+`;
 
 function showEducationBanner(bottom = false) {
   if (bottom) {

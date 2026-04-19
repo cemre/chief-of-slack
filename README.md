@@ -12,7 +12,7 @@ Chief of Slack puts all your unreads — DMs, mentions, threads, channels — in
 - **One-line summaries** — know what each message is about before you open it
 - **Keyboard navigation** — arrow through unreads, mark as read, without touching your mouse
 - **VIP tracking** — Define VIPs in Slack, and keep tabs on what they're posting (even in channels you're not in)
-- **Bulk mark-as-read** — clear many messages in a single click.
+- **Bulk mark-as-read** — each section has a "mark all as read" button to clear it in one click, or hold `Shift` and click ✓ on any item to mark everything from the top down to your cursor as read.
 - **Cost tracking** — see exactly what you're spending 
 - **Stay in browser** - links no longer get hijacked to the Slack desktop app
 
@@ -41,6 +41,7 @@ Chief of Slack puts all your unreads — DMs, mentions, threads, channels — in
 | `→` / `←` | Expand / collapse |
 | `m` | Mark as read (advances to next) |
 | `Shift+m` | Mark unread |
+| `Shift`+click ✓ | Hold down and click ✓ to mark multiple items as read |
 | `o` | Open in Slack |
 | `r` | Reply |
 | `t` | Mute thread or channel |
