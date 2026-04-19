@@ -2,7 +2,7 @@
 
 Chief of Slack puts all your unreads — DMs, mentions, threads, channels — in one place, sorted by what actually needs you. Before you open a single message, you already know what each one is about and how urgent it is.
 
-Powered by Claude, it reads your messages and understands context — not keywords; differentiating "Can you approve this PR?" from "FYI, I approved the PR". 
+<img width="654" height="429" alt="Image" src="https://github.com/user-attachments/assets/c5b320d1-bd85-4a9c-a865-b38903cd77d4" />
 
 ## Features
 
