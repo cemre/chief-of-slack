@@ -8,6 +8,7 @@ Chief of Slack puts all your unreads — DMs, mentions, threads, channels — in
 
 - **Private by design** — no backend, no account, no tracking. Messages go directly from your browser to Anthropic's API with your own key
 - **Personalized prioritization** — describe your role and what matters to you so the AI prioritizes accordingly.
+- **Learns your behavior over time** — if you keep "mark all as read" or engaging in a channel, it's fed back into the prioritization.
 - **Three sections** - high priority items shown right away (things blocked on you are color coded red), relevant channel messages and noise split out. You can map your Slack sidebar sections to the extension's sections
 - **One-line summaries** — know what each message is about before you open it
 - **Keyboard navigation** — arrow through unreads, mark as read, without touching your mouse
